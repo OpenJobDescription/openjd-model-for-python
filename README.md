@@ -1,11 +1,7 @@
-## My Project
+# Open Job Description - Models
 
-TODO: Fill this README out!
-
-Be sure to:
-
-* Change the title in this README
-* Edit your repository description on GitHub
+This package provides an implementation of the data model for Open Job Description. It can be used to
+parse and validate JSON or Yaml documents against the Open Job Description Job Templates.
 
 ## Security
 
@@ -14,4 +10,3 @@ See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more inform
 ## License
 
 This project is licensed under the Apache-2.0 License.
-
