@@ -3,7 +3,13 @@
 import re
 
 import pytest
-from pydantic import BaseModel, ValidationError
+
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1 import BaseModel, ValidationError
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic import BaseModel, ValidationError
 
 from openjd.model._format_strings._dyn_constrained_str import DynamicConstrainedStr
 

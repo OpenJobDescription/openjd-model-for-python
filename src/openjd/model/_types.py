@@ -8,7 +8,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type
 
-from pydantic import BaseModel, Extra
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1 import BaseModel, Extra
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic import BaseModel, Extra
 
 from ._symbol_table import SymbolTable
 

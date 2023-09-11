@@ -6,8 +6,16 @@ from enum import Enum
 from typing import Any, ClassVar, Type, TypeVar, cast
 
 import yaml
-from pydantic import BaseModel
-from pydantic import ValidationError as PydanticValidationError
+
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1 import BaseModel
+    from pydantic.v1 import ValidationError as PydanticValidationError
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic import BaseModel
+    from pydantic import ValidationError as PydanticValidationError
+
 
 from ._errors import DecodeValidationError
 from ._types import JobTemplate, OpenJDModel, SchemaVersion

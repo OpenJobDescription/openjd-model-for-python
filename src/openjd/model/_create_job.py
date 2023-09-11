@@ -2,7 +2,12 @@
 
 from typing import TYPE_CHECKING, cast
 
-from pydantic import ValidationError
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1 import ValidationError
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic import ValidationError
 
 from ._errors import DecodeValidationError
 from ._symbol_table import SymbolTable

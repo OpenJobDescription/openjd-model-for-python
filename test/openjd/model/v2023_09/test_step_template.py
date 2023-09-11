@@ -3,7 +3,13 @@
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
+
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1 import ValidationError
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic import ValidationError
 
 from openjd.model._parse import _parse_model
 from openjd.model.v2023_09 import StepTemplate
