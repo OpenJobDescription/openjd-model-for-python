@@ -3,7 +3,7 @@
 import numbers
 from typing import Union
 
-from .._errors import ExpressionError, ValidationError
+from .._errors import ExpressionError
 from .._symbol_table import SymbolTable
 from ._nodes import Node
 from ._parser import Parser
@@ -40,20 +40,6 @@ class InterpolationExpression:
         """
         self._expresion_tree.validate_symbol_refs(symbols=symbols)
 
-    def validate(self, *, symtab: SymbolTable) -> None:
-        """Check whether this expression can be evaluated correctly given a symbol table.
-
-        Currently, this is simply verifying that the expression references only symbols that
-        are in the given symbol table.
-
-        Args:
-            symtab (SymbolTable): A symbol table to validate against.
-
-        Raises:
-            ValidationError: If the expression cannot be evaluated given the symbol table.
-        """
-        self._expresion_tree.validate(symtab=symtab)
-
     def evaluate(self, *, symtab: SymbolTable) -> Union[numbers.Real, str]:
         """Evaluate the expression given a SymbolTable.
 
@@ -68,7 +54,7 @@ class InterpolationExpression:
         """
         try:
             result = self._expresion_tree.evaluate(symtab=symtab)
-        except ValidationError as exc:
+        except ValueError as exc:
             raise ExpressionError(f"Expression failed validation: {str(exc)}")
 
         if isinstance(result, (numbers.Real, str)):

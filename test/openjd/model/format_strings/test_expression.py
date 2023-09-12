@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from openjd.model import ExpressionError, SymbolTable, TokenError, ValidationError
+from openjd.model import ExpressionError, SymbolTable, TokenError
 from openjd.model._format_strings._expression import InterpolationExpression
 from openjd.model._format_strings._parser import Parser
 
@@ -33,34 +33,6 @@ class TestInterpolationExpression:
         # THEN
         with pytest.raises(TokenError):
             InterpolationExpression(expr)
-
-    def test_validate_success(self):
-        # GIVEN
-        symtab = SymbolTable()
-        symtab["Test.Name"] = "value"
-
-        # WHEN
-        expr = InterpolationExpression("Test.Name")
-
-        # THEN
-        try:
-            expr.validate(symtab=symtab)
-        except ValidationError:
-            pytest.fail("Incorrectly identified expression as nonvalid.")
-
-    def test_validate_fails(self):
-        # GIVEN
-        symtab = SymbolTable()
-        symtab["Test.Name"] = "value"
-
-        # WHEN
-        expr = InterpolationExpression("Test.Fail")
-
-        # THEN
-        with pytest.raises(ValidationError) as exc:
-            expr.validate(symtab=symtab)
-
-        assert "Test.Fail" in str(exc), "Name should be in validation error"
 
     def test_evaluate_success(self):
         # GIVEN

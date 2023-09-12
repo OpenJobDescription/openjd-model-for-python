@@ -5,7 +5,6 @@ from openjd.model import (
     ExpressionError,
     TokenError,
     UnsupportedSchema,
-    ValidationError,
 )
 
 
@@ -22,15 +21,6 @@ class TestDecodeValidationError:
     def test_msg(self):
         # GIVEN
         error = DecodeValidationError("Test message")
-
-        # THEN
-        assert str(error) == "Test message"
-
-
-class TestValidationError:
-    def test_msg(self):
-        # GIVEN
-        error = ValidationError("Test message")
 
         # THEN
         assert str(error) == "Test message"

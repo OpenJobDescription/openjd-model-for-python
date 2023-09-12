@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from numbers import Real
 from typing import TYPE_CHECKING, Optional, Union
 
-from .._errors import ExpressionError, TokenError, ValidationError
+from .._errors import ExpressionError, TokenError
 from .._symbol_table import SymbolTable
 from ._dyn_constrained_str import DynamicConstrainedStr
 from ._expression import InterpolationExpression
@@ -127,45 +127,6 @@ class FormatString(DynamicConstrainedStr):
             resolved_list.append(str(element.resolved_value))
 
         return "".join(resolved_list)
-
-    def validate(self, *, symtab: SymbolTable) -> list[FormatStringError]:
-        """
-        Uses a given symbol table to validate an interpolated string.
-        Verifies that each interpolation expression in the original string
-        can be replaced by a value from the symbol table.
-        Does not raise any exception if the interpolated string is valid.
-
-        Parameters
-        ----------
-        symtab: SymbolTable
-            A symbol table with values that are used to validate interpolation
-            expressions in the interpolated string.
-            For example, tle format string '{{Some.data}}' is valid if the table
-            contains the value for 'Some.data'.
-
-        Returns
-        -------
-        validation_errors: list[FormatStringError]
-            A list of errors for every interpolation expression in the
-            format string that can not be resolved with a given symbol table.
-        """
-        validation_errors: list[FormatStringError] = []
-
-        for expression_info in self.expressions:
-            assert expression_info.expression is not None
-            try:
-                expression_info.expression.validate(symtab=symtab)
-            except ValidationError as exc:
-                validation_errors.append(
-                    FormatStringError(
-                        string=self.original_value,
-                        start=expression_info.start_pos,
-                        end=expression_info.end_pos,
-                        details=str(exc),
-                    )
-                )
-
-        return validation_errors
 
     def _preprocess(self) -> list[Union[str, ExpressionInfo]]:
         """

@@ -6,7 +6,6 @@ __all__ = [
     "ModelValidationError",
     "TokenError",
     "UnsupportedSchema",
-    "ValidationError",
 ]
 
 
@@ -40,12 +39,6 @@ class DecodeValidationError(_BaseMessageError):
     """Error raised when an decoding error is encountered while decoding
     a template.
     """
-
-    pass
-
-
-class ValidationError(_BaseMessageError):
-    """Error raised when a value, or values, in a template are nonvalid."""
 
     pass
 

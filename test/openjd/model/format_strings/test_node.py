@@ -2,39 +2,11 @@
 
 import pytest
 
-from openjd.model import SymbolTable, ValidationError
+from openjd.model import SymbolTable
 from openjd.model._format_strings._nodes import FullNameNode
 
 
 class TestFullNameNode:
-    def test_validate_success(self):
-        # GIVEN
-        symtab = SymbolTable()
-        symtab["Test.Name"] = "value"
-
-        # WHEN
-        node = FullNameNode("Test.Name")
-
-        # THEN
-        try:
-            node.validate(symtab=symtab)
-        except ValidationError:
-            pytest.fail("Incorrectly identified expression as nonvalid.")
-
-    def test_validate_fails(self):
-        # GIVEN
-        symtab = SymbolTable()
-        symtab["Test.Name"] = "value"
-
-        # WHEN
-        node = FullNameNode("Test.Fail")
-
-        # THEN
-        with pytest.raises(ValidationError) as exc:
-            node.validate(symtab=symtab)
-
-        assert "Test.Fail" in str(exc), "Name should be in validation error"
-
     def test_evaluate_success(self):
         # GIVEN
         symtab = SymbolTable()
@@ -56,7 +28,7 @@ class TestFullNameNode:
         node = FullNameNode("Test.Fail")
 
         # THEN
-        with pytest.raises(ValidationError) as exc:
+        with pytest.raises(ValueError) as exc:
             node.evaluate(symtab=symtab)
 
         assert "Test.Fail" in str(exc), "Name should be in validation error"
