@@ -182,9 +182,9 @@ class TestJobTemplate:
         # no exception was raised.
 
     @pytest.mark.parametrize(
-        "data",
+        "data,expected_num_errors",
         (
-            pytest.param({}, id="empty object"),
+            pytest.param({}, 3, id="empty object"),
             pytest.param(
                 {
                     "specificationVersion": "jobtemplate-2023-09",
@@ -192,6 +192,7 @@ class TestJobTemplate:
                     "steps": [STEP_TEMPLATE],
                     "unknown": "key",
                 },
+                1,
                 id="unknown key",
             ),
             pytest.param(
@@ -199,6 +200,7 @@ class TestJobTemplate:
                     "name": "Foo",
                     "steps": [STEP_TEMPLATE],
                 },
+                1,
                 id="missing spec ver",
             ),
             #
@@ -209,6 +211,7 @@ class TestJobTemplate:
                     "steps": [STEP_TEMPLATE],
                     "description": 12,
                 },
+                1,
                 id="description not string",
             ),
             #
@@ -217,6 +220,7 @@ class TestJobTemplate:
                     "specificationVersion": "jobtemplate-2023-09",
                     "name": "Foo",
                 },
+                1,
                 id="missing steps",
             ),
             pytest.param(
@@ -225,6 +229,7 @@ class TestJobTemplate:
                     "name": "Foo",
                     "steps": [],
                 },
+                1,
                 id="empty steps",
             ),
             pytest.param(
@@ -233,6 +238,7 @@ class TestJobTemplate:
                     "name": "Foo",
                     "steps": [{"name": "S", "script": STEP_SCRIPT} for i in range(0, 2)],
                 },
+                1,
                 id="duplicate step names",
             ),
             #
@@ -243,6 +249,7 @@ class TestJobTemplate:
                     "steps": [STEP_TEMPLATE],
                     "parameterDefinitions": [],
                 },
+                1,
                 id="empty parameters",
             ),
             pytest.param(
@@ -254,6 +261,7 @@ class TestJobTemplate:
                         {"name": f"P{i}", "type": "INT"} for i in range(0, 51)
                     ],
                 },
+                1,
                 id="too many job parameters",
             ),
             pytest.param(
@@ -263,7 +271,41 @@ class TestJobTemplate:
                     "steps": [STEP_TEMPLATE],
                     "parameterDefinitions": [{"name": "P", "type": "INT"} for i in range(0, 2)],
                 },
+                1,
                 id="duplicate parameter names",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Foo",
+                    "steps": [STEP_TEMPLATE],
+                    "parameterDefinitions": [
+                        {
+                            "name": "foo",
+                        },
+                    ],
+                },
+                # If the discriminator ("type" field) is missing then we should only see a single
+                # error if the typed union discriminator is set up correctly. If it's not
+                # set up correctly, then we'll get one error for every type in the union.
+                1,
+                id="discriminator missing",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Foo",
+                    "steps": [STEP_TEMPLATE],
+                    "parameterDefinitions": [
+                        {"name": "foo", "type": "INT", "default": "nine"},
+                    ],
+                },
+                # If have a single error in the parameter definition and the Union discriminator
+                # is set up correctly, then we should only see a single error for the field in
+                # the specific Unioned type. If it's not set up correctly, then we'll
+                # see at least an error from each type in the Union.
+                1,
+                id="discriminator works",
             ),
             #
             pytest.param(
@@ -273,6 +315,7 @@ class TestJobTemplate:
                     "steps": [STEP_TEMPLATE],
                     "jobEnvironments": [],
                 },
+                1,
                 id="empty environments",
             ),
             pytest.param(
@@ -282,6 +325,7 @@ class TestJobTemplate:
                     "steps": [STEP_TEMPLATE],
                     "jobEnvironments": [{"name": "E", "script": ENV_SCRIPT} for i in range(0, 2)],
                 },
+                1,
                 id="duplicate environment names",
             ),
             pytest.param(
@@ -306,6 +350,7 @@ class TestJobTemplate:
                         },
                     ],
                 },
+                1,
                 id="with step dependency cycle",
             ),
             pytest.param(
@@ -324,6 +369,7 @@ class TestJobTemplate:
                         },
                     ],
                 },
+                1,
                 id="refs unknown step",
             ),
             pytest.param(
@@ -351,11 +397,12 @@ class TestJobTemplate:
                         {"name": "B0", "script": ENV_SCRIPT},
                     ],
                 },
+                2,
                 id="step env name duplicates job env name",
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any], expected_num_errors: int) -> None:
         # Failure case testing for Open Job Description JobTemplate.
         # - Constraint tests
         # - extra field test
@@ -365,4 +412,4 @@ class TestJobTemplate:
             _parse_model(model=JobTemplate, obj=data)
 
         # THEN
-        assert len(excinfo.value.errors()) > 0
+        assert len(excinfo.value.errors()) == expected_num_errors
