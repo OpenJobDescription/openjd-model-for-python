@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, Type, Union, cast
+from typing_extensions import Annotated
 
 from pydantic import (
     Field,
@@ -498,7 +499,7 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
 
     Attributes:
         name (Identifier):  A name by which the parameter is referenced.
-        type (TaskParameterType.INT): Descriminator to identify the type of the parameter.
+        type (TaskParameterType.INT): discriminator to identify the type of the parameter.
         range (IntRangeList | RangeString): The list of values that the parameter takes on.
     """
 
@@ -587,7 +588,7 @@ class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
 
     Attributes:
         name (Identifier):  A name by which the parameter is referenced.
-        type (TaskParameterType.FLOAT): Descriminator to identify the type of the parameter.
+        type (TaskParameterType.FLOAT): discriminator to identify the type of the parameter.
         range (FloatRangeList): The list of values that the parameter takes on.
     """
 
@@ -639,7 +640,7 @@ class StringTaskParameterDefinition(OpenJDModel_v2023_09):
 
     Attributes:
         name (Identifier):  A name by which the parameter is referenced.
-        type (TaskParameterType.STRING): Descriminator to identify the type of the parameter.
+        type (TaskParameterType.STRING): discriminator to identify the type of the parameter.
         range (StringRangeList): The list of values that the parameter takes on.
     """
 
@@ -667,7 +668,7 @@ class PathTaskParameterDefinition(OpenJDModel_v2023_09):
 
     Attributes:
         name (Identifier):  A name by which the parameter is referenced.
-        type (TaskParameterType.PATH): Descriminator to identify the type of the parameter.
+        type (TaskParameterType.PATH): discriminator to identify the type of the parameter.
         range (StringRangeList): The list of values that the parameter takes on.
     """
 
@@ -701,7 +702,11 @@ if TYPE_CHECKING:
     TaskParameterList = list[TaskParameterDefinition]
     CombinationExpr = str
 else:
-    TaskParameterList = conlist(TaskParameterDefinition, min_items=1, max_items=16)
+    TaskParameterList = conlist(
+        Annotated[TaskParameterDefinition, Field(..., discriminator="type")],
+        min_items=1,
+        max_items=16,
+    )
     # Limit the CombinationExpr to characters allowed in an Identifier plus whitespace
     # and the operator characters.
     CombinationExpr = constr(
@@ -948,7 +953,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     Attributes:
         name (Identifier): A name by which the parameter is referenced.
-        type (JobParameterType.STRING): Descriminator to identify the type of the parameter
+        type (JobParameterType.STRING): discriminator to identify the type of the parameter
         userInterface (Optional[JobStringParameterDefinitionUserInterface]): User interface properties
             for this parameter
         description (Optional[Description]): A free form string that can be used to describe
@@ -1163,7 +1168,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     Attributes:
         name (Identifier): A name by which the parameter is referenced.
-        type (JobParameterType.PATH): Descriminator to identify the type of the parameter
+        type (JobParameterType.PATH): discriminator to identify the type of the parameter
         objectType (Optional[JobPathParameterDefinitionObjectType]): The type of object the path represents,
             either a FILE or a DIRECTORY.
         dataFlow (Optional[JobPathParameterDefinitionDataFlow]): Whether the object the path represents
@@ -1368,7 +1373,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
 
     Attributes:
         name (Identifier): A name by which the parameter is referenced.
-        type (JobParameterType.INT): Descriminator to identify the type of the parameter
+        type (JobParameterType.INT): discriminator to identify the type of the parameter
         userInterface (Optional[JobPathParameterDefinitionUserInterface]): User interface properties
             for this parameter
         description (Optional[Description]): A free form string that can be used to describe
@@ -1577,7 +1582,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
 
     Attributes:
         name (Identifier): A name by which the parameter is referenced.
-        type (JobParameterType.FLOAT): Descriminator to identify the type of the parameter
+        type (JobParameterType.FLOAT): discriminator to identify the type of the parameter
         userInterface (Optional[JobPathParameterDefinitionUserInterface]): User interface properties
             for this parameter.
         description (Optional[Description]): A free form string that can be used to describe
@@ -2117,11 +2122,14 @@ if TYPE_CHECKING:
 else:
     StepTemplateList = conlist(StepTemplate, min_items=1)
     JobParameterDefinitionList = conlist(
-        Union[
-            JobIntParameterDefinition,
-            JobFloatParameterDefinition,
-            JobStringParameterDefinition,
-            JobPathParameterDefinition,
+        Annotated[
+            Union[
+                JobIntParameterDefinition,
+                JobFloatParameterDefinition,
+                JobStringParameterDefinition,
+                JobPathParameterDefinition,
+            ],
+            Field(..., discriminator="type"),
         ],
         min_items=1,
         max_items=50,
@@ -2162,7 +2170,7 @@ class JobTemplate(OpenJDModel_v2023_09):
     name: JobTemplateName
     steps: StepTemplateList
     description: Optional[Description] = None
-    parameterDefinitions: Optional[JobParameterDefinitionList] = Field(None, descriminator="type")
+    parameterDefinitions: Optional[JobParameterDefinitionList] = None
     jobEnvironments: Optional[JobEnvironmentsList] = None
     # Note: Cannot call the field 'schema'; it masks a base class field
     schemaStr: Optional[str] = Field(None, alias="$schema")  # noqa: N815

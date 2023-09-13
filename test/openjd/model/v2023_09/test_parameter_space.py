@@ -455,6 +455,31 @@ class TestStepParameterSpaceDefinition:
             pytest.param(
                 {
                     "taskParameterDefinitions": [
+                        {"name": "foo", "range": [1]},
+                    ]
+                },
+                # If the discriminator ("type" field) is missing then we should only see a single
+                # error if the typed union discriminator is set up correctly. If it's not
+                # set up correctly, then we'll get one error for every type in the union.
+                1,
+                id="discriminator missing",
+            ),
+            pytest.param(
+                {
+                    "taskParameterDefinitions": [
+                        {"name": "foo", "type": "INT"},
+                    ]
+                },
+                # If we're missing a required field ("range") and the Union discriminator
+                # is set up correctly, then we should only see a single error for the field being
+                # missing in the specific Unioned type. If it's not set up correctly, then we'll
+                # see at least an error from each type in the Union.
+                1,
+                id="discriminator works",
+            ),
+            pytest.param(
+                {
+                    "taskParameterDefinitions": [
                         {"name": "foo", "type": "INT", "range": [1]},
                         {"name": "bar", "type": "INT", "range": [1]},
                     ],
