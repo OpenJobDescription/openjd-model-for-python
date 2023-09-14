@@ -4,7 +4,13 @@ from typing import Any
 import string
 
 import pytest
-from pydantic import BaseModel, ValidationError
+
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1 import BaseModel, ValidationError
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic import BaseModel, ValidationError
 
 from openjd.model.v2023_09 import (
     AmountCapabilityName,

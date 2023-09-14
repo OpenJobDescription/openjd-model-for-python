@@ -5,7 +5,12 @@ __all__ = ["validate_model_template_variable_references"]
 from collections import defaultdict
 from typing import Any, cast
 
-from pydantic.error_wrappers import ErrorWrapper
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1.error_wrappers import ErrorWrapper
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic.error_wrappers import ErrorWrapper
 
 from .._format_strings import FormatString
 from .._types import OpenJDModel, ResolutionScope

@@ -9,20 +9,39 @@ from graphlib import CycleError, TopologicalSorter
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, Type, Union, cast
 from typing_extensions import Annotated
 
-from pydantic import (
-    Field,
-    PositiveInt,
-    PositiveFloat,
-    StrictBool,
-    StrictInt,
-    ValidationError,
-    conint,
-    conlist,
-    constr,
-    root_validator,
-    validator,
-)
-from pydantic.error_wrappers import ErrorWrapper
+try:
+    # Pydantic v1 embedded within v2, if it's installed.
+    from pydantic.v1 import (
+        Field,
+        PositiveInt,
+        PositiveFloat,
+        StrictBool,
+        StrictInt,
+        ValidationError,
+        conint,
+        conlist,
+        constr,
+        root_validator,
+        validator,
+    )
+    from pydantic.v1.error_wrappers import ErrorWrapper
+
+except ImportError:  # pragma: no cover
+    # Default to pydantic v1
+    from pydantic import (
+        Field,
+        PositiveInt,
+        PositiveFloat,
+        StrictBool,
+        StrictInt,
+        ValidationError,
+        conint,
+        conlist,
+        constr,
+        root_validator,
+        validator,
+    )
+    from pydantic.error_wrappers import ErrorWrapper
 
 from .._format_strings import FormatString
 from .._errors import ExpressionError, TokenError
