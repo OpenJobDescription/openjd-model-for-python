@@ -11,6 +11,7 @@ from pydantic import ValidationError as PydanticValidationError
 
 from ._errors import DecodeValidationError
 from ._types import JobTemplate, OpenJDModel, SchemaVersion
+from ._convert_pydantic_error import pydantic_validationerrors_to_str, ErrorDict
 from .v2023_09 import JobTemplate as JobTemplate_2023_09
 
 __all__ = ("parse_model", "document_string_to_object", "DocumentType", "decode_template")
@@ -44,7 +45,9 @@ def parse_model(*, model: Type[T], obj: Any) -> T:
     try:
         return _parse_model(model=model, obj=obj)
     except PydanticValidationError as exc:
-        raise DecodeValidationError(str(exc))
+        raise DecodeValidationError(
+            pydantic_validationerrors_to_str(model, cast(list[ErrorDict], exc.errors()))
+        )
 
 
 def document_string_to_object(*, document: str, document_type: DocumentType) -> dict[str, Any]:

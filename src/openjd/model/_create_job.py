@@ -16,6 +16,7 @@ from ._types import (
     ParameterValueType,
     SchemaVersion,
 )
+from ._convert_pydantic_error import pydantic_validationerrors_to_str, ErrorDict
 
 if TYPE_CHECKING:
     # Avoiding a circular import that occurs when trying to import FormatString
@@ -221,6 +222,10 @@ def create_job(*, job_template: JobTemplate, job_parameter_values: JobParameterV
     try:
         job = instantiate_model(job_template, symtab)
     except ValidationError as exc:
-        raise DecodeValidationError(str(exc))
+        raise DecodeValidationError(
+            pydantic_validationerrors_to_str(
+                job_template.__class__, cast(list[ErrorDict], exc.errors())
+            )
+        )
 
     return cast(Job, job)
