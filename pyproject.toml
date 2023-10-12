@@ -7,7 +7,7 @@ name = "openjd-model"
 dynamic = ["version"]
 readme = "README.md"
 license = "Apache-2.0"
-requires-python = ">=3.9"
+requires-python = ">=3.7"
 
 dependencies = [
   "pyyaml ~= 6.0",
