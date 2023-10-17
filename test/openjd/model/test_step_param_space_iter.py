@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Callable, Union
+from typing import Callable, Union, Dict
 
 import pytest
 
@@ -172,7 +172,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         # THEN
         # The combination_expr should default to "Param1 * Param2"
         assert len(result) == 2 * 2
-        element: Callable[[int, str], dict[str, ParameterValue]] = lambda p1, p2: {
+        element: Callable[[int, str], Dict[str, ParameterValue]] = lambda p1, p2: {
             "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
             "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),
         }
@@ -205,7 +205,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         result = StepParameterSpaceIterator(space=space)
 
         # THEN
-        element: Callable[[int, str, int], dict[str, ParameterValue]] = lambda p1, p2, p3: {
+        element: Callable[[int, str, int], Dict[str, ParameterValue]] = lambda p1, p2, p3: {
             "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
             "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),
             "Param3": ParameterValue(type=ParameterValueType.INT, value=str(p3)),
@@ -272,7 +272,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         result = StepParameterSpaceIterator(space=space)
 
         # THEN
-        element: Callable[[int, str, int], dict[str, ParameterValue]] = lambda p1, p2, p3: {
+        element: Callable[[int, str, int], Dict[str, ParameterValue]] = lambda p1, p2, p3: {
             "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
             "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),
             "Param3": ParameterValue(type=ParameterValueType.INT, value=str(p3)),
@@ -321,7 +321,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         result = StepParameterSpaceIterator(space=space)
 
         # THEN
-        element: Callable[[int, str, int], dict[str, ParameterValue]] = lambda p1, p2, p3: {
+        element: Callable[[int, str, int], Dict[str, ParameterValue]] = lambda p1, p2, p3: {
             "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
             "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),
             "Param3": ParameterValue(type=ParameterValueType.INT, value=str(p3)),
@@ -380,7 +380,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         result = StepParameterSpaceIterator(space=space)
 
         # THEN
-        element: Callable[[int, str, int], dict[str, ParameterValue]] = lambda p1, p2, p3: {
+        element: Callable[[int, str, int], Dict[str, ParameterValue]] = lambda p1, p2, p3: {
             "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
             "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),
             "Param3": ParameterValue(type=ParameterValueType.INT, value=str(p3)),
@@ -428,7 +428,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
 
         # THEN
         element: Callable[
-            [int, str, int, int], dict[str, ParameterValue]
+            [int, str, int, int], Dict[str, ParameterValue]
         ] = lambda p1, p2, p3, p4: {
             "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
             "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),

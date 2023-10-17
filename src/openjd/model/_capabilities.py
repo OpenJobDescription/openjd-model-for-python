@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Sequence, Union
+from typing import Sequence, Union, Tuple
 import re
 
 from ._format_strings import FormatString
@@ -12,7 +12,7 @@ _name_regex: re.Pattern = re.compile(
 _reserved_scopes = ("worker", "job", "step", "task")
 
 
-def _split_vendor(capability_name: str) -> tuple[str, str]:
+def _split_vendor(capability_name: str) -> Tuple[str, str]:
     if ":" in capability_name:
         # Code is like this to satisfy mypy.
         split = capability_name.split(":", 1)

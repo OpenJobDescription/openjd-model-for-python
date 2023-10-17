@@ -1,13 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Type, cast
+from typing import Type, cast, Dict
 
 from .._errors import ExpressionError, TokenError
 from .._tokenstream import Token, TokenStream, TokenType
 from ._nodes import FullNameNode, Node
 from ._tokens import DotToken, NameToken
 
-_tokens: dict[TokenType, Type[Token]] = {TokenType.NAME: NameToken, TokenType.DOT: DotToken}
+_tokens: Dict[TokenType, Type[Token]] = {TokenType.NAME: NameToken, TokenType.DOT: DotToken}
 
 
 class Parser:

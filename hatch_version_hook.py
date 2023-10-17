@@ -5,7 +5,7 @@ import sys
 
 from dataclasses import dataclass
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
-from typing import Any, Optional
+from typing import Any, Optional, List, Dict
 
 
 _logger = logging.Logger(__name__, logging.INFO)
@@ -19,8 +19,8 @@ _logger.addHandler(_stderr_handler)
 
 @dataclass
 class CopyConfig:
-    sources: list[str]
-    destinations: list[str]
+    sources: List[str]
+    destinations: List[str]
 
 
 class CustomBuildHookException(Exception):
@@ -34,7 +34,7 @@ class CustomBuildHook(BuildHookInterface):
     This build hook copies files from one location (sources) to another (destinations).
     Config options:
     - `log_level (str)`: The logging level. Any value accepted by logging.Logger.setLevel is allowed. Default is INFO.
-    - `copy_map (list[dict])`: A list of mappings of files to copy and the destinations to copy them into. In TOML files,
+    - `copy_map (List[dict])`: A list of mappings of files to copy and the destinations to copy them into. In TOML files,
       this is expressed as an array of tables. See https://toml.io/en/v1.0.0#array-of-tables
     Example TOML config:
     ```
@@ -63,7 +63,7 @@ class CustomBuildHook(BuildHookInterface):
         "copy_map",
     ]
 
-    def initialize(self, version: str, build_data: dict[str, Any]) -> None:
+    def initialize(self, version: str, build_data: Dict[str, Any]) -> None:
         if not self._prepare():
             return
 
@@ -78,7 +78,7 @@ class CustomBuildHook(BuildHookInterface):
                     )
             _logger.info("Copy complete")
 
-    def clean(self, versions: list[str]) -> None:
+    def clean(self, versions: List[str]) -> None:
         if not self._prepare():
             return
 
@@ -116,8 +116,8 @@ class CustomBuildHook(BuildHookInterface):
         return True
 
     @property
-    def copy_map(self) -> Optional[list[CopyConfig]]:
-        raw_copy_map: list[dict] = self.config.get("copy_map")
+    def copy_map(self) -> Optional[List[CopyConfig]]:
+        raw_copy_map: List[dict] = self.config.get("copy_map")
         if not raw_copy_map:
             return None
 
@@ -126,13 +126,13 @@ class CustomBuildHook(BuildHookInterface):
             and all(isinstance(copy_cfg, dict) for copy_cfg in raw_copy_map)
         ):
             raise CustomBuildHookException(
-                f'"copy_map" config option is a nonvalid type. Expected list[dict], but got {raw_copy_map}'
+                f'"copy_map" config option is a nonvalid type. Expected List[dict], but got {raw_copy_map}'
             )
 
         def verify_list_of_file_paths(file_paths: Any, config_name: str):
             if not (isinstance(file_paths, list) and all(isinstance(fp, str) for fp in file_paths)):
                 raise CustomBuildHookException(
-                    f'"{config_name}" config option is a nonvalid type. Expected list[str], but got {file_paths}'
+                    f'"{config_name}" config option is a nonvalid type. Expected List[str], but got {file_paths}'
                 )
 
             missing_paths = [
@@ -143,12 +143,12 @@ class CustomBuildHook(BuildHookInterface):
                     f'"{config_name}" config option contains some file paths that do not exist: {missing_paths}'
                 )
 
-        copy_map: list[CopyConfig] = []
+        copy_map: List[CopyConfig] = []
         for copy_cfg in raw_copy_map:
-            destinations: list[str] = copy_cfg.get("destinations")
+            destinations: List[str] = copy_cfg.get("destinations")
             verify_list_of_file_paths(destinations, "destinations")
 
-            sources: list[str] = copy_cfg.get("sources")
+            sources: List[str] = copy_cfg.get("sources")
             verify_list_of_file_paths(sources, "source")
 
             copy_map.append(CopyConfig(sources, destinations))

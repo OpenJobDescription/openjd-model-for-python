@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any
+from typing import Any, Dict
 
 import pytest
 from pydantic import ValidationError
@@ -64,7 +64,7 @@ class TestStepTemplate:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description StepTemplate
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -137,7 +137,7 @@ class TestStepTemplate:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description StepTemplate.
         # - Constraint tests
         # - extra field test

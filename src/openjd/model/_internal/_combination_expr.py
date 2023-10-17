@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
+from typing import Union, List, Tuple
 
 from .._errors import ExpressionError, TokenError
 from .._tokenstream import Token, TokenStream, TokenType
@@ -20,7 +20,7 @@ class Node:
     parser for task parameter combination expressions.
     """
 
-    def collect_identifiers(self, destination: list[str]) -> None:
+    def collect_identifiers(self, destination: List[str]) -> None:
         if isinstance(self, (ProductNode, AssociationNode)):
             for node in self.children:
                 node.collect_identifiers(destination)
@@ -35,7 +35,7 @@ class ProductNode(Node):
     e.g. A * B * C
     """
 
-    children: tuple[Node, ...]
+    children: Tuple[Node, ...]
 
     def __str__(self) -> str:
         return " * ".join(str(child) for child in self.children)
@@ -51,7 +51,7 @@ class AssociationNode(Node):
     e.g. (A, B, C)
     """
 
-    children: tuple[Node, ...]
+    children: Tuple[Node, ...]
 
     def __str__(self) -> str:
         return f"({', '.join(str(child) for child in self.children)})"
@@ -167,7 +167,7 @@ class Parser:
             Node: Expression tree node for the recursively matched expression.
         """
 
-        children: list[Node] = []
+        children: List[Node] = []
         # Parse: <element>
         # Raises: TokenError, ExpressionError
         children.append(self._element())
@@ -202,7 +202,7 @@ class Parser:
                 association expression.
         """
 
-        children: list[Node] = []
+        children: List[Node] = []
         # We only get into this function by doing a token lookahead and
         # seeing a left-paren. Consume the left paren.
         self._tokens.next()

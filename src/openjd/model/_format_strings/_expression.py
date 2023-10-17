@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import numbers
-from typing import Union
+from typing import Union, Set
 
 from .._errors import ExpressionError
 from .._symbol_table import SymbolTable
@@ -29,11 +29,11 @@ class InterpolationExpression:
         # Raises: ExpressionError, TokenError
         self._expresion_tree = parser.parse(expr)
 
-    def validate_symbol_refs(self, *, symbols: set[str]) -> None:
+    def validate_symbol_refs(self, *, symbols: Set[str]) -> None:
         """Check whether this expression can be evaluated correctly given a set of symbol names.
 
         Args:
-            symbols (set[str]): The names of symbols visible to this expression.
+            symbols (Set[str]): The names of symbols visible to this expression.
 
         Raises:
             ValueError: If the expression cannot be evaluated with the given symbol names

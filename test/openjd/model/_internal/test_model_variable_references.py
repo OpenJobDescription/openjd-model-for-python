@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import cast
+from typing import cast, Dict, List
 
 import pytest
 
@@ -320,7 +320,7 @@ class TestListField:
 
         class BaseModel(OpenJDModel):
             name: str
-            sub: list[SubModel]
+            sub: List[SubModel]
 
             _template_variable_definitions = DefinesTemplateVariables(
                 defines={TemplateVariableDef(prefix="|Param.", resolves=def_scope)},
@@ -358,7 +358,7 @@ class TestListField:
         # GIVEN
         class BaseModel(OpenJDModel):
             name: str
-            ref: list[FormatString]
+            ref: List[FormatString]
             _template_variable_scope = ref_scope
             _template_variable_sources = {"ref": {"__self__"}}
             _template_variable_definitions = DefinesTemplateVariables(
@@ -395,7 +395,7 @@ class TestDictField:
 
         class BaseModel(OpenJDModel):
             name: str
-            sub: dict[str, SubModel]
+            sub: Dict[str, SubModel]
 
             _template_variable_definitions = DefinesTemplateVariables(
                 defines={TemplateVariableDef(prefix="|Param.", resolves=def_scope)},
@@ -433,7 +433,7 @@ class TestDictField:
         # GIVEN
         class BaseModel(OpenJDModel):
             name: str
-            ref: dict[str, FormatString]
+            ref: Dict[str, FormatString]
             _template_variable_scope = ref_scope
             _template_variable_sources = {"ref": {"__self__"}}
             _template_variable_definitions = DefinesTemplateVariables(
@@ -473,7 +473,7 @@ def test_dict_key_as_name(
 
     class BaseModel(OpenJDModel):
         ref: FormatString
-        sub: dict[str, SubModel]
+        sub: Dict[str, SubModel]
 
         _template_variable_scope = ref_scope
         _template_variable_sources = {

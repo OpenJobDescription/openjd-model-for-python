@@ -2,6 +2,7 @@
 
 
 from dataclasses import dataclass
+from typing import Dict, List
 
 from ._types import Job, SchemaVersion, Step, dataclass_kwargs
 
@@ -12,11 +13,11 @@ class StepDependencyGraphNode:
     """The Step that this node represents
     """
 
-    in_edges: list["StepDependencyGraphEdgeBase"]
+    in_edges: List["StepDependencyGraphEdgeBase"]
     """Edges wherein this step depends upon another.
     """
 
-    out_edges: list["StepDependencyGraphEdgeBase"]
+    out_edges: List["StepDependencyGraphEdgeBase"]
     """Edges wherein this step is depended-upon by another.
     """
 
@@ -62,7 +63,7 @@ class StepDependencyGraph:
     """
 
     # map from step name -> graph node
-    _nodes: dict[str, StepDependencyGraphNode]
+    _nodes: Dict[str, StepDependencyGraphNode]
 
     def __init__(self, *, job: Job) -> None:
         # The only version supported at the moment.

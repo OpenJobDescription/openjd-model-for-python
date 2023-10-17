@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any
+from typing import Any, Dict
 
 import pytest
 from pydantic import ValidationError
@@ -44,7 +44,7 @@ class TestAction:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description Actions
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -111,7 +111,7 @@ class TestAction:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description Actions.
         # - Constraint tests
         # - extra field test
@@ -128,7 +128,7 @@ class TestStepActions:
     @pytest.mark.parametrize(
         "data", (pytest.param({"onRun": {"command": "foo"}}, id="has required"),)
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description StepActions
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -148,7 +148,7 @@ class TestStepActions:
             pytest.param({"onRun": {"command": "foo"}, "onUnknown": "blah"}, id="unknown field"),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description StepActions.
 
         # WHEN
@@ -175,7 +175,7 @@ class TestEnvironmentActions:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description StepActions
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -195,7 +195,7 @@ class TestEnvironmentActions:
             pytest.param({"onEnter": {"command": "foo"}, "onUnknown": "blah"}, id="unknown field"),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description StepActions.
 
         # WHEN

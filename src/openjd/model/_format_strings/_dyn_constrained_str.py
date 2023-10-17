@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import re
-from typing import TYPE_CHECKING, Any, Callable, Optional, Pattern, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional, Pattern, Union, Dict
 
 from pydantic.errors import AnyStrMaxLengthError, AnyStrMinLengthError, StrRegexError
 from pydantic.utils import update_not_none
@@ -33,7 +33,7 @@ class DynamicConstrainedStr(str):
         return cls._max_length
 
     @classmethod
-    def __modify_schema__(cls, field_schema: dict[str, Any]) -> None:
+    def __modify_schema__(cls, field_schema: Dict[str, Any]) -> None:
         update_not_none(
             field_schema,
             minLength=cls._min_length,

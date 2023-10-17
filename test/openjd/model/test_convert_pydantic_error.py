@@ -1,7 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from pydantic import BaseModel, root_validator, Field
-from typing import Literal, Union
+from typing import Union, List
+
+try:
+    # Literal is only available in python 3.8+
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal  # type:ignore
 
 from openjd.model._convert_pydantic_error import (
     ErrorDict,
@@ -20,7 +26,7 @@ class TestValidationErrorsToStr:
             f1: str
             f2: int
 
-        errors: list[ErrorDict] = [
+        errors: List[ErrorDict] = [
             {"loc": ("f1",), "msg": "error message1", "type": "error-type"},
             {"loc": ("f2",), "msg": "error message2", "type": "error-type"},
         ]
@@ -153,7 +159,7 @@ class TestArrayFields:
 
         # GIVEN
         class Model(BaseModel):
-            field: list[int]
+            field: List[int]
 
         error: ErrorDict = {
             "loc": (
@@ -180,7 +186,7 @@ class TestArrayFields:
             ff: int
 
         class Model(BaseModel):
-            inner: list[Inner]
+            inner: List[Inner]
 
         error: ErrorDict = {
             "loc": (

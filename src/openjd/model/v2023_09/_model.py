@@ -5,8 +5,31 @@ from __future__ import annotations
 import re
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from graphlib import CycleError, TopologicalSorter
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, Type, Union, cast
+
+try:
+    # graphlib only available in python 3.9+
+    from graphlib import CycleError, TopologicalSorter
+except ModuleNotFoundError:
+    from .._graphlib37 import CycleError, TopologicalSorter  # type:ignore
+
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    ClassVar,
+    Optional,
+    Type,
+    Union,
+    cast,
+    Dict,
+    List,
+)
+
+try:
+    # Literal is only available in python 3.8+
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal  # type:ignore
+
 from typing_extensions import Annotated
 
 from pydantic import (
@@ -237,7 +260,7 @@ class CancelationMethodTerminate(OpenJDModel_v2023_09):
 
 
 if TYPE_CHECKING:
-    ArgListType = list[ArgString]
+    ArgListType = List[ArgString]
 else:
     ArgListType = conlist(ArgString, min_items=1)
 
@@ -247,7 +270,7 @@ class Action(OpenJDModel_v2023_09):
 
     Attributes:
         command (FormatString): The command/executable that will be run.
-        args (Optional[list[FormatString]]): The arguments that are provided to the command
+        args (Optional[List[FormatString]]): The arguments that are provided to the command
             when it is run.
         timeout (Optional[int]): Maximum allowed runtime of the Action in seconds.
             Default: No timeout
@@ -290,7 +313,7 @@ class EnvironmentActions(OpenJDModel_v2023_09):
     onExit: Optional[Action] = Field(None)  # noqa: N815
 
     @root_validator(pre=True)
-    def _requires_oneof(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _requires_oneof(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         """A validator that runs on the model data before parsing."""
         on_enter = values.get("onEnter")
         on_exit = values.get("onExit")
@@ -352,7 +375,7 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
 # --------------------- Script types ----------------------------
 
 if TYPE_CHECKING:
-    EmbeddedFiles = list[EmbeddedFileText]
+    EmbeddedFiles = List[EmbeddedFileText]
 else:
     EmbeddedFiles = conlist(EmbeddedFileText, min_items=1)
 
@@ -362,7 +385,7 @@ class StepScript(OpenJDModel_v2023_09):
     a Task for a Step.
 
     Attributes:
-        embeddedFiles (Optional[list[EmbeddedFileText]]): List of text files embedded
+        embeddedFiles (Optional[List[EmbeddedFileText]]): List of text files embedded
            into the script. These will be written to disk prior to running each of the
            Actions in the script.
         actions (StepActions): The actions to run when running a Task for the Step.
@@ -397,7 +420,7 @@ class EnvironmentScript(OpenJDModel_v2023_09):
     an Environment within a Session.
 
     Attributes:
-        embeddedFiles (Optional[list[EmbeddedFileText]]): List of text files embedded
+        embeddedFiles (Optional[List[EmbeddedFileText]]): List of text files embedded
            into the script. These will be written to disk prior to running each of the
            Actions in the script.
         actions (EnvironmentActions): The actions to run when at various stages of the Environment's
@@ -456,9 +479,9 @@ class RangeString(FormatString):
 if TYPE_CHECKING:
     # Note: Ordering within the Unions is important. Pydantic will try to match in
     # the order given.
-    IntRangeList = list[Union[int, TaskParameterStringValue]]
-    FloatRangeList = list[Union[Decimal, TaskParameterStringValue]]
-    StringRangeList = list[TaskParameterStringValue]
+    IntRangeList = List[Union[int, TaskParameterStringValue]]
+    FloatRangeList = List[Union[Decimal, TaskParameterStringValue]]
+    StringRangeList = List[TaskParameterStringValue]
     TaskParameterStringValueAsJob = str
 else:
     IntRangeList = conlist(Union[int, TaskParameterStringValue], min_items=1, max_items=1024)
@@ -466,7 +489,7 @@ else:
     StringRangeList = conlist(TaskParameterStringValue, min_items=1, max_items=1024)
     TaskParameterStringValueAsJob = constr(min_length=0, max_length=1024)
 
-TaskRangeList = list[TaskParameterStringValueAsJob]
+TaskRangeList = List[TaskParameterStringValueAsJob]
 TaskRangeExpression = RangeString
 
 
@@ -537,7 +560,7 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
-            errors = list[ErrorWrapper]()
+            errors: List[ErrorWrapper] = []
             for v in value:
                 if isinstance(v, bool) or not isinstance(v, (int, str)):
                     errors.append(
@@ -556,7 +579,7 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
     @validator("range")
     def _validate_range_elements(cls, value: Any) -> Any:
         if isinstance(value, list):
-            errors = list[ErrorWrapper]()
+            errors: List[ErrorWrapper] = []
             for v in value:
                 if isinstance(v, TaskParameterStringValue):
                     # A TaskParameterStringValue is a FormatString.
@@ -699,7 +722,7 @@ TaskParameterDefinition = Union[
 ]
 
 if TYPE_CHECKING:
-    TaskParameterList = list[TaskParameterDefinition]
+    TaskParameterList = List[TaskParameterDefinition]
     CombinationExpr = str
 else:
     TaskParameterList = conlist(
@@ -721,7 +744,7 @@ class StepParameterSpace(OpenJDModel_v2023_09):
     # Note: taskParameterDefinitions is a dict here to make it easier to work with
     # programatically (e.g. finding the TaskRangeParameterDefinition for a given
     # identifier)
-    taskParameterDefinitions: dict[Identifier, TaskRangeParameter]
+    taskParameterDefinitions: Dict[Identifier, TaskRangeParameter]
     combination: Optional[CombinationExpr] = None
 
 
@@ -750,7 +773,7 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
         return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
 
     @root_validator
-    def _validate_combination(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_combination(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         if values.get("combination") is None:
             return values
         if values.get("taskParameterDefinitions") is None:
@@ -770,13 +793,13 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
         except (ExpressionError, TokenError) as e:
             raise ValueError(str(e))
 
-        expr_identifiers = list[str]()
+        expr_identifiers = list()  # type: List[str]
         parse_tree.collect_identifiers(expr_identifiers)
         unique_expr_identifiers = set(expr_identifiers)
         parameter_names = [param.name for param in parameter_list]
         unique_parameter_names = set(parameter_names)
 
-        errors = list[ErrorWrapper]()
+        errors: List[ErrorWrapper] = []
         if len(unique_expr_identifiers) < len(unique_parameter_names):
             # Missing some parameter identifiers in the expression
             missing = sorted(list(unique_parameter_names - unique_expr_identifiers))
@@ -831,7 +854,7 @@ class EnvironmentVariableValueString(FormatString):
     _max_length = 2048
 
 
-EnvironmentVariableObject = dict[EnvironmentVariableNameString, EnvironmentVariableValueString]
+EnvironmentVariableObject = Dict[EnvironmentVariableNameString, EnvironmentVariableValueString]
 
 
 # ==================================================================
@@ -862,7 +885,7 @@ class Environment(OpenJDModel_v2023_09):
     _template_variable_scope = ResolutionScope.SESSION
 
     @root_validator(pre=True)
-    def _validate_has_script_or_variables(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_has_script_or_variables(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         if values.get("script") is None and values.get("variables") is None:
             raise ValueError("Environment must have either a script or variables.")
         return values
@@ -891,12 +914,12 @@ class JobParameterType(str, Enum):
 
 
 if TYPE_CHECKING:
-    AllowedParameterStringValueList = list[ParameterStringValue]
-    AllowedIntParameterList = list[int]
-    AllowedFloatParameterList = list[Decimal]
+    AllowedParameterStringValueList = List[ParameterStringValue]
+    AllowedIntParameterList = List[int]
+    AllowedFloatParameterList = List[Decimal]
     UserInterfaceLabelStringValue = str
     FileDialogFilterPatternStringValue = str
-    FileDialogFilterPatternStringValueList = list[FileDialogFilterPatternStringValue]
+    FileDialogFilterPatternStringValueList = List[FileDialogFilterPatternStringValue]
 else:
     AllowedParameterStringValueList = conlist(ParameterStringValue, min_items=1)
     AllowedIntParameterList = conlist(int, min_items=1)
@@ -1008,7 +1031,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         return v
 
     @validator("maxLength")
-    def _validate_max_length(cls, v: Optional[int], values: dict[str, Any]) -> Optional[int]:
+    def _validate_max_length(cls, v: Optional[int], values: Dict[str, Any]) -> Optional[int]:
         if v is None:
             return v
         if v <= 0:
@@ -1022,7 +1045,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     @validator("allowedValues", each_item=True)
     def _validate_allowed_values_item(
-        cls, v: ParameterStringValue, values: dict[str, Any]
+        cls, v: ParameterStringValue, values: Dict[str, Any]
     ) -> ParameterStringValue:
         min_length = values.get("minLength")
         if min_length is not None:
@@ -1036,7 +1059,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     @validator("default")
     def _validate_default(
-        cls, v: ParameterStringValue, values: dict[str, Any]
+        cls, v: ParameterStringValue, values: Dict[str, Any]
     ) -> ParameterStringValue:
         min_length = values.get("minLength")
         if min_length is not None:
@@ -1054,7 +1077,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         return v
 
     @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_user_interface_compatibility(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # validate that the user interface control is compatible with the value constraints
         if values.get("userInterface"):
             user_interface_control = values["userInterface"].control
@@ -1124,7 +1147,7 @@ class JobPathParameterDefinitionFileFilter(OpenJDModel_v2023_09):
 
     Attributes:
         label (UserInterfaceLabelStringValue): The label for this file filter, e.g. "Image Files" or "All Files".
-        patterns (list[FileDialogFilterPatternStringValue]): A list of possible glob file patterns for files to show.
+        patterns (List[FileDialogFilterPatternStringValue]): A list of possible glob file patterns for files to show.
             e.g. ["*.jpg", "*.png"]
     """
 
@@ -1133,7 +1156,7 @@ class JobPathParameterDefinitionFileFilter(OpenJDModel_v2023_09):
 
 
 if TYPE_CHECKING:
-    JobPathParameterDefinitionFileFilterList = list[JobPathParameterDefinitionFileFilter]
+    JobPathParameterDefinitionFileFilterList = List[JobPathParameterDefinitionFileFilter]
 else:
     JobPathParameterDefinitionFileFilterList = conlist(
         JobPathParameterDefinitionFileFilter, min_items=1, max_items=20
@@ -1149,7 +1172,7 @@ class JobPathParameterDefinitionUserInterface(OpenJDModel_v2023_09):
             to the `name` of the parameter.
         groupLabel (Optional[UserInterfaceLabelStringValue]): The label of the group box to place the user interface
             control in.
-        fileFilters (Optional[list[JobPathParameterDefinitionFileFilter]]): Can be provided when the uiControl is “CHOOSE_INPUT_FILE” or
+        fileFilters (Optional[List[JobPathParameterDefinitionFileFilter]]): Can be provided when the uiControl is “CHOOSE_INPUT_FILE” or
             “CHOOSE_OUTPUT_FILE”. Defines the file filters that are shown in the file choice dialog.
             Maximum of 20 filters.
         fileFilterDefault (Optional[JobPathParameterDefinitionFileFilter]): Can be provided when the uiControl is “CHOOSE_INPUT_FILE” or
@@ -1231,7 +1254,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         return v
 
     @validator("maxLength")
-    def _validate_max_length(cls, v: Optional[int], values: dict[str, Any]) -> Optional[int]:
+    def _validate_max_length(cls, v: Optional[int], values: Dict[str, Any]) -> Optional[int]:
         if v is None:
             return v
         if v <= 0:
@@ -1245,7 +1268,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     @validator("allowedValues", each_item=True)
     def _validate_allowed_values_item(
-        cls, v: ParameterStringValue, values: dict[str, Any]
+        cls, v: ParameterStringValue, values: Dict[str, Any]
     ) -> ParameterStringValue:
         min_length = values.get("minLength")
         if min_length is not None:
@@ -1259,7 +1282,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     @validator("default")
     def _validate_default(
-        cls, v: ParameterStringValue, values: dict[str, Any]
+        cls, v: ParameterStringValue, values: Dict[str, Any]
     ) -> ParameterStringValue:
         min_length = values.get("minLength")
         if min_length is not None:
@@ -1277,7 +1300,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         return v
 
     @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_user_interface_compatibility(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # validate that the user interface control is compatible with the value constraints
         if values.get("userInterface"):
             user_interface_control = values["userInterface"].control
@@ -1453,7 +1476,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
         return v
 
     @validator("maxValue")
-    def _validate_max_value(cls, v: Optional[int], values: dict[str, Any]) -> Optional[int]:
+    def _validate_max_value(cls, v: Optional[int], values: Dict[str, Any]) -> Optional[int]:
         if v is None:
             return v
         min_value = values.get("minValue")
@@ -1464,7 +1487,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
         return v
 
     @validator("allowedValues", each_item=True)
-    def _validate_allowed_values_item(cls, v: int, values: dict[str, Any]) -> int:
+    def _validate_allowed_values_item(cls, v: int, values: Dict[str, Any]) -> int:
         min_value = values.get("minValue")
         if min_value is not None:
             if v < min_value:
@@ -1476,7 +1499,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
         return v
 
     @validator("default")
-    def _validate_default(cls, v: int, values: dict[str, Any]) -> int:
+    def _validate_default(cls, v: int, values: Dict[str, Any]) -> int:
         min_value = values.get("minValue")
         if min_value is not None:
             if v < min_value:
@@ -1493,7 +1516,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
         return v
 
     @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_user_interface_compatibility(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # validate that the user interface control is compatible with the value constraints
         if values.get("userInterface"):
             user_interface_control = values["userInterface"].control
@@ -1629,7 +1652,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
     )
 
     @validator("maxValue")
-    def _validate_max_value(cls, v: Optional[Decimal], values: dict[str, Any]) -> Optional[Decimal]:
+    def _validate_max_value(cls, v: Optional[Decimal], values: Dict[str, Any]) -> Optional[Decimal]:
         if v is None:
             return v
         min_value = values.get("minValue")
@@ -1640,7 +1663,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
         return v
 
     @validator("allowedValues", each_item=True)
-    def _validate_allowed_values_item(cls, v: Decimal, values: dict[str, Any]) -> Decimal:
+    def _validate_allowed_values_item(cls, v: Decimal, values: Dict[str, Any]) -> Decimal:
         min_value = values.get("minValue")
         if min_value is not None:
             if v < min_value:
@@ -1652,7 +1675,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
         return v
 
     @validator("default")
-    def _validate_default(cls, v: Decimal, values: dict[str, Any]) -> Decimal:
+    def _validate_default(cls, v: Decimal, values: Dict[str, Any]) -> Decimal:
         min_value = values.get("minValue")
         if min_value is not None:
             if v < min_value:
@@ -1669,7 +1692,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
         return v
 
     @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_user_interface_compatibility(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # validate that the user interface control is compatible with the value constraints
         if values.get("userInterface"):
             user_interface_control = values["userInterface"].control
@@ -1726,12 +1749,12 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
 # =================== Step Requires/Capabilities ===================
 # ==================================================================
 
-STANDARD_ATTRIBUTE_CAPABILITIES: dict[str, Any] = {
+STANDARD_ATTRIBUTE_CAPABILITIES: Dict[str, Any] = {
     "attr.worker.os.family": {"values": {"linux", "windows", "macos"}, "multivalued": False},
     "attr.worker.cpu.arch": {"values": {"x86_64", "arm64"}, "multivalued": False},
 }
 _STANDARD_ATTRIBUTE_CAPABILITIES_NAMES = list(STANDARD_ATTRIBUTE_CAPABILITIES.keys())
-STANDARD_AMOUNT_CAPABILITIES: dict[str, Any] = {
+STANDARD_AMOUNT_CAPABILITIES: Dict[str, Any] = {
     "amount.worker.vcpu": {},
     "amount.worker.memory": {},
     "amount.worker.gpu": {},
@@ -1760,7 +1783,7 @@ class AttributeCapabilityValue(FormatString):
 
 
 if TYPE_CHECKING:
-    AttributeCapabilityList = list[AttributeCapabilityValue]
+    AttributeCapabilityList = List[AttributeCapabilityValue]
 else:
     AttributeCapabilityList = conlist(AttributeCapabilityValue, min_items=1, max_items=50)
 
@@ -1786,7 +1809,7 @@ class AmountRequirement(OpenJDModel_v2023_09):
     max: Optional[Decimal]
 
     @root_validator(pre=True)
-    def validate_concrete_model(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def validate_concrete_model(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # Reuse the AmountRequirementTemplate validation. Because all the template
         # variables have been substituted, it will now run validation it couldn't
         # before.
@@ -1827,7 +1850,7 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
         return v
 
     @validator("min")
-    def _validate_min(cls, v: Optional[Decimal], values: dict[str, Any]) -> Optional[Decimal]:
+    def _validate_min(cls, v: Optional[Decimal], values: Dict[str, Any]) -> Optional[Decimal]:
         if v is None:
             return v
         if v < 0:
@@ -1835,7 +1858,7 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
         return v
 
     @validator("max")
-    def _validate_max(cls, v: Optional[Decimal], values: dict[str, Any]) -> Optional[Decimal]:
+    def _validate_max(cls, v: Optional[Decimal], values: Dict[str, Any]) -> Optional[Decimal]:
         if v is None:
             return v
         if v <= 0:
@@ -1846,7 +1869,7 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
         return v
 
     @root_validator(pre=True)
-    def _validate_has_one_optional(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_has_one_optional(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         if not ("min" in values or "max" in values):
             raise ValueError("At least one of 'min' or 'max' must be defined.")
         return values
@@ -1864,11 +1887,11 @@ class AttributeRequirement(OpenJDModel_v2023_09):
     """
 
     name: str
-    anyOf: Optional[list[str]]
-    allOf: Optional[list[str]]
+    anyOf: Optional[List[str]]
+    allOf: Optional[List[str]]
 
     @root_validator(pre=True)
-    def validate_concrete_model(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def validate_concrete_model(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # Reuse the AttributeRequirementTemplate validation. Because all the template
         # variables have been substituted, it will now run validation it couldn't
         # before.
@@ -1908,7 +1931,7 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
 
     @classmethod
     def _validate_attribute_list(
-        cls, v: AttributeCapabilityList, values: dict[str, Any], is_allof: bool
+        cls, v: AttributeCapabilityList, values: Dict[str, Any], is_allof: bool
     ) -> None:
         capability_name = values["name"].lower()
         standard_capability = STANDARD_ATTRIBUTE_CAPABILITIES.get(capability_name, {})
@@ -1941,7 +1964,7 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
 
     @validator("allOf")
     def _validate_allof(
-        cls, v: Optional[AttributeCapabilityList], values: dict[str, Any]
+        cls, v: Optional[AttributeCapabilityList], values: Dict[str, Any]
     ) -> Optional[AttributeCapabilityList]:
         if v is None:
             return v
@@ -1950,7 +1973,7 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
 
     @validator("anyOf")
     def _validate_anyof(
-        cls, v: Optional[AttributeCapabilityList], values: dict[str, Any]
+        cls, v: Optional[AttributeCapabilityList], values: Dict[str, Any]
     ) -> Optional[AttributeCapabilityList]:
         if v is None:
             return v
@@ -1958,20 +1981,20 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
         return v
 
     @root_validator(pre=True)
-    def _validate_has_one_optional(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_has_one_optional(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         if not ("anyOf" in values or "allOf" in values):
             raise ValueError("At least one of 'anyOf' or 'allOf' must be defined.")
         return values
 
 
 class HostRequirements(OpenJDModel_v2023_09):
-    amounts: Optional[list[AmountRequirement]] = None
-    attributes: Optional[list[AttributeRequirement]] = None
+    amounts: Optional[List[AmountRequirement]] = None
+    attributes: Optional[List[AttributeRequirement]] = None
 
 
 class HostRequirementsTemplate(OpenJDModel_v2023_09):
-    amounts: Optional[list[AmountRequirementTemplate]] = None
-    attributes: Optional[list[AttributeRequirementTemplate]] = None
+    amounts: Optional[List[AmountRequirementTemplate]] = None
+    attributes: Optional[List[AttributeRequirementTemplate]] = None
 
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=HostRequirements)
@@ -1981,8 +2004,8 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
 
     @validator("amounts")
     def _validate_amounts(
-        cls, v: Optional[list[AmountRequirementTemplate]]
-    ) -> Optional[list[AmountRequirementTemplate]]:
+        cls, v: Optional[List[AmountRequirementTemplate]]
+    ) -> Optional[List[AmountRequirementTemplate]]:
         if v is None:
             return v
         if len(v) == 0:
@@ -1991,8 +2014,8 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
 
     @validator("attributes")
     def _validate_attributes(
-        cls, v: Optional[list[AttributeRequirementTemplate]]
-    ) -> Optional[list[AttributeRequirementTemplate]]:
+        cls, v: Optional[List[AttributeRequirementTemplate]]
+    ) -> Optional[List[AttributeRequirementTemplate]]:
         if v is None:
             return v
         if len(v) == 0:
@@ -2000,7 +2023,7 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
         return v
 
     @root_validator
-    def _validate(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         if not ("amounts" in values or "attributes" in values):
             raise ValueError(
                 "Must define at least one of 'amounts' or 'attributes' if defining this property."
@@ -2027,8 +2050,8 @@ class StepDependency(OpenJDModel_v2023_09):
 
 
 if TYPE_CHECKING:
-    StepEnvironmentList = list[Environment]
-    StepDependenciesList = list[StepDependency]
+    StepEnvironmentList = List[Environment]
+    StepDependenciesList = List[StepDependency]
 else:
     StepEnvironmentList = conlist(Environment, min_items=1)
     StepDependenciesList = conlist(StepDependency, min_items=1)
@@ -2097,7 +2120,7 @@ class StepTemplate(OpenJDModel_v2023_09):
         return v
 
     @root_validator
-    def _validate_no_self_dependency(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_no_self_dependency(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # Dependency of the step upon itself is not allowed.
         deps: StepDependenciesList = values.get("dependencies", [])
         if not deps:
@@ -2109,8 +2132,8 @@ class StepTemplate(OpenJDModel_v2023_09):
 
 
 if TYPE_CHECKING:
-    StepTemplateList = list[StepTemplate]
-    JobParameterDefinitionList = list[
+    StepTemplateList = List[StepTemplate]
+    JobParameterDefinitionList = List[
         Union[
             JobIntParameterDefinition,
             JobFloatParameterDefinition,
@@ -2118,7 +2141,7 @@ if TYPE_CHECKING:
             JobPathParameterDefinition,
         ]
     ]
-    JobEnvironmentsList = list[Environment]
+    JobEnvironmentsList = List[Environment]
 else:
     StepTemplateList = conlist(StepTemplate, min_items=1)
     JobParameterDefinitionList = conlist(
@@ -2137,13 +2160,13 @@ else:
     JobEnvironmentsList = conlist(Environment, min_items=1)
 
 
-JobParameters = dict[Identifier, JobParameter]
+JobParameters = Dict[Identifier, JobParameter]
 
 
 # Target model for a JobTemplate when instantiating a job.
 class Job(OpenJDModel_v2023_09):
     name: JobName
-    steps: list[Step]
+    steps: List[Step]
     description: Optional[Description] = None
     parameters: Optional[JobParameters] = None
     jobEnvironments: Optional[JobEnvironmentsList] = None
@@ -2210,19 +2233,19 @@ class JobTemplate(OpenJDModel_v2023_09):
         return v
 
     @root_validator
-    def _validate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_template_variable_references(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         errors = validate_model_template_variable_references(cls, values)
         if errors:
             raise ValidationError(errors, JobTemplate)
         return values
 
     @root_validator
-    def _validate_no_step_dependency_cycles(cls, values: dict[str, Any]) -> dict[str, Any]:
-        depgraph = dict[str, set[str]]()
+    def _validate_no_step_dependency_cycles(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        depgraph = dict()
         steplist = values.get("steps", [])
         for step in steplist:
             if step.dependencies is not None:
-                dependsOn = set[str](dep.dependsOn for dep in step.dependencies)
+                dependsOn = set([dep.dependsOn for dep in step.dependencies])
                 depgraph[step.name] = dependsOn
 
         sorter = TopologicalSorter(depgraph)
@@ -2236,15 +2259,15 @@ class JobTemplate(OpenJDModel_v2023_09):
         return values
 
     @root_validator
-    def _validate_step_deps_exist(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _validate_step_deps_exist(cls, values: Dict[str, Any]) -> Dict[str, Any]:
         # Check that the deps referenced by all steps actually exist
 
         steplist = values.get("steps", [])
         if not steplist:
             return values
 
-        errors = list[ErrorWrapper]()
-        stepnames = set[str](step.name for step in steplist)
+        errors: List[ErrorWrapper] = []
+        stepnames = set([step.name for step in steplist])
         for i, step in enumerate(steplist):
             if step.dependencies is not None:
                 for j, dep in enumerate(step.dependencies):
@@ -2264,8 +2287,8 @@ class JobTemplate(OpenJDModel_v2023_09):
 
     @root_validator
     def _validate_env_names_dont_match_step_env_names(
-        cls, values: dict[str, Any]
-    ) -> dict[str, Any]:
+        cls, values: Dict[str, Any]
+    ) -> Dict[str, Any]:
         # Check that if we have job-level Environments defined that none of the defined Step-level
         # environments have the same name.
         # Names must be unique between Steps & Jobs.
@@ -2280,7 +2303,7 @@ class JobTemplate(OpenJDModel_v2023_09):
 
         job_env_names = set(env.name for env in cast(JobEnvironmentsList, envlist))
 
-        errors = list[ErrorWrapper]()
+        errors: List[ErrorWrapper] = []
         for i, step in enumerate(steplist):
             if step.stepEnvironments is not None:
                 for j, env in enumerate(step.stepEnvironments):

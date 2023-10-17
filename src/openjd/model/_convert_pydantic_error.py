@@ -1,15 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import TypedDict, Union, Type
+from typing import Union, Type, List, Tuple
+
+try:
+    # TypedDict only available in python3.8+
+    from typing import TypedDict
+except ImportError:
+    from typing_extensions import TypedDict
+
 from pydantic import BaseModel
 from inspect import getmodule
 
-# Calling pydantic's ValidationError.errors() returns a list[ErrorDict], but
+# Calling pydantic's ValidationError.errors() returns a List[ErrorDict], but
 # pydantic doesn't export the ErrorDict type publicly. So, we create it here for
 # type checking.
 # Note that we ignore the 'ctx' key since we don't use it.
 # See: https://github.com/pydantic/pydantic/blob/d9c2af3a701ca982945a590de1a1da98b3fb4003/pydantic/error_wrappers.py#L50
-Loc = tuple[Union[int, str], ...]
+Loc = Tuple[Union[int, str], ...]
 
 
 class ErrorDict(TypedDict):
@@ -18,12 +25,12 @@ class ErrorDict(TypedDict):
     type: str
 
 
-def pydantic_validationerrors_to_str(root_model: Type[BaseModel], errors: list[ErrorDict]) -> str:
+def pydantic_validationerrors_to_str(root_model: Type[BaseModel], errors: List[ErrorDict]) -> str:
     """This is our own custom stringification of the Pydantic ValidationError to use
     in place of str(<ValidationError>). Pydantic's default stringification too verbose for
     our purpose, and contains information that we don't want.
     """
-    results = list[str]()
+    results: List[str] = []
     for error in errors:
         results.append(_error_dict_to_str(root_model, error))
     return f"{len(errors)} validation errors for {root_model.__name__}\n" + "\n".join(results)
@@ -62,7 +69,7 @@ def _loc_to_str(root_model: Type[BaseModel], loc: Loc) -> str:
     if loc[-1] == "__root__":
         loc = loc[:-1]
 
-    loc_elements = list[str]()
+    loc_elements: List[str] = []
     for item in loc:
         if isinstance(item, int):
             loc_elements[-1] = f"{loc_elements[-1]}[{item}]"

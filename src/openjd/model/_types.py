@@ -6,7 +6,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type, Dict, Set
 
 from pydantic import BaseModel, Extra
 
@@ -48,7 +48,7 @@ __all__ = (
 if sys.version_info >= (3, 10):
     dataclass_kwargs = {"slots": True, "kw_only": True}
 else:
-    dataclass_kwargs = dict[str, Any]()
+    dataclass_kwargs: Dict[str, Any] = {}
 
 
 class ParameterValueType(str, Enum):
@@ -67,9 +67,9 @@ class ParameterValue:
     value: str
 
 
-TaskParameterSet = dict[str, ParameterValue]
-JobParameterInputValues = dict[str, str]
-JobParameterValues = dict[str, ParameterValue]
+TaskParameterSet = Dict[str, ParameterValue]
+JobParameterInputValues = Dict[str, str]
+JobParameterValues = Dict[str, ParameterValue]
 
 
 class SchemaVersion(str, Enum):
@@ -123,7 +123,7 @@ class DefinesTemplateVariables:
             "MyParameter" for its name, it produces the variable "Param.MyParameter". A special
             value "__key__", not currently used by any model, indicates the name should come
             from the dictionary key above the model object.
-        inject (set[str]): This adds specific names not generated from model fields, like the
+        inject (Set[str]): This adds specific names not generated from model fields, like the
             "Session.WorkingDirectory" name, into the scope of the model.
             A "|" prefix discards the parent scope prefix.
             The given symbols are always injected into the current variable scope.
@@ -133,9 +133,9 @@ class DefinesTemplateVariables:
         self,
         *,
         symbol_prefix: str = "",
-        defines: set[TemplateVariableDef] = set(),
+        defines: Set[TemplateVariableDef] = set(),
         field: str = "",
-        inject: set[str] = set(),
+        inject: Set[str] = set(),
     ):
         self.symbol_prefix = symbol_prefix
         self.defines = defines
@@ -161,7 +161,7 @@ class JobCreationMetadata:
     treatment the model needs during translation from Template to Job.
     """
 
-    resolve_fields: set[str] = field(default_factory=set)
+    resolve_fields: Set[str] = field(default_factory=set)
     """The names of fields in the model that may contain FormatStrings, and
     if it does then those FormatStrings must be resolved into strings when
     creating a job.
@@ -184,12 +184,12 @@ class JobCreationMetadata:
             of the Task parameter is defined (list or expression)
     """
 
-    exclude_fields: set[str] = field(default_factory=set)
+    exclude_fields: Set[str] = field(default_factory=set)
     """A set of fields that are ignored when processing the model. The model that is created will
     not be provided values, or kwargs even, for these fields.
     """
 
-    adds_fields: Optional[Callable[[str, "OpenJDModel", SymbolTable], dict[str, Any]]] = field(
+    adds_fields: Optional[Callable[[str, "OpenJDModel", SymbolTable], Dict[str, Any]]] = field(
         default=None
     )
     """This property defines a callable that uses the instantiation context (i.e. SymbolTable) and
@@ -201,13 +201,13 @@ class JobCreationMetadata:
             value of the parameter from the SymbolTable into the Job.
     """
 
-    reshape_field_to_dict: dict[str, str] = field(default_factory=dict)
+    reshape_field_to_dict: Dict[str, str] = field(default_factory=dict)
     """This instructs the instantation code to reshape the given list fields into dict fields.
         key: name of the field to reshape.
         value: field name within the list item to use as the dictionary key.
     """
 
-    rename_fields: dict[str, str] = field(default_factory=dict)
+    rename_fields: Dict[str, str] = field(default_factory=dict)
     """This instructs the instantiation code to rename the given fields.
     """
 
@@ -243,7 +243,7 @@ class OpenJDModel(BaseModel):
     #   Template variable source fields:
     #       "<fieldname>" provides the field's exported variables.
     #       "__self__" provides the variables exported by this model via `__template_variable_definitions`.
-    _template_variable_sources: ClassVar[dict[str, set[str]]] = {}
+    _template_variable_sources: ClassVar[Dict[str, Set[str]]] = {}
 
     # ----
     # Metadata used in the creation of a Job from a Job Template

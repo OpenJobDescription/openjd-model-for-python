@@ -2,18 +2,18 @@
 
 import pytest
 import string
-from typing import Union
+from typing import Union, List
 
 from openjd.model import validate_amount_capability_name, validate_attribute_capability_name
 from openjd.model.v2023_09 import FormatString
 
-TEST_BUILTIN_AMOUNTS: list[str] = [
+TEST_BUILTIN_AMOUNTS: List[str] = [
     "amount.worker.foo",
     "amount.job.foo",
     "amount.step.foo",
     "amount.task.foo",
 ]
-TEST_BUILTIN_ATTRIBUTES: list[str] = [
+TEST_BUILTIN_ATTRIBUTES: List[str] = [
     "attr.worker.foo",
     "attr.job.foo",
     "attr.step.foo",

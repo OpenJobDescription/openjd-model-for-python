@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import AbstractSet as _AbstractSet
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Dict
 
 __all__ = ["SymbolTable"]
 
@@ -13,13 +13,13 @@ class SymbolTable:
     Class used to represent the available symbols that can be used for interpolation in the current context.
     """
 
-    _table: dict[str, Any]
+    _table: Dict[str, Any]
 
-    def __init__(self, *, source: Optional[Union[SymbolTable, dict[str, Any]]] = None):
+    def __init__(self, *, source: Optional[Union[SymbolTable, Dict[str, Any]]] = None):
         """Initialize the SymbolTable
 
         Args:
-            source (Optional[Union[SymbolTable, dict[str, Any]]], optional): If provided then this
+            source (Optional[Union[SymbolTable, Dict[str, Any]]], optional): If provided then this
                 gets initialized with the contents of the given source. Defaults to None.
         """
         self._table = dict()
@@ -50,7 +50,7 @@ class SymbolTable:
         """
         return self._table.keys()
 
-    def union(self, *symtabs: Union[SymbolTable, dict[str, Any]]) -> SymbolTable:
+    def union(self, *symtabs: Union[SymbolTable, Dict[str, Any]]) -> SymbolTable:
         """Create a new SymbolTable that is the union of this SymbolTable with
         the given ones.
 

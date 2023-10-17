@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional, Union, cast
+from typing import Optional, Union, cast, Dict, List
 
 import pytest
 from pydantic import PositiveInt, ValidationError
@@ -103,8 +103,8 @@ class TestInternalCreateJobNoMetadata:
             f: str
 
         class Model(BaseModelForTesting):
-            i: list[int]
-            i2: list[NonModelType]
+            i: List[int]
+            i2: List[NonModelType]
 
         model = Model(i=[1, 2, 3], i2=[NonModelType("one"), NonModelType("two")])
         symtab = SymbolTable()
@@ -127,7 +127,7 @@ class TestInternalCreateJobNoMetadata:
             f: str
 
         class Model(BaseModelForTesting):
-            ii: list[Inner]
+            ii: List[Inner]
 
         model = Model(ii=[{"f": "one"}, {"f": "two"}])
         symtab = SymbolTable()
@@ -148,8 +148,8 @@ class TestInternalCreateJobNoMetadata:
             f: str
 
         class Model(BaseModelForTesting):
-            d1: dict[str, int]
-            d2: dict[str, NonModelType]
+            d1: Dict[str, int]
+            d2: Dict[str, NonModelType]
 
         model = Model(
             d1={"k1": 1, "k2": 2},
@@ -176,7 +176,7 @@ class TestInternalCreateJobNoMetadata:
             f: str
 
         class Model(BaseModelForTesting):
-            d1: dict[str, Inner]
+            d1: Dict[str, Inner]
 
         model = Model(
             d1={"k1": {"f": "one"}, "k2": {"f": "two"}},
@@ -230,7 +230,7 @@ class TestInternalCreateJobResolvesFormatStrings:
         f2 = FormatString("{{ Param.V2 }}")
 
         class Model(BaseModelForTesting):
-            f1: list[FormatString]
+            f1: List[FormatString]
             f2: FormatString
 
             _job_creation_metadata = JobCreationMetadata(resolve_fields={"f1"})
@@ -254,7 +254,7 @@ class TestInternalCreateJobResolvesFormatStrings:
         f2 = FormatString("{{ Param.V2 }}")
 
         class Model(BaseModelForTesting):
-            f1: list[Union[int, FormatString]]
+            f1: List[Union[int, FormatString]]
             f2: FormatString
 
             _job_creation_metadata = JobCreationMetadata(resolve_fields={"f1"})
@@ -388,7 +388,7 @@ class TestInternalCreateJobReshapes:
             f: str
 
         class TargetModel(BaseModelForTesting):
-            inner: dict[str, InnerModelTarget]
+            inner: Dict[str, InnerModelTarget]
 
         class InnerModel(BaseModelForTesting):
             name: str
@@ -398,7 +398,7 @@ class TestInternalCreateJobReshapes:
             )
 
         class Model(BaseModelForTesting):
-            inner: list[InnerModel]
+            inner: List[InnerModel]
             _job_creation_metadata = JobCreationMetadata(
                 create_as=JobCreateAsMetadata(model=TargetModel),
                 reshape_field_to_dict={"inner": "name"},
@@ -540,7 +540,7 @@ class TestInternalCreateJobExceptions:
             )
 
         class Model(BaseModelForTesting):
-            ii: list[InnerModel]
+            ii: List[InnerModel]
 
         model = Model(ii=[{"vv": -10, "ff": "{{ Param.V }}"}, {"vv": -5, "ff": "{{ Param.V }}"}])
         symtab = SymbolTable(
@@ -571,7 +571,7 @@ class TestInternalCreateJobExceptions:
             ff: FormatString
 
         class TargetModel(BaseModelForTesting):
-            ii: dict[str, TargetInner]
+            ii: Dict[str, TargetInner]
 
         class InnerModel(BaseModelForTesting):
             name: str
@@ -584,7 +584,7 @@ class TestInternalCreateJobExceptions:
             )
 
         class Model(BaseModelForTesting):
-            ii: list[InnerModel]
+            ii: List[InnerModel]
             _job_creation_metadata = JobCreationMetadata(
                 create_as=JobCreateAsMetadata(model=TargetModel),
                 reshape_field_to_dict={"inner": "name"},
@@ -631,7 +631,7 @@ class TestInternalCreateJobExceptions:
             )
 
         class Model(BaseModelForTesting):
-            dd: dict[str, InnerModel]
+            dd: Dict[str, InnerModel]
 
         model = Model(
             dd={"foo": {"vv": -10, "ff": "{{ Param.V }}"}, "bar": {"vv": -5, "ff": "{{ Param.V }}"}}

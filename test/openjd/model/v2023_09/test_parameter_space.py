@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any
+from typing import Any, Dict
 
 import pytest
 from pydantic import ValidationError
@@ -35,7 +35,7 @@ class TestIntTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description IntTaskParameterDefinition
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -76,7 +76,7 @@ class TestIntTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description TaskParameterDecl.
         # - Constraint tests
         # - extra field test
@@ -116,7 +116,7 @@ class TestFloatTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description TestFloatTaskParameterDefinition
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -155,7 +155,7 @@ class TestFloatTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description TaskParameterDecl.
         # - Constraint tests
         # - extra field test
@@ -182,7 +182,7 @@ class TestStringTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description StringTaskParameterDefinition
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -217,7 +217,7 @@ class TestStringTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description TaskParameterDecl.
         # - Constraint tests
         # - extra field test
@@ -242,7 +242,7 @@ class TestPathTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description PathTaskParameterDefinition
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -277,7 +277,7 @@ class TestPathTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description TaskParameterDecl.
         # - Constraint tests
         # - extra field test
@@ -331,7 +331,7 @@ class TestRangeExpressionTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, str]) -> None:
+    def test_parse_success(self, data: Dict[str, str]) -> None:
         # Parsing tests of valid Open Job Description RangeExpression
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -362,7 +362,7 @@ class TestRangeExpressionTaskParameterDefinition:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any]) -> None:
+    def test_parse_fails(self, data: Dict[str, Any]) -> None:
         # Failure case testing for Open Job Description TaskParameterDecl.
         # - Constraint tests
         # - extra field test
@@ -415,7 +415,7 @@ class TestStepParameterSpaceDefinition:
             ),
         ),
     )
-    def test_parse_success(self, data: dict[str, Any]) -> None:
+    def test_parse_success(self, data: Dict[str, Any]) -> None:
         # Parsing tests of valid Open Job Description StepParameterSpaceDefinition
         # It is sufficient to check that parsing the input does not
         # raise an exception. We trust the Pydantic package's testing
@@ -534,7 +534,7 @@ class TestStepParameterSpaceDefinition:
             ),
         ),
     )
-    def test_parse_fails(self, data: dict[str, Any], expected_num_errors: int) -> None:
+    def test_parse_fails(self, data: Dict[str, Any], expected_num_errors: int) -> None:
         # Failure case testing for Open Job Description StepParameterSpaceDefinition.
         # - Constraint tests
         # - extra field test

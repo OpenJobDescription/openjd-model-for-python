@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Iterator, Sized
+from collections.abc import Iterator, Sized
 from dataclasses import dataclass, field
 from functools import reduce
 from operator import mul
-from typing import AbstractSet, Optional, Union
+from typing import AbstractSet, Optional, Union, Dict, List, Tuple, Iterable
 
 from ._internal import (
     CombinationExpressionAssociationNode,
@@ -65,13 +65,13 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
         None
     """
 
-    _parameters: dict[str, TaskParameter]
+    _parameters: Dict[str, TaskParameter]
     _expr_tree: Node
     _parsedtree: CombinationExpressionNode
 
     def __init__(self, *, space: StepParameterSpace):
         if space.combination is None:
-            # space.taskParameterDefinitions is a dict[str,TaskParameter]
+            # space.taskParameterDefinitions is a Dict[str,TaskParameter]
             combination = "*".join(name for name in space.taskParameterDefinitions)
         else:
             combination = space.combination
@@ -104,7 +104,7 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
                 return self
 
             def __next__(self) -> TaskParameterSet:
-                result: TaskParameterSet = TaskParameterSet()
+                result: TaskParameterSet = {}
                 self._root.next(result)
                 return result
 
@@ -124,7 +124,7 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
             index (int): Index for a task parameter set to fetch.
 
         Returns:
-            dict[str, Union[int, float, str]]: Values of every task parameter. Dictionary key
+            Dict[str, Union[int, float, str]]: Values of every task parameter. Dictionary key
                 is the parameter  name.
         """
         return self._expr_tree[index]
@@ -208,13 +208,13 @@ class ProductNodeIter(NodeIterator):
         _first_value: True if and only if we have not yet evaluated the first value of the iterator.
     """
 
-    _children: tuple[NodeIterator, ...]
+    _children: Tuple[NodeIterator, ...]
     _prev_result: TaskParameterSet
     _first_value: bool
 
-    def __init__(self, children: tuple[Node, ...]):
+    def __init__(self, children: Tuple[Node, ...]):
         self._children = tuple(child.iter() for child in children)
-        self._prev_result = TaskParameterSet()
+        self._prev_result: TaskParameterSet = {}
         self._first_value = True
 
     def reset_iter(self) -> None:
@@ -278,7 +278,7 @@ class ProductNodeIter(NodeIterator):
 
 @dataclass
 class ProductNode(Node):
-    children: tuple[Node, ...]
+    children: Tuple[Node, ...]
     _len: Optional[int] = field(default=None, init=False, repr=False, compare=False)
 
     def __len__(self) -> int:
@@ -329,9 +329,9 @@ class AssociationNodeIter(NodeIterator):
         _children: Iterators for the child nodes of this node in the expression tree.
     """
 
-    _children: tuple[NodeIterator, ...]
+    _children: Tuple[NodeIterator, ...]
 
-    def __init__(self, children: tuple[Node, ...]):
+    def __init__(self, children: Tuple[Node, ...]):
         self._children = tuple(child.iter() for child in children)
 
     def reset_iter(self) -> None:
@@ -346,7 +346,7 @@ class AssociationNodeIter(NodeIterator):
 
 @dataclass
 class AssociationNode(Node):
-    children: tuple[Node, ...]
+    children: Tuple[Node, ...]
     _len: Optional[int] = field(default=None, init=False, repr=False, compare=False)
 
     def __len__(self) -> int:
@@ -355,7 +355,7 @@ class AssociationNode(Node):
         return self._len
 
     def __getitem__(self, index: int) -> TaskParameterSet:
-        result = TaskParameterSet()
+        result: TaskParameterSet = {}
         for child in self.children:
             result.update(child[index])
         return result
@@ -392,7 +392,7 @@ class RangeListIdentifierNodeIterator(NodeIterator):
 class RangeListIdentifierNode(Node):
     name: str
     type: ParameterValueType
-    range: list[str]
+    range: List[str]
     _len: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):

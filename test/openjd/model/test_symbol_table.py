@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any
+from typing import Any, Dict, List
 
 import pytest
 
@@ -41,7 +41,7 @@ class TestSymbolTable:
 
     def test_copy_construct_from_badtype(self) -> None:
         # GIVEN
-        given: list[str] = list()
+        given: List[str] = list()
 
         # THEN
         with pytest.raises(TypeError):
@@ -84,7 +84,7 @@ class TestSymbolTable:
         symtab1 = SymbolTable()
         symtab1["Test.Symtab1"] = "One"
         symtab1["Overlap1"] = 1
-        symtab2: dict[str, Any] = dict()
+        symtab2: Dict[str, Any] = dict()
         symtab2["Test.Symtab2"] = "Two"
         symtab2["Overlap1"] = 2
         symtab2["Overlap2"] = 2
@@ -106,7 +106,7 @@ class TestSymbolTable:
         symtab1 = SymbolTable()
         symtab1["Test.Symtab1"] = "One"
         symtab1["Overlap1"] = 1
-        symtab2: list[str] = list()
+        symtab2: List[str] = list()
 
         # THEN
         with pytest.raises(TypeError):
