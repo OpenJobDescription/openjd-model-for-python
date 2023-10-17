@@ -7,7 +7,7 @@ from collections.abc import Iterator, Sized
 from dataclasses import dataclass, field
 from functools import reduce
 from operator import mul
-from typing import AbstractSet, Optional, Union, Dict, List, Tuple, Iterable
+from typing import AbstractSet, Optional, Union, Iterable
 
 from ._internal import (
     CombinationExpressionAssociationNode,
@@ -65,13 +65,13 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
         None
     """
 
-    _parameters: Dict[str, TaskParameter]
+    _parameters: dict[str, TaskParameter]
     _expr_tree: Node
     _parsedtree: CombinationExpressionNode
 
     def __init__(self, *, space: StepParameterSpace):
         if space.combination is None:
-            # space.taskParameterDefinitions is a Dict[str,TaskParameter]
+            # space.taskParameterDefinitions is a dict[str,TaskParameter]
             combination = "*".join(name for name in space.taskParameterDefinitions)
         else:
             combination = space.combination
@@ -124,7 +124,7 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
             index (int): Index for a task parameter set to fetch.
 
         Returns:
-            Dict[str, Union[int, float, str]]: Values of every task parameter. Dictionary key
+            dict[str, Union[int, float, str]]: Values of every task parameter. Dictionary key
                 is the parameter  name.
         """
         return self._expr_tree[index]
@@ -208,11 +208,11 @@ class ProductNodeIter(NodeIterator):
         _first_value: True if and only if we have not yet evaluated the first value of the iterator.
     """
 
-    _children: Tuple[NodeIterator, ...]
+    _children: tuple[NodeIterator, ...]
     _prev_result: TaskParameterSet
     _first_value: bool
 
-    def __init__(self, children: Tuple[Node, ...]):
+    def __init__(self, children: tuple[Node, ...]):
         self._children = tuple(child.iter() for child in children)
         self._prev_result: TaskParameterSet = {}
         self._first_value = True
@@ -278,7 +278,7 @@ class ProductNodeIter(NodeIterator):
 
 @dataclass
 class ProductNode(Node):
-    children: Tuple[Node, ...]
+    children: tuple[Node, ...]
     _len: Optional[int] = field(default=None, init=False, repr=False, compare=False)
 
     def __len__(self) -> int:
@@ -329,9 +329,9 @@ class AssociationNodeIter(NodeIterator):
         _children: Iterators for the child nodes of this node in the expression tree.
     """
 
-    _children: Tuple[NodeIterator, ...]
+    _children: tuple[NodeIterator, ...]
 
-    def __init__(self, children: Tuple[Node, ...]):
+    def __init__(self, children: tuple[Node, ...]):
         self._children = tuple(child.iter() for child in children)
 
     def reset_iter(self) -> None:
@@ -346,7 +346,7 @@ class AssociationNodeIter(NodeIterator):
 
 @dataclass
 class AssociationNode(Node):
-    children: Tuple[Node, ...]
+    children: tuple[Node, ...]
     _len: Optional[int] = field(default=None, init=False, repr=False, compare=False)
 
     def __len__(self) -> int:
@@ -392,7 +392,7 @@ class RangeListIdentifierNodeIterator(NodeIterator):
 class RangeListIdentifierNode(Node):
     name: str
     type: ParameterValueType
-    range: List[str]
+    range: list[str]
     _len: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):

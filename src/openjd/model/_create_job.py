@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import TYPE_CHECKING, cast, Set, List
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, cast
 
 from pydantic import ValidationError
 
@@ -31,8 +33,8 @@ __all__ = ("preprocess_job_parameters",)
 # =======================================================================
 
 
-def _collect_available_parameter_names(job_template: JobTemplate) -> Set[str]:
-    # job_template.parameterDefinitions is a List[JobParameterDefinitionList]
+def _collect_available_parameter_names(job_template: JobTemplate) -> set[str]:
+    # job_template.parameterDefinitions is a list[JobParameterDefinitionList]
     return (
         set(param.name for param in job_template.parameterDefinitions)
         if job_template.parameterDefinitions
@@ -42,16 +44,16 @@ def _collect_available_parameter_names(job_template: JobTemplate) -> Set[str]:
 
 def _collect_extra_job_parameter_names(
     job_template: JobTemplate, job_parameter_values: JobParameterInputValues
-) -> Set[str]:
+) -> set[str]:
     # Verify that job parameters are provided if the template requires them
-    available_parameters: Set[str] = _collect_available_parameter_names(job_template)
+    available_parameters: set[str] = _collect_available_parameter_names(job_template)
     return set(job_parameter_values).difference(available_parameters)
 
 
 def _collect_missing_job_parameter_names(
     job_template: JobTemplate, job_parameter_values: JobParameterValues
-) -> Set[str]:
-    available_parameters: Set[str] = _collect_available_parameter_names(job_template)
+) -> set[str]:
+    available_parameters: set[str] = _collect_available_parameter_names(job_template)
     return available_parameters.difference(set(job_parameter_values.keys()))
 
 
@@ -85,7 +87,7 @@ def _check_2023_09(
     # For the type checker
     assert job_template.parameterDefinitions is not None
 
-    errors: List[str] = []
+    errors: list[str] = []
     # Check values
     for param in job_template.parameterDefinitions:
         if param.name in job_parameter_values:
@@ -129,7 +131,7 @@ def preprocess_job_parameters(
         raise NotImplementedError(f"Not implemented for schema version {job_template.version}")
 
     return_value: JobParameterValues = dict()
-    errors: List[str] = []
+    errors: list[str] = []
 
     extra_defined_parameters = _collect_extra_job_parameter_names(
         job_template, job_parameter_values
@@ -224,7 +226,7 @@ def create_job(*, job_template: JobTemplate, job_parameter_values: JobParameterV
     except ValidationError as exc:
         raise DecodeValidationError(
             pydantic_validationerrors_to_str(
-                job_template.__class__, cast(List[ErrorDict], exc.errors())
+                job_template.__class__, cast(list[ErrorDict], exc.errors())
             )
         )
 

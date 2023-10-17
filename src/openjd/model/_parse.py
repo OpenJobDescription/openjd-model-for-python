@@ -1,9 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from __future__ import annotations
+
 import json
 from dataclasses import is_dataclass
 from enum import Enum
-from typing import Any, ClassVar, Type, TypeVar, cast, Dict, List
+from typing import Any, ClassVar, Type, TypeVar, cast
 
 import yaml
 from pydantic import BaseModel
@@ -46,11 +48,11 @@ def parse_model(*, model: Type[T], obj: Any) -> T:
         return _parse_model(model=model, obj=obj)
     except PydanticValidationError as exc:
         raise DecodeValidationError(
-            pydantic_validationerrors_to_str(model, cast(List[ErrorDict], exc.errors()))
+            pydantic_validationerrors_to_str(model, cast(list[ErrorDict], exc.errors()))
         )
 
 
-def document_string_to_object(*, document: str, document_type: DocumentType) -> Dict[str, Any]:
+def document_string_to_object(*, document: str, document_type: DocumentType) -> dict[str, Any]:
     """
     Converts the YAML or JSON encoded document into a python dictionary.
 
@@ -58,7 +60,7 @@ def document_string_to_object(*, document: str, document_type: DocumentType) -> 
         document (str): A string containing a JSON or YAML encoded document.
 
     Returns:
-        Dict[str, Any]: The decoded document.
+        dict[str, Any]: The decoded document.
 
     Raises:
         DecodeValidationError
@@ -77,12 +79,12 @@ def document_string_to_object(*, document: str, document_type: DocumentType) -> 
         )
 
 
-def decode_template(*, template: Dict[str, Any]) -> JobTemplate:
+def decode_template(*, template: dict[str, Any]) -> JobTemplate:
     """Given a dictionary containing a Job Template, this will decode the template, run validation checks on it,
     and then return the decoded template.
 
     Args:
-        template (Dict[str, Any]): A Job Template as a dictionary object.
+        template (dict[str, Any]): A Job Template as a dictionary object.
 
     Returns:
         JobTemplate: The decoded job template.

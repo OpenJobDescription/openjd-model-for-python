@@ -6,7 +6,6 @@ from bisect import bisect
 from collections.abc import Iterator, Sized
 from functools import total_ordering
 from itertools import chain
-from typing import Tuple, List
 
 from .._errors import ExpressionError, TokenError
 from .._tokenstream import Token, TokenStream, TokenType
@@ -17,11 +16,11 @@ class IntRangeExpression(Sized):
 
     _start: int
     _end: int
-    _ranges: List[IntRange]
+    _ranges: list[IntRange]
     _length: int
-    _range_length_indicies: List[int]
+    _range_length_indicies: list[int]
 
-    def __init__(self, ranges: List[IntRange]):
+    def __init__(self, ranges: list[IntRange]):
         self._ranges = sorted(ranges)
         self._start = self.ranges[0].start
         self._end = self.ranges[-1].end
@@ -83,7 +82,7 @@ class IntRangeExpression(Sized):
         return self._end
 
     @property
-    def ranges(self) -> List[IntRange]:
+    def ranges(self) -> list[IntRange]:
         """read-only property"""
         return self._ranges.copy()
 
@@ -250,7 +249,7 @@ class Parser:
 
         return result
 
-    def _integer(self) -> Tuple[str, PosIntToken]:
+    def _integer(self) -> tuple[str, PosIntToken]:
         """Matches one number (integer) within a range expression
 
         Grammar:
@@ -352,7 +351,7 @@ class Parser:
             IntRangeExpression: The full range expression parsed
         """
         range_ = self._range()
-        ranges: List[IntRange] = [range_]
+        ranges: list[IntRange] = [range_]
         try:
             while isinstance(self._tokens.lookahead(0), CommaToken):
                 self._tokens.next()

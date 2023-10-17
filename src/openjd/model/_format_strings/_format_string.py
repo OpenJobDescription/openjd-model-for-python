@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from numbers import Real
-from typing import TYPE_CHECKING, Optional, Union, List
+from typing import TYPE_CHECKING, Optional, Union
 
 from .._errors import ExpressionError, TokenError
 from .._symbol_table import SymbolTable
@@ -59,7 +61,7 @@ class FormatString(DynamicConstrainedStr):
         FormatStringError: if the original string is nonvalid.
         """
         # Note: str is constructed in __new__, so don't call super __init__
-        self._processed_list: List[Union[str, ExpressionInfo]] = self._preprocess()
+        self._processed_list: list[Union[str, ExpressionInfo]] = self._preprocess()
 
     @property
     def original_value(self) -> str:
@@ -72,11 +74,11 @@ class FormatString(DynamicConstrainedStr):
         return self
 
     @property
-    def expressions(self) -> List[ExpressionInfo]:
+    def expressions(self) -> list[ExpressionInfo]:
         """
         Returns
         -------
-        expressions: List[ExpressionInfo]
+        expressions: list[ExpressionInfo]
             A list of all interpolation expressions in this interpolated string.
         """
         return [expr for expr in self._processed_list if isinstance(expr, ExpressionInfo)]
@@ -105,7 +107,7 @@ class FormatString(DynamicConstrainedStr):
         FormatStringError: if it is impossible to resolve
         all interpolation expressions with a given symbol table.
         """
-        resolved_list: List[str] = []
+        resolved_list: list[str] = []
         for element in self._processed_list:
             assert isinstance(element, (ExpressionInfo, str))
             if isinstance(element, str):
@@ -128,7 +130,7 @@ class FormatString(DynamicConstrainedStr):
 
         return "".join(resolved_list)
 
-    def _preprocess(self) -> List[Union[str, ExpressionInfo]]:
+    def _preprocess(self) -> list[Union[str, ExpressionInfo]]:
         """
         Scans through the original string to find all interpolation expressions inside of {{ }}.
         Also, validates the content of each interpolation expression inside of {{ }}.
@@ -146,14 +148,14 @@ class FormatString(DynamicConstrainedStr):
 
         Returns
         -------
-        preprocessed_list: List[Union[str, ExpressionInfo]]
+        preprocessed_list: list[Union[str, ExpressionInfo]]
             A list, where each element is either
                 - a string that doesn't contain interpolation expression {{ }}, or
                 - an instance of ExpressionInfo
             For example, for original string 'a {{ B.C }} d {{ E.f }}' the list will be
             ['a ', ExpressionInfo({{ B.C }}), ' d ', ExpressionInfo({{ E.f }})]
         """
-        result_list: List[Union[str, ExpressionInfo]] = []
+        result_list: list[Union[str, ExpressionInfo]] = []
 
         opening = "{{"
         closing = "}}"

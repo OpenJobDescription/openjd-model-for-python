@@ -1,9 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from __future__ import annotations
+
 __all__ = ["validate_model_template_variable_references"]
 
 from collections import defaultdict
-from typing import Any, cast, Dict, List
+from typing import Any, cast
 
 from pydantic.error_wrappers import ErrorWrapper
 
@@ -23,8 +25,8 @@ class ScopedSymtabs(defaultdict):
 
 
 def validate_model_template_variable_references(
-    cls: OpenJDModel, values: Dict[str, Any]
-) -> List[ErrorWrapper]:
+    cls: OpenJDModel, values: dict[str, Any]
+) -> list[ErrorWrapper]:
     """Validates the template variable references in a model object, based on the model metadata:
     _template_variable_scope
     _template_variable_definitions and
@@ -42,12 +44,12 @@ def validate_model_template_variable_references(
 
 def _validate_model_template_variable_references(
     cls: OpenJDModel,
-    values: Dict[str, Any],
+    values: dict[str, Any],
     current_scope: ResolutionScope,
     symbol_prefix: str,
     symbols: ScopedSymtabs,
     loc: tuple,
-) -> List[ErrorWrapper]:
+) -> list[ErrorWrapper]:
     """Inner implementation of validate_model_template_variable_references().
 
     Arguments:
@@ -58,7 +60,7 @@ def _validate_model_template_variable_references(
       symbols - The variable symbols that have been defined in each reference scope.
       loc - The path of fields taken from the root of the model to the current recursive level
     """
-    errors: List[ErrorWrapper] = []
+    errors: list[ErrorWrapper] = []
 
     # Update scope if the model defines a scope for itself and all children
     if cls._template_variable_scope is not None:
@@ -108,11 +110,11 @@ def _validate_model_template_variable_references(
 
 def _collect_model_template_variables(  # noqa: C901  (suppress: too complex)
     cls: OpenJDModel,
-    values: Dict[str, Any],
+    values: dict[str, Any],
     current_scope: ResolutionScope,
     symbol_prefix: str,
     dict_key: str = "",
-) -> Dict[str, ScopedSymtabs]:
+) -> dict[str, ScopedSymtabs]:
     """Collects the names of variables that each field of this model object provides.
 
     The return value is a dictionary with a set of symbols for each field,
@@ -121,7 +123,7 @@ def _collect_model_template_variables(  # noqa: C901  (suppress: too complex)
 
     defs = cls._template_variable_definitions
 
-    symbols: Dict[str, ScopedSymtabs] = {"__self__": ScopedSymtabs()}
+    symbols: dict[str, ScopedSymtabs] = {"__self__": ScopedSymtabs()}
 
     def add_symbol(into: ScopedSymtabs, scope: ResolutionScope, symbol_name: str) -> None:
         if scope == ResolutionScope.TEMPLATE:
@@ -208,12 +210,12 @@ def _collect_model_template_variables(  # noqa: C901  (suppress: too complex)
 
 def _validate_field_template_variable_references(  # noqa: C901  (suppress: too complex)
     value: Any, current_scope: ResolutionScope, symbol_prefix: str, symbols: ScopedSymtabs, loc: Any
-) -> List[ErrorWrapper]:
+) -> list[ErrorWrapper]:
     """Recursively validates all the template variable references of a model, based on its
     type annotation metadata. Returns the set of symbols exported by the object
     """
 
-    errors: List[ErrorWrapper] = []
+    errors: list[ErrorWrapper] = []
     if isinstance(value, list):
         for i, item in enumerate(value):
             errors.extend(

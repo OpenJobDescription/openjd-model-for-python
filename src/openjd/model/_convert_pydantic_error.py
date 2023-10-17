@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Union, Type, List, Tuple
+from __future__ import annotations
+
+from typing import Union, Type, Tuple
 
 try:
     # TypedDict only available in python3.8+
@@ -11,7 +13,7 @@ except ImportError:
 from pydantic import BaseModel
 from inspect import getmodule
 
-# Calling pydantic's ValidationError.errors() returns a List[ErrorDict], but
+# Calling pydantic's ValidationError.errors() returns a list[ErrorDict], but
 # pydantic doesn't export the ErrorDict type publicly. So, we create it here for
 # type checking.
 # Note that we ignore the 'ctx' key since we don't use it.
@@ -25,12 +27,12 @@ class ErrorDict(TypedDict):
     type: str
 
 
-def pydantic_validationerrors_to_str(root_model: Type[BaseModel], errors: List[ErrorDict]) -> str:
+def pydantic_validationerrors_to_str(root_model: Type[BaseModel], errors: list[ErrorDict]) -> str:
     """This is our own custom stringification of the Pydantic ValidationError to use
     in place of str(<ValidationError>). Pydantic's default stringification too verbose for
     our purpose, and contains information that we don't want.
     """
-    results: List[str] = []
+    results: list[str] = []
     for error in errors:
         results.append(_error_dict_to_str(root_model, error))
     return f"{len(errors)} validation errors for {root_model.__name__}\n" + "\n".join(results)
@@ -69,7 +71,7 @@ def _loc_to_str(root_model: Type[BaseModel], loc: Loc) -> str:
     if loc[-1] == "__root__":
         loc = loc[:-1]
 
-    loc_elements: List[str] = []
+    loc_elements: list[str] = []
     for item in loc:
         if isinstance(item, int):
             loc_elements[-1] = f"{loc_elements[-1]}[{item}]"

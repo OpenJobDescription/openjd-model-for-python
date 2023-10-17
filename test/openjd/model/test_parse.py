@@ -1,7 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from __future__ import annotations
+
 import json
-from typing import Any, Type, Dict
+from typing import Any, Type
 
 import pytest
 import yaml
@@ -28,7 +30,7 @@ class TestDocStringToObject:
             ),
         ],
     )
-    def test_success(self, document: str, doctype: DocumentType, expected: Dict[str, Any]) -> None:
+    def test_success(self, document: str, doctype: DocumentType, expected: dict[str, Any]) -> None:
         # WHEN
         result = document_string_to_object(document=document, document_type=doctype)
 
@@ -68,7 +70,7 @@ class TestDecodeTemplate:
             pytest.param({"specificationVersion": "badvalue"}, id="unknown version"),
         ],
     )
-    def test_fail_cases(self, template: Dict[str, Any]) -> None:
+    def test_fail_cases(self, template: dict[str, Any]) -> None:
         # THEN
         with pytest.raises(DecodeValidationError):
             decode_template(template=template)
@@ -89,7 +91,7 @@ class TestDecodeTemplate:
             ),
         ],
     )
-    def test_success(self, template: Dict[str, Any], expected_class: Type[OpenJDModel]) -> None:
+    def test_success(self, template: dict[str, Any], expected_class: Type[OpenJDModel]) -> None:
         # WHEN
         result = decode_template(template=template)
 

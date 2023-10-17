@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any, Dict
+from __future__ import annotations
+
+from typing import Any
 import string
 
 import pytest
@@ -114,7 +116,7 @@ class TestJobTemplateName:
         "data",
         (pytest.param({"name": "{{ Job.Parameter.Foo "}, id="bad format string"),),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -158,7 +160,7 @@ class TestJobName:
             pytest.param({"name": "\u009F"}, id="9f disallowed"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -202,7 +204,7 @@ class TestStepName:
             pytest.param({"name": "\u009F"}, id="9f disallowed"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -246,7 +248,7 @@ class TestEnvironmentName:
             pytest.param({"name": "\u009F"}, id="9f disallowed"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -310,7 +312,7 @@ class TestEnvironmentVariableNameString:
             )
         ],
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -346,7 +348,7 @@ class TestEnvironmentVariableValueString:
             pytest.param({"value": "a" * 2049}, id="too long"),
         ],
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -409,7 +411,7 @@ class TestIdentifier:
             )
         ],
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -455,7 +457,7 @@ class TestDescription:
             pytest.param({"desc": "a\n\u0000"}, id="disallowed after newline"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -491,7 +493,7 @@ class TestParameterStringValue:
             pytest.param({"str": "a" * 1025}, id="too long"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -537,7 +539,7 @@ class TestArgString:
             pytest.param({"arg": "\u009F"}, id="end of second control character range"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -584,7 +586,7 @@ class TestCommandString:
             pytest.param({"cmd": "\u009F"}, id="end of second control character range"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -634,7 +636,7 @@ class TestCombinationExpr:
             pytest.param({"expr": "foo\n"}, id="no newline"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -663,7 +665,7 @@ class TestTaskParameterStringValueAsJob:
         "data",
         (pytest.param({"str": "A" * 1025}, id="too long"),),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -697,7 +699,7 @@ class TestAmountCapabilityName:
             pytest.param({"str": "A" * 101}, id="too long"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -731,7 +733,7 @@ class TestAttributeCapabilityName:
             pytest.param({"str": "A" * 101}, id="too long"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -775,7 +777,7 @@ class TestUserInterfaceLabelStringValue:
             pytest.param({"str": "\u009F"}, id="9f disallowed"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN
@@ -849,7 +851,7 @@ class TestFileDialogFilterPatternStringValue:
             pytest.param({"name": "*.="}, id="no '='"),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any]) -> None:
+    def test_parse_fails(self, data: dict[str, Any]) -> None:
         # - Constraint tests
 
         # WHEN

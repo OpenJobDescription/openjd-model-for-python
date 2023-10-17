@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any, Union, Dict, List, Tuple
+from __future__ import annotations
+
+from typing import Any, Union
 
 from pydantic import ValidationError
 from pydantic.error_wrappers import ErrorWrapper
@@ -15,7 +17,7 @@ __all__ = ("instantiate_model",)
 def instantiate_model(  # noqa: C901
     model: OpenJDModel,
     symtab: SymbolTable,
-    loc: Tuple[Union[str, int], ...] = tuple(),
+    loc: tuple[Union[str, int], ...] = tuple(),
     within_field: str = "",
 ) -> OpenJDModel:
     """This function is for instantiating a Template model into a Job model.
@@ -27,7 +29,7 @@ def instantiate_model(  # noqa: C901
         model (OpenJDModel): The model instance to transform.
         symtab (SymbolTable): The symbol table containing fully qualified Job parameter values
             used during the instantiation.
-        loc (Tuple[Union[str,int], ...], optional): Path to the model. Used for generating contextual errors.
+        loc (tuple[Union[str,int], ...], optional): Path to the model. Used for generating contextual errors.
         within_field (str): The name of the field where this model was found during traversal. "" if this
             is the top-level/root model
 
@@ -38,8 +40,8 @@ def instantiate_model(  # noqa: C901
         OpenJDModel: The transformed model.
     """
 
-    errors = list()  # type: List[ErrorWrapper]
-    instantiated_fields = dict()  # type: Dict[str, Any]
+    errors: list[ErrorWrapper] = []
+    instantiated_fields: dict[str, Any] = {}
 
     for field_name in model.__fields__.keys():
         target_field_name = field_name
@@ -97,7 +99,7 @@ def _instantiate_noncollection_value(
     field_name: str,
     value: Any,
     symtab: SymbolTable,
-    loc: Tuple[Union[str, int], ...],
+    loc: tuple[Union[str, int], ...],
 ) -> Any:
     """Instantiate a single value that must not be a collection type (list, dict, etc).
 
@@ -106,7 +108,7 @@ def _instantiate_noncollection_value(
         field_name (str): The name of the field within that model that contains the value.
         value (Any): Value to process.
         symtab (SymbolTable): Symbol table for format string value lookups.
-        loc (Tuple[Union[str,int], ...]): Path to this value.
+        loc (tuple[Union[str,int], ...]): Path to this value.
     """
 
     # Note: Let the exceptions fall through to the calling context to handle.
@@ -129,10 +131,10 @@ def _instantiate_noncollection_value(
 def _instantiate_list_field(  # noqa: C901
     within_model: OpenJDModel,
     field_name: str,
-    value: List[Any],
+    value: list[Any],
     symtab: SymbolTable,
-    loc: Tuple[Union[str, int], ...],
-) -> Union[List[Any], Dict[str, Any]]:
+    loc: tuple[Union[str, int], ...],
+) -> Union[list[Any], dict[str, Any]]:
     """As _instantiate_noncollection_value, but where the value is a list.
 
     Arguments:
@@ -140,10 +142,10 @@ def _instantiate_list_field(  # noqa: C901
         field_name (str): The name of the field within that model that contains the value.
         value (Any): Value to process.
         symtab (SymbolTable): Symbol table for format string value lookups.
-        loc (Tuple[Union[str,int], ...]): Path to this value.
+        loc (tuple[Union[str,int], ...]): Path to this value.
     """
-    errors: List[ErrorWrapper] = []
-    result: Union[List[Any], Dict[str, Any]]
+    errors: list[ErrorWrapper] = []
+    result: Union[list[Any], dict[str, Any]]
     if field_name in within_model._job_creation_metadata.reshape_field_to_dict:
         key_field = within_model._job_creation_metadata.reshape_field_to_dict[field_name]
         result = {}
@@ -194,10 +196,10 @@ def _instantiate_list_field(  # noqa: C901
 def _instantiate_dict_field(
     within_model: OpenJDModel,
     field_name: str,
-    value: Dict[str, Any],
+    value: dict[str, Any],
     symtab: SymbolTable,
-    loc: Tuple[Union[str, int], ...],
-) -> Dict[str, Any]:
+    loc: tuple[Union[str, int], ...],
+) -> dict[str, Any]:
     """As _instantiate_noncollection_value, but where the value is a dict.
 
     Arguments:
@@ -205,10 +207,10 @@ def _instantiate_dict_field(
         field_name (str): The name of the field within that model that contains the value.
         value (Any): Value to process.
         symtab (SymbolTable): Symbol table for format string value lookups.
-        loc (Tuple[Union[str,int], ...]): Path to this value.
+        loc (tuple[Union[str,int], ...]): Path to this value.
     """
-    errors: List[ErrorWrapper] = []
-    result: Dict[str, Any] = {}
+    errors: list[ErrorWrapper] = []
+    result: dict[str, Any] = {}
     for key, item in value.items():
         try:
             # Raises: ValidationError, FormatStringError

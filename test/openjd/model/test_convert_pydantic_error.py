@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from __future__ import annotations
+
 from pydantic import BaseModel, root_validator, Field
 from typing import Union, List
 
@@ -26,7 +28,7 @@ class TestValidationErrorsToStr:
             f1: str
             f2: int
 
-        errors: List[ErrorDict] = [
+        errors: list[ErrorDict] = [
             {"loc": ("f1",), "msg": "error message1", "type": "error-type"},
             {"loc": ("f2",), "msg": "error message2", "type": "error-type"},
         ]
@@ -186,7 +188,7 @@ class TestArrayFields:
             ff: int
 
         class Model(BaseModel):
-            inner: List[Inner]
+            inner: list[Inner]
 
         error: ErrorDict = {
             "loc": (

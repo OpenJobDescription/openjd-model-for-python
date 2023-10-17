@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any, Dict
+from __future__ import annotations
+
+from typing import Any
 import string
 
 import pytest
@@ -80,7 +82,7 @@ class TestAttributeRequirementTemplate:
             ),
         ),
     )
-    def test_parse_success(self, data: Dict[str, Any]) -> None:
+    def test_parse_success(self, data: dict[str, Any]) -> None:
         # Success case testing for Open Job Description AttributeRequirementTemplate.
 
         # WHEN
@@ -198,7 +200,7 @@ class TestAttributeRequirementTemplate:
             ),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any], error_count: int) -> None:
+    def test_parse_fails(self, data: dict[str, Any], error_count: int) -> None:
         # Failure case testing for Open Job Description AttributeRequirementTemplate.
 
         # WHEN
@@ -317,7 +319,7 @@ class TestAmountRequirementTemplate:
             ),
         ),
     )
-    def test_parse_success(self, data: Dict[str, Any]) -> None:
+    def test_parse_success(self, data: dict[str, Any]) -> None:
         # Success case testing for Open Job Description AmountRequirementTemplate.
 
         # WHEN
@@ -378,7 +380,7 @@ class TestAmountRequirementTemplate:
             ),
         ),
     )
-    def test_parse_fails(self, data: Dict[str, Any], error_count: int) -> None:
+    def test_parse_fails(self, data: dict[str, Any], error_count: int) -> None:
         # Failure case testing for Open Job Description AmountRequirementTemplate.
 
         # WHEN
@@ -427,7 +429,7 @@ class TestHostRequirementsTemplate:
             ),
         ],
     )
-    def test_parse_success(self, data: Dict[str, Any]) -> None:
+    def test_parse_success(self, data: dict[str, Any]) -> None:
         # Success case testing for Open Job Description HostRequirementsTemplate.
 
         # WHEN
@@ -469,7 +471,7 @@ class TestHostRequirementsTemplate:
             ),
         ],
     )
-    def test_parse_fails(self, data: Dict[str, Any], error_count: int) -> None:
+    def test_parse_fails(self, data: dict[str, Any], error_count: int) -> None:
         # Failure case testing for Open Job Description AmountRequirementTemplate.
 
         # WHEN

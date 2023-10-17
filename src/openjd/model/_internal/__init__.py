@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any, Callable, TypeVar, List
+from __future__ import annotations
+
+from typing import Any, Callable, TypeVar
 
 from ._combination_expr import AssociationNode as CombinationExpressionAssociationNode
 from ._combination_expr import IdentifierNode as CombinationExpressionIdentifierNode
@@ -30,8 +32,8 @@ T = TypeVar("T")
 
 
 def validate_unique_elements(
-    lst: List[T], *, item_value: Callable[[T], Any], property: str
-) -> List[T]:
+    lst: list[T], *, item_value: Callable[[T], Any], property: str
+) -> list[T]:
     """Pydantic validator that can be used that every item in a list has a unique
     value for a specific property.
 

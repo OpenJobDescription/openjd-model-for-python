@@ -1,10 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from __future__ import annotations
+
 import re
 from collections import namedtuple
 from dataclasses import dataclass
 from enum import Enum
-from typing import Sequence, Type, Dict, List
+from typing import Sequence, Type
 
 from ._errors import TokenError
 
@@ -84,7 +86,7 @@ class TokenStream:
         None
     """
 
-    _tokens: List[Token]
+    _tokens: list[Token]
     """The tokens for the given expression"""
 
     _pos: int
@@ -93,12 +95,12 @@ class TokenStream:
     _expr: str
     """The expression that we're tokenizing."""
 
-    def __init__(self, expr: str, *, supported_tokens: Dict[TokenType, Type[Token]]):
+    def __init__(self, expr: str, *, supported_tokens: dict[TokenType, Type[Token]]):
         """Initialize the TokenStream
 
         Args:
             expr (str): The expression to stream tokens from.
-            supported_tokens (Dict[TokenType, Type[Token]]): A mapping of token type to
+            supported_tokens (dict[TokenType, Type[Token]]): A mapping of token type to
                 Token class for the token types that this tokenstream will support.
 
         Raises:
@@ -176,9 +178,9 @@ class TokenStream:
 
 
 class Lexer:
-    _supported_tokens: Dict[TokenType, Type[Token]]
+    _supported_tokens: dict[TokenType, Type[Token]]
 
-    def __init__(self, expr: str, *, supported_tokens: Dict[TokenType, Type[Token]]) -> None:
+    def __init__(self, expr: str, *, supported_tokens: dict[TokenType, Type[Token]]) -> None:
         """Args:
         expr (str): String interpolation expression to tokenize.
             Note: Only space characters allowed for whitespace.
@@ -193,7 +195,7 @@ class Lexer:
         Raises:
             TokenError: If a bad or unsupported Token is encountered.
         """
-        results: List[Token] = []
+        results: list[Token] = []
         for match in lexer_matcher.finditer(self.expr):
             value = match.group()
             if value == " ":

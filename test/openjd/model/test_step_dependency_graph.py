@@ -1,6 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any, Optional, Dict, Set
+from __future__ import annotations
+
+from typing import Any, Optional, Set
 
 from openjd.model import (  # StepDependencyGraphNode,; ,
     StepDependencyGraph,
@@ -14,9 +16,9 @@ from openjd.model.v2023_09 import JobTemplate as JobTemplate_2023_09
 class TestStepDependencyGraph_2023_09:
     def create_step_template(
         self, name: str, dependsOn: Optional[Set[str]] = None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """A helper for generating step template data."""
-        toreturn: Dict[str, Any] = {
+        toreturn: dict[str, Any] = {
             "name": name,
             "script": {"actions": {"onRun": {"command": "foo"}}},
         }
