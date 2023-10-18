@@ -10,7 +10,7 @@ _NODE_OUT = -1
 _NODE_DONE = -2
 
 
-class _NodeInfo:
+class _NodeInfo:  # pragma: no cover
     __slots__ = "node", "npredecessors", "successors"
 
     def __init__(self, node):
@@ -27,7 +27,7 @@ class _NodeInfo:
         self.successors = []
 
 
-class CycleError(ValueError):
+class CycleError(ValueError):  # pragma: no cover
     """Subclass of ValueError raised by TopologicalSorter.prepare if cycles
     exist in the working graph.
 
@@ -42,7 +42,7 @@ class CycleError(ValueError):
     pass
 
 
-class TopologicalSorter:
+class TopologicalSorter:  # pragma: no cover
     """Provides functionality to topologically sort a graph of hashable nodes"""
 
     def __init__(self, graph=None):
@@ -108,7 +108,7 @@ class TopologicalSorter:
         if cycle:
             raise CycleError("nodes are in a cycle", cycle)
 
-    def get_ready(self):  # pragma: no cover
+    def get_ready(self):
         """Return a tuple of all the nodes that are ready.
 
         Initially it returns all nodes with no predecessors; once those are marked
@@ -151,7 +151,7 @@ class TopologicalSorter:
     def __bool__(self):
         return self.is_active()
 
-    def done(self, *nodes):  # pragma: no cover
+    def done(self, *nodes):
         """Marks a set of nodes returned by "get_ready" as processed.
 
         This method unblocks any successor of each node in *nodes* for being returned
@@ -233,7 +233,7 @@ class TopologicalSorter:
                     break
         return None
 
-    def static_order(self):  # pragma: no cover
+    def static_order(self):
         """Returns an iterable of nodes in a topological order.
 
         The particular order that is returned may depend on the specific

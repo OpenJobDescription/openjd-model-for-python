@@ -3,7 +3,6 @@ import os
 import shutil
 import sys
 
-
 from dataclasses import dataclass
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
@@ -20,7 +19,7 @@ _logger.addHandler(_stdout_handler)
 _logger.addHandler(_stderr_handler)
 
 
-@dataclass()
+@dataclass
 class CopyConfig:
     sources: List[str]
     destinations: List[str]

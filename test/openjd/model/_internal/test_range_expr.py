@@ -238,6 +238,14 @@ class TestIntRangeExpression:
         with pytest.raises(IndexError):
             range_expression[index]
 
+    def test_range_expression_not_implemented(self):
+        # GIVEN
+        first = IntRange(start=-5, end=0, step=2)
+
+        # WHEN / THEN
+        with pytest.raises(NotImplementedError):
+            _ = IntRangeExpression([first, "1"])
+
     @pytest.mark.parametrize(
         "index, expected_item",
         [
