@@ -3,11 +3,12 @@ import os
 import shutil
 import sys
 
-from __future__ import annotations
 
 from dataclasses import dataclass
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
-from typing import Any, Optional
+
+# python3.7 note: canot use annotations with dataclass setup
+from typing import Any, Optional, List, Dict
 
 
 _logger = logging.Logger(__name__, logging.INFO)
@@ -19,10 +20,10 @@ _logger.addHandler(_stdout_handler)
 _logger.addHandler(_stderr_handler)
 
 
-@dataclass
+@dataclass()
 class CopyConfig:
-    sources: list[str]
-    destinations: list[str]
+    sources: List[str]
+    destinations: List[str]
 
 
 class CustomBuildHookException(Exception):
@@ -65,7 +66,7 @@ class CustomBuildHook(BuildHookInterface):
         "copy_map",
     ]
 
-    def initialize(self, version: str, build_data: dict[str, Any]) -> None:
+    def initialize(self, version: str, build_data: Dict[str, Any]) -> None:
         if not self._prepare():
             return
 
@@ -145,12 +146,12 @@ class CustomBuildHook(BuildHookInterface):
                     f'"{config_name}" config option contains some file paths that do not exist: {missing_paths}'
                 )
 
-        copy_map: list[CopyConfig] = []
+        copy_map: List[CopyConfig] = []
         for copy_cfg in raw_copy_map:
-            destinations: list[str] = copy_cfg.get("destinations")
+            destinations: List[str] = copy_cfg.get("destinations")
             verify_list_of_file_paths(destinations, "destinations")
 
-            sources: list[str] = copy_cfg.get("sources")
+            sources: List[str] = copy_cfg.get("sources")
             verify_list_of_file_paths(sources, "source")
 
             copy_map.append(CopyConfig(sources, destinations))

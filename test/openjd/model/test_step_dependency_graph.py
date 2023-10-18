@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Set
+from typing import Any, Optional
 
 from openjd.model import (  # StepDependencyGraphNode,; ,
     StepDependencyGraph,
@@ -15,7 +15,7 @@ from openjd.model.v2023_09 import JobTemplate as JobTemplate_2023_09
 
 class TestStepDependencyGraph_2023_09:
     def create_step_template(
-        self, name: str, dependsOn: Optional[Set[str]] = None
+        self, name: str, dependsOn: Optional[set[str]] = None
     ) -> dict[str, Any]:
         """A helper for generating step template data."""
         toreturn: dict[str, Any] = {

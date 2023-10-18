@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union, Tuple
+from typing import Union
 
 from .._errors import ExpressionError, TokenError
 from .._tokenstream import Token, TokenStream, TokenType
@@ -35,7 +35,7 @@ class ProductNode(Node):
     e.g. A * B * C
     """
 
-    children: Tuple[Node, ...]
+    children: tuple[Node, ...]
 
     def __str__(self) -> str:
         return " * ".join(str(child) for child in self.children)
@@ -51,7 +51,7 @@ class AssociationNode(Node):
     e.g. (A, B, C)
     """
 
-    children: Tuple[Node, ...]
+    children: tuple[Node, ...]
 
     def __str__(self) -> str:
         return f"({', '.join(str(child) for child in self.children)})"

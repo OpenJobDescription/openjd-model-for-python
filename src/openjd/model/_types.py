@@ -123,7 +123,7 @@ class DefinesTemplateVariables:
             "MyParameter" for its name, it produces the variable "Param.MyParameter". A special
             value "__key__", not currently used by any model, indicates the name should come
             from the dictionary key above the model object.
-        inject (Set[str]): This adds specific names not generated from model fields, like the
+        inject (set[str]): This adds specific names not generated from model fields, like the
             "Session.WorkingDirectory" name, into the scope of the model.
             A "|" prefix discards the parent scope prefix.
             The given symbols are always injected into the current variable scope.
@@ -133,9 +133,9 @@ class DefinesTemplateVariables:
         self,
         *,
         symbol_prefix: str = "",
-        defines: Set[TemplateVariableDef] = set(),
+        defines: set[TemplateVariableDef] = set(),
         field: str = "",
-        inject: Set[str] = set(),
+        inject: set[str] = set(),
     ):
         self.symbol_prefix = symbol_prefix
         self.defines = defines
@@ -161,7 +161,7 @@ class JobCreationMetadata:
     treatment the model needs during translation from Template to Job.
     """
 
-    resolve_fields: Set[str] = field(default_factory=set)
+    resolve_fields: set[str] = field(default_factory=set)
     """The names of fields in the model that may contain FormatStrings, and
     if it does then those FormatStrings must be resolved into strings when
     creating a job.
@@ -184,7 +184,7 @@ class JobCreationMetadata:
             of the Task parameter is defined (list or expression)
     """
 
-    exclude_fields: Set[str] = field(default_factory=set)
+    exclude_fields: set[str] = field(default_factory=set)
     """A set of fields that are ignored when processing the model. The model that is created will
     not be provided values, or kwargs even, for these fields.
     """

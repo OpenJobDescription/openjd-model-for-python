@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, Set
+from typing import Any
 
 from .._symbol_table import SymbolTable
 
@@ -15,7 +15,7 @@ class Node(ABC):
     """
 
     @abstractmethod
-    def validate_symbol_refs(self, *, symbols: Set[str]) -> None:  # pragma: no cover
+    def validate_symbol_refs(self, *, symbols: set[str]) -> None:  # pragma: no cover
         """Verifies that the expression rooted at this node is valid
         given the definitions of symbols in a symbol table.
 
@@ -27,7 +27,7 @@ class Node(ABC):
                context and information on the specifics of the error.
 
         Args:
-            symbols (Set[str]): The names of symbols visible to this expression.
+            symbols (set[str]): The names of symbols visible to this expression.
         """
         pass
 
@@ -62,7 +62,7 @@ class FullNameNode(Node):
 
     name: str
 
-    def validate_symbol_refs(self, *, symbols: Set[str]) -> None:
+    def validate_symbol_refs(self, *, symbols: set[str]) -> None:
         if self.name not in symbols:
             raise ValueError(
                 f"{self.name} is referenced by an expression, but is out of scope or has no value"

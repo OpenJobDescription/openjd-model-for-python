@@ -108,7 +108,7 @@ class TopologicalSorter:
         if cycle:
             raise CycleError("nodes are in a cycle", cycle)
 
-    def get_ready(self):
+    def get_ready(self):  # pragma: no cover
         """Return a tuple of all the nodes that are ready.
 
         Initially it returns all nodes with no predecessors; once those are marked
@@ -151,7 +151,7 @@ class TopologicalSorter:
     def __bool__(self):
         return self.is_active()
 
-    def done(self, *nodes):
+    def done(self, *nodes):  # pragma: no cover
         """Marks a set of nodes returned by "get_ready" as processed.
 
         This method unblocks any successor of each node in *nodes* for being returned
@@ -233,7 +233,7 @@ class TopologicalSorter:
                     break
         return None
 
-    def static_order(self):
+    def static_order(self):  # pragma: no cover
         """Returns an iterable of nodes in a topological order.
 
         The particular order that is returned may depend on the specific
