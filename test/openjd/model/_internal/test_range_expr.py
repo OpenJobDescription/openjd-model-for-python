@@ -1,7 +1,8 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from __future__ import annotations
+
 from itertools import zip_longest
-from typing import List
 
 import pytest
 
@@ -294,7 +295,7 @@ class TestIntRangeExpression:
     def test_read_only_properties(self) -> None:
         # GIVEN
         full_range: IntRangeExpression = IntRangeExpression([IntRange(start=0, end=10, step=1)])
-        original_ranges_contents: List[IntRange] = full_range.ranges
+        original_ranges_contents: list[IntRange] = full_range.ranges
 
         # WHEN
         full_range.ranges.append(IntRange(start=1, end=2, step=1))

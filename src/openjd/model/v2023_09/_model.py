@@ -6,11 +6,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 
-try:
-    # graphlib only available in python 3.9+
-    from graphlib import CycleError, TopologicalSorter
-except ModuleNotFoundError:
-    from .._graphlib37 import CycleError, TopologicalSorter  # type:ignore
+from graphlib import CycleError, TopologicalSorter
 
 from typing import (
     TYPE_CHECKING,

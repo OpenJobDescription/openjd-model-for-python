@@ -12,6 +12,7 @@ requires-python = ">=3.7"
 dependencies = [
   "pyyaml ~= 6.0",
   "pydantic ~= 1.10",
+  "graphlib_backport ~= 1.0.0; python_version < '3.9'"
 ]
 
 [tool.hatch.build]
