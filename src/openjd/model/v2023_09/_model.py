@@ -2153,7 +2153,7 @@ class JobTemplate(OpenJDModel_v2023_09):
     """Definition of an Open Job Description Job Template.
 
     Attributes:
-        specificationVersion (SchemaVersion.v2023_09): The OpenJD schema version that
+        specificationVersion (SchemaVersion.v2023_09): The OpenJD schema version
             whose data model this follows.
         name (JobTemplateName): The name of Jobs constructed by this template.
         steps (StepTemplateList): The Step Templates that comprise the Job Template.
@@ -2298,4 +2298,41 @@ class JobTemplate(OpenJDModel_v2023_09):
         if errors:
             raise ValidationError(errors, JobTemplate)
 
+        return values
+
+
+class EnvironmentTemplate(OpenJDModel_v2023_09):
+    """Definition of an Open Job Description Environment Template.
+
+    Attributes:
+        specificationVersion (SchemaVersion.ENVIRONMENT_v2023_09): The OpenJD schema version
+            whose data model this follows.
+        parameterDefinitions (Optional[JobParameterDefinitionList]): The job parameters that are available for use
+            within this template, and that must have values defined for them when creating jobs while this
+            environment template is included.
+        environment (Environment): The definition of the Environment that is applied.
+    """
+
+    specificationVersion: Literal[SchemaVersion.ENVIRONMENT_v2023_09]
+    parameterDefinitions: Optional[JobParameterDefinitionList] = None
+    environment: Environment
+
+    _template_variable_scope = ResolutionScope.TEMPLATE
+    _template_variable_sources = {
+        "environment": {"parameterDefinitions"},
+    }
+
+    @validator("parameterDefinitions")
+    def _unique_parameter_names(
+        cls, v: Optional[JobParameterDefinitionList]
+    ) -> Optional[JobParameterDefinitionList]:
+        if v is not None:
+            return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
+        return v
+
+    @root_validator
+    def _validate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
+        errors = validate_model_template_variable_references(cls, values)
+        if errors:
+            raise ValidationError(errors, EnvironmentTemplate)
         return values
