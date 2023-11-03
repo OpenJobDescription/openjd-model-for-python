@@ -10,11 +10,19 @@ from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
 from ._errors import DecodeValidationError
-from ._types import JobTemplate, OpenJDModel, SchemaVersion
+from ._types import EnvironmentTemplate, JobTemplate, OpenJDModel, SchemaVersion
 from ._convert_pydantic_error import pydantic_validationerrors_to_str, ErrorDict
 from .v2023_09 import JobTemplate as JobTemplate_2023_09
+from .v2023_09 import EnvironmentTemplate as EnvironmentTemplate_2023_09
 
-__all__ = ("parse_model", "document_string_to_object", "DocumentType", "decode_template")
+__all__ = (
+    "parse_model",
+    "document_string_to_object",
+    "DocumentType",
+    "decode_template",
+    "decode_job_template",
+    "decode_environment_template",
+)
 
 
 class DocumentType(str, Enum):
@@ -77,7 +85,7 @@ def document_string_to_object(*, document: str, document_type: DocumentType) -> 
         )
 
 
-def decode_template(*, template: dict[str, Any]) -> JobTemplate:
+def decode_job_template(*, template: dict[str, Any]) -> JobTemplate:
     """Given a dictionary containing a Job Template, this will decode the template, run validation checks on it,
     and then return the decoded template.
 
@@ -98,13 +106,82 @@ def decode_template(*, template: dict[str, Any]) -> JobTemplate:
         schema_version = SchemaVersion(document_version)
     except KeyError:
         # Unable to get 'specificationVersion' key from the document
-        raise DecodeValidationError("Template is missing Open Job Description schema version key")
+        raise DecodeValidationError(
+            "Template is missing Open Job Description schema version key: specificationVersion"
+        )
     except ValueError:
         # Value of the schema version is not one we know.
-        raise DecodeValidationError(f"Unknown template version: {document_version}")
+        values_allowed = ", ".join(str(s) for s in SchemaVersion.job_template_versions())
+        raise DecodeValidationError(
+            (
+                f"Unknown template version: {document_version}. "
+                f"Values allowed for 'specificationVersion' in Job Templates are: {values_allowed}"
+            )
+        )
+
+    if not SchemaVersion.is_job_template(schema_version):
+        values_allowed = ", ".join(str(s) for s in SchemaVersion.job_template_versions())
+        raise DecodeValidationError(
+            (
+                f"Specification version '{str(schema_version)}' is not a Job Template version. "
+                f"Values allowed for 'specificationVersion' in Job Templates are: {values_allowed}"
+            )
+        )
 
     if schema_version == SchemaVersion.v2023_09:
         return parse_model(model=JobTemplate_2023_09, obj=template)
+    else:
+        raise NotImplementedError(
+            f"Template decode for schema {schema_version.value} is not yet implemented."
+        )
+
+
+def decode_template(*, template: dict[str, Any]) -> JobTemplate:
+    """THIS FUNCTION IS DEPRECATED AND WILL BE REMOVED IN A FUTURE RELEASE. Please use
+    decode_job_template() instead.
+    """
+    return decode_job_template(template=template)
+
+
+def decode_environment_template(*, template: dict[str, Any]) -> EnvironmentTemplate:
+    """Given a dictionary containing an Environment Template, this will decode the template, run validation checks on it,
+    and then return the decoded template.
+
+    Args:
+        template (dict[str, Any]): An Environment Template as a dictionary object.
+
+    Returns:
+        EnvironmentTemplate: The decoded environment template.
+
+    Raises:
+        DecodeValidationError
+        NotImplementedError
+    """
+    try:
+        # Raises: KeyError
+        document_version = template["specificationVersion"]
+        # Raises: ValueError
+        schema_version = SchemaVersion(document_version)
+    except KeyError:
+        # Unable to get 'specificationVersion' key from the document
+        raise DecodeValidationError(
+            "Template is missing Open Job Description schema version key: specificationVersion"
+        )
+    except ValueError:
+        # Value of the schema version is not one we know.
+        values_allowed = ", ".join(str(s) for s in SchemaVersion.environment_template_versions())
+        raise DecodeValidationError(
+            f"Unknown template version: {document_version}. Allowed values are: {values_allowed}"
+        )
+
+    if not SchemaVersion.is_environment_template(schema_version):
+        values_allowed = ", ".join(str(s) for s in SchemaVersion.environment_template_versions())
+        raise DecodeValidationError(
+            f"Unknown template version: {document_version}. Allowed values are: {values_allowed}"
+        )
+
+    if schema_version == SchemaVersion.ENVIRONMENT_v2023_09:
+        return parse_model(model=EnvironmentTemplate_2023_09, obj=template)
     else:
         raise NotImplementedError(
             f"Template decode for schema {schema_version.value} is not yet implemented."

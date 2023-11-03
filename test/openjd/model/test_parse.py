@@ -9,11 +9,13 @@ import yaml
 from openjd.model import (
     DecodeValidationError,
     DocumentType,
-    decode_template,
+    decode_environment_template,
+    decode_job_template,
     document_string_to_object,
 )
 from openjd.model._types import OpenJDModel
 from openjd.model.v2023_09 import JobTemplate as JobTemplate_2023_09
+from openjd.model.v2023_09 import EnvironmentTemplate as EnvironmentTemplate_2023_09
 
 
 class TestDocStringToObject:
@@ -60,18 +62,21 @@ class TestDocStringToObject:
             document_string_to_object(document=document, document_type=doctype)
 
 
-class TestDecodeTemplate:
+class TestDecodeJobTemplate:
     @pytest.mark.parametrize(
         "template",
         [
             pytest.param({"notspecversion": "badvalue"}, id="missing specificationVersion field"),
             pytest.param({"specificationVersion": "badvalue"}, id="unknown version"),
+            pytest.param(
+                {"specificationVersion": "environment-2023-09"}, id="not a job template version"
+            ),
         ],
     )
     def test_fail_cases(self, template: dict[str, Any]) -> None:
         # THEN
         with pytest.raises(DecodeValidationError):
-            decode_template(template=template)
+            decode_job_template(template=template)
 
     @pytest.mark.parametrize(
         "template,expected_class",
@@ -91,7 +96,51 @@ class TestDecodeTemplate:
     )
     def test_success(self, template: dict[str, Any], expected_class: Type[OpenJDModel]) -> None:
         # WHEN
-        result = decode_template(template=template)
+        result = decode_job_template(template=template)
+
+        # THEN
+        assert isinstance(result, expected_class)
+
+
+class TestDecodeEnvironmentTemplate:
+    @pytest.mark.parametrize(
+        "template",
+        [
+            pytest.param({"notspecversion": "badvalue"}, id="missing specificationVersion field"),
+            pytest.param({"specificationVersion": "badvalue"}, id="unknown version"),
+            pytest.param(
+                {"specificationVersion": "jobtemplate-2023-09"},
+                id="not an environment template version",
+            ),
+        ],
+    )
+    def test_fail_cases(self, template: dict[str, Any]) -> None:
+        # THEN
+        with pytest.raises(DecodeValidationError):
+            decode_environment_template(template=template)
+
+    @pytest.mark.parametrize(
+        "template,expected_class",
+        [
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "environment": {
+                        "name": "FooEnv",
+                        "description": "A description",
+                        "script": {
+                            "actions": {"onEnter": {"command": "echo", "args": ["Hello", "World"]}}
+                        },
+                    },
+                },
+                EnvironmentTemplate_2023_09,
+                id="2023-09",
+            ),
+        ],
+    )
+    def test_success(self, template: dict[str, Any], expected_class: Type[OpenJDModel]) -> None:
+        # WHEN
+        result = decode_environment_template(template=template)
 
         # THEN
         assert isinstance(result, expected_class)

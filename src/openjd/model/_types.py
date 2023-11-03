@@ -14,16 +14,19 @@ from ._symbol_table import SymbolTable
 
 if TYPE_CHECKING:
     # Avoiding a circular import
+    from .v2023_09 import EnvironmentTemplate as EnvironmentTemplate_2023_09
     from .v2023_09 import Job as Job_2023_09
     from .v2023_09 import JobTemplate as JobTemplate_2023_09
     from .v2023_09 import Step as Step_2023_09
     from .v2023_09 import StepParameterSpace as StepParameterSpace_2023_09
 
+    EnvironmentTemplate = EnvironmentTemplate_2023_09
     JobTemplate = JobTemplate_2023_09
     Job = Job_2023_09
     StepParameterSpace = StepParameterSpace_2023_09
     Step = Step_2023_09
 else:
+    EnvironmentTemplate = Any
     JobTemplate = Any
     Job = Any
     StepParameterSpace = Any
@@ -31,6 +34,7 @@ else:
 
 __all__ = (
     "DefinesTemplateVariables",
+    "EnvironmentTemplate",
     "Job",
     "JobParameterInterface",
     "JobParameterValues",
@@ -79,11 +83,29 @@ class SchemaVersion(str, Enum):
       UNDEFINED -- Purely for internal testing.
 
     Versions:
-      v2023_09
+      v2023_09 -- Job Template for spec version 2023-09.
+      ENVIRONMENT_v2023_09 -- Environment Template for spec version 2023-09.
     """
 
     UNDEFINED = "UNDEFINED"
     v2023_09 = "jobtemplate-2023-09"
+    ENVIRONMENT_v2023_09 = "environment-2023-09"
+
+    @staticmethod
+    def job_template_versions() -> tuple[SchemaVersion, ...]:
+        return (SchemaVersion.v2023_09,)
+
+    @staticmethod
+    def is_job_template(version: SchemaVersion) -> bool:
+        return version in SchemaVersion.job_template_versions()
+
+    @staticmethod
+    def environment_template_versions() -> tuple[SchemaVersion, ...]:
+        return (SchemaVersion.ENVIRONMENT_v2023_09,)
+
+    @staticmethod
+    def is_environment_template(version: SchemaVersion) -> bool:
+        return version in SchemaVersion.environment_template_versions()
 
 
 class ResolutionScope(str, Enum):
