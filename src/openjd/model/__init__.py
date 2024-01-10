@@ -3,6 +3,7 @@
 from ._capabilities import validate_attribute_capability_name, validate_amount_capability_name
 from ._create_job import create_job, preprocess_job_parameters
 from ._errors import (
+    CompatibilityError,
     DecodeValidationError,
     ExpressionError,
     ModelValidationError,
@@ -28,6 +29,7 @@ from ._symbol_table import SymbolTable
 from ._types import (
     EnvironmentTemplate,
     Job,
+    JobParameterDefinition,
     JobParameterInputValues,
     JobParameterValues,
     JobTemplate,
@@ -50,12 +52,14 @@ __all__ = (
     "validate_attribute_capability_name",
     "parse_model",
     "preprocess_job_parameters",
+    "CompatibilityError",
     "DecodeValidationError",
     "DocumentType",
     "EnvironmentTemplate",
     "ExpressionError",
     "FormatStringError",
     "Job",
+    "JobParameterDefinition",
     "JobParameterInputValues",
     "JobParameterValues",
     "JobTemplate",
