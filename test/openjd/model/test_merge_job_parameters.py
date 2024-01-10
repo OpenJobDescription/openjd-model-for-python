@@ -45,7 +45,7 @@ class Test_v2023_09:
                                 "type": "INT",
                                 "allowedValues": [10, 20, 30],
                                 "minValue": 0,
-                                "maxValue": 50,
+                                "maxValue": 40,
                                 "default": 20,
                             },
                         ),
@@ -59,7 +59,7 @@ class Test_v2023_09:
                                 "type": "INT",
                                 "allowedValues": [10, 30],
                                 "minValue": 5,
-                                "maxValue": 40,
+                                "maxValue": 50,
                                 "default": 10,
                             },
                         ),
@@ -105,7 +105,7 @@ class Test_v2023_09:
                                 "type": "FLOAT",
                                 "allowedValues": [10, 20, 30],
                                 "minValue": 0,
-                                "maxValue": 50,
+                                "maxValue": 40,
                                 "default": 20,
                             },
                         ),
@@ -119,7 +119,7 @@ class Test_v2023_09:
                                 "type": "FLOAT",
                                 "allowedValues": [10, 30],
                                 "minValue": 5,
-                                "maxValue": 40,
+                                "maxValue": 50,
                                 "default": 10,
                             },
                         ),
@@ -165,7 +165,7 @@ class Test_v2023_09:
                                 "type": "STRING",
                                 "allowedValues": ["aaa", "bbbbb", "cccccc"],
                                 "minLength": 1,
-                                "maxLength": 10,
+                                "maxLength": 9,
                                 "default": "aaa",
                             },
                         ),
@@ -179,7 +179,7 @@ class Test_v2023_09:
                                 "type": "STRING",
                                 "allowedValues": ["bbbbb", "cccccc"],
                                 "minLength": 2,
-                                "maxLength": 9,
+                                "maxLength": 10,
                                 "default": "bbbbb",
                             },
                         ),
@@ -299,7 +299,7 @@ class Test_v2023_09:
                         definition=JobFloatParameterDefinition(name="foo", type="FLOAT"),
                     ),
                 ],
-                "Parameter types differ",
+                "Parameter type in 'Env' differs from expected type 'FLOAT'",
                 id="types differ",
             ),
             pytest.param(
@@ -315,12 +315,32 @@ class Test_v2023_09:
                         source="JobTemplate",
                         definition=parse_model(
                             model=JobIntParameterDefinition,
-                            obj={"name": "foo", "type": "INT", "allowedValues": [10, 40]},
+                            obj={"name": "foo", "type": "INT", "allowedValues": [30, 40]},
                         ),
                     ),
                 ],
-                "allowedValues for 'JobTemplate' contains non-compatible",
+                "The intersection of all allowedValues is empty. There are no values that can satisfy all constraints.",
                 id="non-compatible allowedValues",
+            ),
+            pytest.param(
+                [
+                    SourcedParamDefinition(
+                        source="Env",
+                        definition=parse_model(
+                            model=JobPathParameterDefinition,
+                            obj={"name": "foo", "type": "PATH"},  # default objectType is DIRECTORY
+                        ),
+                    ),
+                    SourcedParamDefinition(
+                        source="JobTemplate",
+                        definition=parse_model(
+                            model=JobPathParameterDefinition,
+                            obj={"name": "foo", "type": "PATH", "objectType": "FILE"},
+                        ),
+                    ),
+                ],
+                "Parameter objectTypes differ",
+                id="non-compatible PATH objectType with default",
             ),
             pytest.param(
                 [
@@ -368,39 +388,19 @@ class Test_v2023_09:
                         source="Env",
                         definition=parse_model(
                             model=JobStringParameterDefinition,
-                            obj={"name": "foo", "type": "STRING", "minLength": 10},
+                            obj={"name": "foo", "type": "STRING", "minLength": 10, "maxLength": 20},
                         ),
                     ),
                     SourcedParamDefinition(
                         source="JobTemplate",
                         definition=parse_model(
                             model=JobStringParameterDefinition,
-                            obj={"name": "foo", "type": "STRING", "minLength": 5},
+                            obj={"name": "foo", "type": "STRING", "minLength": 5, "maxLength": 8},
                         ),
                     ),
                 ],
-                "minLength of 'JobTemplate'",
-                id="non-compatible minLength",
-            ),
-            pytest.param(
-                [
-                    SourcedParamDefinition(
-                        source="Env",
-                        definition=parse_model(
-                            model=JobStringParameterDefinition,
-                            obj={"name": "foo", "type": "STRING", "maxLength": 10},
-                        ),
-                    ),
-                    SourcedParamDefinition(
-                        source="JobTemplate",
-                        definition=parse_model(
-                            model=JobStringParameterDefinition,
-                            obj={"name": "foo", "type": "STRING", "maxLength": 15},
-                        ),
-                    ),
-                ],
-                "maxLength of 'JobTemplate'",
-                id="non-compatible maxLength",
+                "Merged constraint minLength (10) <= maxLength (8) is not satisfyable.",
+                id="non-compatible length constraints",
             ),
             pytest.param(
                 [
@@ -411,7 +411,8 @@ class Test_v2023_09:
                             obj={
                                 "name": "foo",
                                 "type": "INT",
-                                "minValue": 5,
+                                "minValue": 10,
+                                "maxValue": 20,
                             },
                         ),
                     ),
@@ -419,44 +420,12 @@ class Test_v2023_09:
                         source="JobTemplate",
                         definition=parse_model(
                             model=JobIntParameterDefinition,
-                            obj={
-                                "name": "foo",
-                                "type": "INT",
-                                "minValue": 0,
-                            },
+                            obj={"name": "foo", "type": "INT", "minValue": 5, "maxValue": 8},
                         ),
                     ),
                 ],
-                "minValue of 'JobTemplate'",
-                id="non-compatible minValue",
-            ),
-            pytest.param(
-                [
-                    SourcedParamDefinition(
-                        source="Env",
-                        definition=parse_model(
-                            model=JobIntParameterDefinition,
-                            obj={
-                                "name": "foo",
-                                "type": "INT",
-                                "maxValue": 50,
-                            },
-                        ),
-                    ),
-                    SourcedParamDefinition(
-                        source="JobTemplate",
-                        definition=parse_model(
-                            model=JobIntParameterDefinition,
-                            obj={
-                                "name": "foo",
-                                "type": "INT",
-                                "maxValue": 55,
-                            },
-                        ),
-                    ),
-                ],
-                "maxValue of 'JobTemplate'",
-                id="non-compatible maxValue",
+                "Merged constraint minValue (10) <= maxValue (8) is not satisfyable.",
+                id="non-compatible value constraints",
             ),
         ],
     )

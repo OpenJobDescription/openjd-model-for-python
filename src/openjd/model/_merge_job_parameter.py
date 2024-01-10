@@ -71,8 +71,11 @@ def merge_job_parameter_definitions_for_one(
 
     # All parameters must be the same parameter type.
     param_type = params[-1].definition.type
-    if any(param.definition.type != param_type for param in params):
-        raise CompatibilityError("Parameter types differ.")
+    for param in params:
+        if param.definition.type != param_type:
+            raise CompatibilityError(
+                f"Parameter type in '{param.source}' differs from expected type '{str(param_type.value)}'"
+            )
     merged_properties["type"] = param_type
 
     # Default value is the last defined one in the list.
@@ -124,31 +127,35 @@ def _merge_allowed_values(
     params: list[SourcedParamDefinition],
 ) -> tuple[Optional[Union[list[str], list[int], list[Decimal]]], list[str]]:
     errors = list[str]()
-    return_value: Optional[Union[list[str], list[int], list[Decimal]]] = None
+    return_value: Optional[Union[set[str], set[int], set[Decimal]]] = None
 
     for param in params:
         definition = param.definition
         if not definition.allowedValues:
-            # If this definition doesn't have a set of allowedValues, then that's okay.
-            # Move on to the next one.
+            # If this definition doesn't have a set of allowedValues, then it's unconstrained.
+            # Thus, it's happy with any values and we can move on to the next one.
             continue
         if not return_value:
-            return_value = definition.allowedValues
+            return_value = cast(
+                Union[set[str], set[int], set[Decimal]], set(definition.allowedValues)
+            )
         else:
             param_as_set = cast(
                 Union[set[str], set[int], set[Decimal]], set(definition.allowedValues)
             )
-            ret_as_set = set(return_value)
-            if not param_as_set.issubset(ret_as_set):
-                extra_values = sorted(param_as_set.difference(ret_as_set))
-                errors.append(
-                    f"allowedValues for '{param.source}' contains non-compatible values: {', '.join(str(v) for v in extra_values)}"
-                )
-            else:
-                # Note: Preserve the order of the given list; else we will end up with randomly failing unit tests.
-                return_value = definition.allowedValues
+            return_value.intersection_update(param_as_set)
 
-    return return_value, errors
+    if return_value is not None and not return_value:
+        errors.append(
+            "The intersection of all allowedValues is empty. There are no values that can satisfy all constraints."
+        )
+
+    return (
+        cast(Union[list[str], list[int], list[Decimal]], sorted(return_value))
+        if return_value
+        else None,
+        errors,
+    )
 
 
 def _merge_path_param_types(
@@ -161,9 +168,9 @@ def _merge_path_param_types(
     # objectType & dataFlow must be identical in all templates, if provided.
     object_types = set(
         [
-            param.definition.objectType
+            # objectType's default value is DIRECTORY if it's not provided.
+            param.definition.objectType if param.definition.objectType is not None else "DIRECTORY"
             for param in casted_params
-            if param.definition.objectType is not None
         ]
     )
     data_flows = set(
@@ -177,8 +184,18 @@ def _merge_path_param_types(
         errors.append("Parameter objectTypes differ.")
     if len(data_flows) > 1:
         errors.append("Parameter dataFlows differ.")
-    if object_types:
-        return_value["objectType"] = list(object_types)[0]
+    try:
+        defined_object_type = next(
+            iter(
+                param.definition.objectType
+                for param in casted_params
+                if param.definition.objectType is not None
+            )
+        )
+        return_value["objectType"] = defined_object_type
+    except StopIteration:
+        # There were no objectTypes defined.
+        pass
     if data_flows:
         return_value["dataFlow"] = list(data_flows)[0]
 
@@ -202,23 +219,25 @@ def _merge_string_kind_param_constraints(
     for param in casted_params:
         definition = param.definition
         if definition.minLength is not None:
-            if min_length is not None and definition.minLength < min_length:
-                errors.append(
-                    f"minLength of '{param.source}' must be >= {min_length} in this context"
-                )
-            else:
+            if min_length is None:
                 min_length = definition.minLength
-        if definition.maxLength is not None:
-            if max_length is not None and definition.maxLength > max_length:
-                errors.append(
-                    f"maxLength of '{param.source}' must be <= {max_length} in this context"
-                )
             else:
+                min_length = max(min_length, definition.minLength)
+        if definition.maxLength is not None:
+            if max_length is None:
                 max_length = definition.maxLength
+            else:
+                max_length = min(max_length, definition.maxLength)
+
     if min_length is not None:
         return_value["minLength"] = min_length
     if max_length is not None:
         return_value["maxLength"] = max_length
+
+    if min_length is not None and max_length is not None and min_length > max_length:
+        errors.append(
+            f"Merged constraint minLength ({min_length}) <= maxLength ({max_length}) is not satisfyable."
+        )
 
     return return_value, errors
 
@@ -240,22 +259,24 @@ def _merge_number_kind_param_constraints(
     for param in casted_params:
         definition = param.definition
         if definition.minValue is not None:
-            if min_value is not None and definition.minValue < min_value:
-                errors.append(
-                    f"minValue of '{param.source}' must be >= {min_value} in this context"
-                )
-            else:
+            if min_value is None:
                 min_value = definition.minValue
-        if definition.maxValue is not None:
-            if max_value is not None and definition.maxValue > max_value:
-                errors.append(
-                    f"maxValue of '{param.source}' must be <= {max_value} in this context"
-                )
             else:
+                min_value = max(min_value, definition.minValue)
+        if definition.maxValue is not None:
+            if max_value is None:
                 max_value = definition.maxValue
+            else:
+                max_value = min(max_value, definition.maxValue)
+
     if min_value is not None:
         return_value["minValue"] = min_value
     if max_value is not None:
         return_value["maxValue"] = max_value
+
+    if min_value is not None and max_value is not None and min_value > max_value:
+        errors.append(
+            f"Merged constraint minValue ({min_value}) <= maxValue ({max_value}) is not satisfyable."
+        )
 
     return return_value, errors
