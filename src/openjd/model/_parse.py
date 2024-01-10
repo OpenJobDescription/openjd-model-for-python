@@ -144,7 +144,7 @@ def decode_job_template(*, template: dict[str, Any]) -> JobTemplate:
         )
     except ValueError:
         # Value of the schema version is not one we know.
-        values_allowed = ", ".join(str(s) for s in SchemaVersion.job_template_versions())
+        values_allowed = ", ".join(str(s.value) for s in SchemaVersion.job_template_versions())
         raise DecodeValidationError(
             (
                 f"Unknown template version: {document_version}. "
@@ -153,10 +153,10 @@ def decode_job_template(*, template: dict[str, Any]) -> JobTemplate:
         )
 
     if not SchemaVersion.is_job_template(schema_version):
-        values_allowed = ", ".join(str(s) for s in SchemaVersion.job_template_versions())
+        values_allowed = ", ".join(str(s.value) for s in SchemaVersion.job_template_versions())
         raise DecodeValidationError(
             (
-                f"Specification version '{str(schema_version)}' is not a Job Template version. "
+                f"Specification version '{document_version}' is not a Job Template version. "
                 f"Values allowed for 'specificationVersion' in Job Templates are: {values_allowed}"
             )
         )
@@ -202,15 +202,20 @@ def decode_environment_template(*, template: dict[str, Any]) -> EnvironmentTempl
         )
     except ValueError:
         # Value of the schema version is not one we know.
-        values_allowed = ", ".join(str(s) for s in SchemaVersion.environment_template_versions())
+        values_allowed = ", ".join(
+            str(s.value) for s in SchemaVersion.environment_template_versions()
+        )
         raise DecodeValidationError(
             f"Unknown template version: {document_version}. Allowed values are: {values_allowed}"
         )
 
     if not SchemaVersion.is_environment_template(schema_version):
-        values_allowed = ", ".join(str(s) for s in SchemaVersion.environment_template_versions())
+        values_allowed = ", ".join(
+            str(s.value) for s in SchemaVersion.environment_template_versions()
+        )
         raise DecodeValidationError(
-            f"Unknown template version: {document_version}. Allowed values are: {values_allowed}"
+            f"Specification version '{document_version}' is not an Environment Template version. "
+            f"Allowed values for 'specificationVersion' are: {values_allowed}"
         )
 
     if schema_version == SchemaVersion.ENVIRONMENT_v2023_09:

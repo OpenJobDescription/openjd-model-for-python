@@ -1,14 +1,17 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import TYPE_CHECKING, cast
+from typing import Optional, cast
 
 from pydantic import ValidationError
 
-from ._errors import DecodeValidationError
+from ._errors import CompatibilityError, DecodeValidationError
 from ._symbol_table import SymbolTable
 from ._internal import instantiate_model
+from ._merge_job_parameter import merge_job_parameter_definitions
 from ._types import (
+    EnvironmentTemplate,
     Job,
+    JobParameterDefinition,
     JobParameterInputValues,
     JobParameterValues,
     JobTemplate,
@@ -18,11 +21,6 @@ from ._types import (
 )
 from ._convert_pydantic_error import pydantic_validationerrors_to_str, ErrorDict
 
-if TYPE_CHECKING:
-    # Avoiding a circular import that occurs when trying to import FormatString
-    from .v2023_09 import JobTemplate as JobTemplate_2023_09
-
-
 __all__ = ("preprocess_job_parameters",)
 
 
@@ -31,39 +29,36 @@ __all__ = ("preprocess_job_parameters",)
 # =======================================================================
 
 
-def _collect_available_parameter_names(job_template: JobTemplate) -> set[str]:
-    # job_template.parameterDefinitions is a list[JobParameterDefinitionList]
-    return (
-        set(param.name for param in job_template.parameterDefinitions)
-        if job_template.parameterDefinitions
-        else set()
-    )
+def _collect_available_parameter_names(
+    job_parameter_definitions: list[JobParameterDefinition],
+) -> set[str]:
+    return set(param.name for param in job_parameter_definitions)
 
 
 def _collect_extra_job_parameter_names(
-    job_template: JobTemplate, job_parameter_values: JobParameterInputValues
+    job_parameter_definitions: list[JobParameterDefinition],
+    job_parameter_values: JobParameterInputValues,
 ) -> set[str]:
     # Verify that job parameters are provided if the template requires them
-    available_parameters: set[str] = _collect_available_parameter_names(job_template)
+    available_parameters: set[str] = _collect_available_parameter_names(job_parameter_definitions)
     return set(job_parameter_values).difference(available_parameters)
 
 
 def _collect_missing_job_parameter_names(
-    job_template: JobTemplate, job_parameter_values: JobParameterValues
+    job_parameter_definitions: list[JobParameterDefinition],
+    job_parameter_values: JobParameterValues,
 ) -> set[str]:
-    available_parameters: set[str] = _collect_available_parameter_names(job_template)
+    available_parameters: set[str] = _collect_available_parameter_names(job_parameter_definitions)
     return available_parameters.difference(set(job_parameter_values.keys()))
 
 
 def _collect_defaults_2023_09(
-    job_template: "JobTemplate_2023_09", job_parameter_values: JobParameterInputValues
+    job_parameter_definitions: list[JobParameterDefinition],
+    job_parameter_values: JobParameterInputValues,
 ) -> JobParameterValues:
-    # For the type checker
-    assert job_template.parameterDefinitions is not None
-
     return_value: JobParameterValues = dict[str, ParameterValue]()
     # Collect defaults
-    for param in job_template.parameterDefinitions:
+    for param in job_parameter_definitions:
         if param.name not in job_parameter_values:
             if param.default is not None:
                 return_value[param.name] = ParameterValue(
@@ -80,14 +75,12 @@ def _collect_defaults_2023_09(
 
 
 def _check_2023_09(
-    job_template: "JobTemplate_2023_09", job_parameter_values: JobParameterValues
+    job_parameter_definitions: list[JobParameterDefinition],
+    job_parameter_values: JobParameterValues,
 ) -> None:
-    # For the type checker
-    assert job_template.parameterDefinitions is not None
-
     errors = list[str]()
     # Check values
-    for param in job_template.parameterDefinitions:
+    for param in job_parameter_definitions:
         if param.name in job_parameter_values:
             param_value = job_parameter_values[param.name]
             try:
@@ -96,11 +89,14 @@ def _check_2023_09(
                 errors.append(str(err))
 
     if errors:
-        raise ValueError(", ".join(errors))
+        raise ValueError("\n".join(errors))
 
 
 def preprocess_job_parameters(
-    *, job_template: JobTemplate, job_parameter_values: JobParameterInputValues
+    *,
+    job_template: JobTemplate,
+    job_parameter_values: JobParameterInputValues,
+    environment_templates: Optional[list[EnvironmentTemplate]] = None,
 ) -> JobParameterValues:
     """Preprocess a collection of job parameter values. Must be used prior to
     instantiating a Job Template into a Job.
@@ -117,6 +113,8 @@ def preprocess_job_parameters(
         job_template (JobTemplate) -- A Job Template to check the job parameter values against.
         job_parameter_values (JobParameterValues) -- Mapping of Job Parameter names to values.
             e.g. { "Foo": 12 } if you have a Job Parameter named "Foo"
+        environment_templates (Optional[list[EnvironmentTemplate]]) -- An ordered list of the
+            externally defined Environment Templates that are applied to the Job.
 
     Returns:
         A copy of job_parameter_values, but with added values for any missing job parameters
@@ -127,34 +125,49 @@ def preprocess_job_parameters(
     """
     if job_template.version not in (SchemaVersion.v2023_09,):
         raise NotImplementedError(f"Not implemented for schema version {job_template.version}")
+    if environment_templates and any(
+        env.version not in (SchemaVersion.v2023_09,) for env in environment_templates
+    ):
+        raise NotImplementedError(
+            f"Not implemented for Environment Template schema versions other than {str(SchemaVersion.ENVIRONMENT_v2023_09)}"
+        )
 
     return_value: JobParameterValues = dict[str, ParameterValue]()
     errors = list[str]()
 
+    parameterDefinitions: Optional[list[JobParameterDefinition]] = None
+    try:
+        parameterDefinitions = merge_job_parameter_definitions(
+            job_template=job_template, environment_templates=environment_templates
+        )
+    except CompatibilityError as e:
+        # There's no point in continuing if the job parameter definitions are not compatible.
+        raise ValueError(str(e))
+
     extra_defined_parameters = _collect_extra_job_parameter_names(
-        job_template, job_parameter_values
+        parameterDefinitions, job_parameter_values
     )
     if extra_defined_parameters:
-        extra_list = ", ".join(extra_defined_parameters)
+        extra_list = ", ".join(sorted(extra_defined_parameters))
         errors.append(
             f"Job parameter values provided for parameters that are not defined in the template: {extra_list}"
         )
-    if job_template.parameterDefinitions:
+    if parameterDefinitions:
         # Set of all required, but undefined, job parameter values
         try:
             if job_template.version == SchemaVersion.v2023_09:
-                return_value = _collect_defaults_2023_09(job_template, job_parameter_values)
-                _check_2023_09(job_template, return_value)
+                return_value = _collect_defaults_2023_09(parameterDefinitions, job_parameter_values)
+                _check_2023_09(parameterDefinitions, return_value)
             else:
                 raise NotImplementedError(
                     f"Not implemented for schema version {job_template.version}"
                 )
         except ValueError as err:
             errors.append(str(err))
-        missing = _collect_missing_job_parameter_names(job_template, return_value)
+        missing = _collect_missing_job_parameter_names(parameterDefinitions, return_value)
 
         if missing:
-            missing_list = ", ".join(missing)
+            missing_list = ", ".join(sorted(missing))
             errors.append(f"Values missing for required job parameters: {missing_list}")
 
     if errors:
@@ -168,7 +181,12 @@ def preprocess_job_parameters(
 # =======================================================================
 
 
-def create_job(*, job_template: JobTemplate, job_parameter_values: JobParameterValues) -> Job:
+def create_job(
+    *,
+    job_template: JobTemplate,
+    job_parameter_values: JobParameterValues,
+    environment_templates: Optional[list[EnvironmentTemplate]] = None,
+) -> Job:
     """This function will create a job from a given Job Template and set of values for
     Job Parameters. Minimally, values must be provided for Job Parameters that do not have
     default values defined in the template.
@@ -179,6 +197,8 @@ def create_job(*, job_template: JobTemplate, job_parameter_values: JobParameterV
     Arguments:
         job_template (JobTemplate) -- A Job Template to check the job parameter values against.
         job_parameter_values (JobParameterValues) -- Mapping of Job Parameter names to values.
+        environment_templates (Optional[list[EnvironmentTemplate]]) -- An ordered list of the
+            externally defined Environment Templates that are applied to the Job.
 
     Raises:
         DecodeValidationError
@@ -195,6 +215,7 @@ def create_job(*, job_template: JobTemplate, job_parameter_values: JobParameterV
             job_parameter_values={
                 name: param.value for name, param in job_parameter_values.items()
             },
+            environment_templates=environment_templates,
         )
     except ValueError as exc:
         raise DecodeValidationError(str(exc))
