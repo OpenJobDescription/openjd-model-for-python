@@ -1374,7 +1374,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
     Attributes:
         name (Identifier): A name by which the parameter is referenced.
         type (JobParameterType.INT): discriminator to identify the type of the parameter
-        userInterface (Optional[JobPathParameterDefinitionUserInterface]): User interface properties
+        userInterface (Optional[JobIntParameterDefinitionUserInterface]): User interface properties
             for this parameter
         description (Optional[Description]): A free form string that can be used to describe
             the parameter. It has no functional purpose, but may appear in UI elements.
@@ -1583,7 +1583,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
     Attributes:
         name (Identifier): A name by which the parameter is referenced.
         type (JobParameterType.FLOAT): discriminator to identify the type of the parameter
-        userInterface (Optional[JobPathParameterDefinitionUserInterface]): User interface properties
+        userInterface (Optional[JobFloatParameterDefinitionUserInterface]): User interface properties
             for this parameter.
         description (Optional[Description]): A free form string that can be used to describe
             the parameter. It has no functional purpose, but may appear in UI elements.

@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 __all__ = [
+    "CompatibilityError",
     "DecodeValidationError",
     "ExpressionError",
     "ModelValidationError",
@@ -65,3 +66,11 @@ class TokenError(ExpressionError):
     def __init__(self, expression: str, token_value: str, position: int):
         msg = f"Unexpected '{token_value}' in '{expression}' after '{expression[:position]}'"
         super().__init__(msg)
+
+
+class CompatibilityError(_BaseMessageError):
+    """Error raised when a check that two, or more, models are compatible determines that
+    there are non-compatibilities between the models.
+    """
+
+    pass

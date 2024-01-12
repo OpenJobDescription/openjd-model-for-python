@@ -6,7 +6,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type, Union
 
 from pydantic import BaseModel, Extra
 
@@ -19,16 +19,29 @@ if TYPE_CHECKING:
     from .v2023_09 import JobTemplate as JobTemplate_2023_09
     from .v2023_09 import Step as Step_2023_09
     from .v2023_09 import StepParameterSpace as StepParameterSpace_2023_09
+    from .v2023_09 import (
+        JobIntParameterDefinition,
+        JobFloatParameterDefinition,
+        JobStringParameterDefinition,
+        JobPathParameterDefinition,
+    )
 
     EnvironmentTemplate = EnvironmentTemplate_2023_09
     JobTemplate = JobTemplate_2023_09
     Job = Job_2023_09
+    JobParameterDefinition = Union[
+        JobIntParameterDefinition,
+        JobFloatParameterDefinition,
+        JobStringParameterDefinition,
+        JobPathParameterDefinition,
+    ]
     StepParameterSpace = StepParameterSpace_2023_09
     Step = Step_2023_09
 else:
     EnvironmentTemplate = Any
     JobTemplate = Any
     Job = Any
+    JobParameterDefinition = Any
     StepParameterSpace = Any
     Step = Any
 
@@ -36,6 +49,7 @@ __all__ = (
     "DefinesTemplateVariables",
     "EnvironmentTemplate",
     "Job",
+    "JobParameterDefinition",
     "JobParameterInterface",
     "JobParameterValues",
     "JobTemplate",
