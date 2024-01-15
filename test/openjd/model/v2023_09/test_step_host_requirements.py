@@ -92,6 +92,16 @@ class TestAttributeRequirementTemplate:
     @pytest.mark.parametrize(
         "data,error_count",
         (
+            pytest.param(
+                {"allOf": ["a", "b"]},
+                1,
+                id="allOf missing name",
+            ),
+            pytest.param(
+                {"anyOf": ["a", "b"]},
+                1,
+                id="anyOf missing name",
+            ),
             # All the built-in attribute capabilities
             pytest.param(
                 {"name": "attr.worker.os.family"},
@@ -329,6 +339,16 @@ class TestAmountRequirementTemplate:
     @pytest.mark.parametrize(
         "data,error_count",
         (
+            pytest.param(
+                {"min": 0},
+                1,
+                id="min missing name",
+            ),
+            pytest.param(
+                {"max": 2},
+                1,
+                id="max missing name",
+            ),
             # All the built-in amount capabilities
             pytest.param(
                 {"name": "amount.worker.gpu.memory", "min": -2},

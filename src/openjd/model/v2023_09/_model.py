@@ -1910,7 +1910,12 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
     def _validate_attribute_list(
         cls, v: AttributeCapabilityList, values: dict[str, Any], is_allof: bool
     ) -> None:
-        capability_name = values["name"].lower()
+        try:
+            capability_name = values["name"].lower()
+        except KeyError:
+            # Just return as though there is no error. The missing name field
+            # will be reported by the validation of 'name'
+            return
         standard_capability = STANDARD_ATTRIBUTE_CAPABILITIES.get(capability_name, {})
         if standard_capability:
             if is_allof and not standard_capability["multivalued"] and len(v) > 1:
