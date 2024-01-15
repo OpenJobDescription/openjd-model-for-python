@@ -2,8 +2,9 @@
 
 import json
 from dataclasses import is_dataclass
+from decimal import Decimal
 from enum import Enum
-from typing import Any, ClassVar, Type, TypeVar, cast
+from typing import Any, ClassVar, Type, TypeVar, Union, cast
 
 import yaml
 from pydantic import BaseModel
@@ -83,6 +84,38 @@ def document_string_to_object(*, document: str, document_type: DocumentType) -> 
         raise DecodeValidationError(
             f"The document is not a valid {document_type.value} document consisting of key-value pairs."
         )
+
+
+def model_to_object(*, model: OpenJDModel) -> dict[str, Any]:
+    """Given a model from this package, encode it as a dictionary such that it could
+    be written to a JSON/YAML document."""
+
+    as_dict = model.dict()
+
+    # Some of the values in the model can be type 'Decimal', which doesn't
+    # encode into json/yaml without special handling. So, we convert those in to
+    # strings.
+    def decimal_to_str(data: Union[dict[str, Any], list[Any]]) -> None:
+        if isinstance(data, list):
+            for i, item in enumerate(data):
+                if isinstance(item, Decimal):
+                    data[i] = str(item)
+                elif isinstance(item, (dict, list)):
+                    decimal_to_str(item)
+        else:
+            delete_keys: list[str] = []
+            for k, v in data.items():
+                if isinstance(v, Decimal):
+                    data[k] = str(v)
+                elif isinstance(v, (dict, list)):
+                    decimal_to_str(v)
+                elif v is None:
+                    delete_keys.append(k)
+            for k in delete_keys:
+                del data[k]
+
+    decimal_to_str(as_dict)
+    return as_dict
 
 
 def decode_job_template(*, template: dict[str, Any]) -> JobTemplate:

@@ -74,6 +74,38 @@ job_template = JobTemplate(
 )
 ```
 
+### Converting a Template Model to a Dictionary
+
+```python
+import json
+from openjd.model import (
+    decode_job_template,
+    model_to_object,
+)
+from openjd.model.v2023_09 import *
+
+job_template = JobTemplate(
+    specificationVersion="jobtemplate-2023-09",
+    name="DemoJob",
+    steps=[
+        StepTemplate(
+            name="DemoStep",
+            script=StepScript(
+                actions=StepActions(
+                    onRun=Action(
+                        command="echo",
+                        args=["Hello world"]
+                    )
+                )
+            )
+        )
+    ]
+)
+
+obj = model_to_object(model=job_template)
+print(json.dumps(obj))
+```
+
 ### Creating a Job from a Job Template
 
 ```python
