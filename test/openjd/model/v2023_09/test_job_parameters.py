@@ -1013,6 +1013,9 @@ class TestJobIntParameterDefinition:
             ),
             pytest.param({"name": "Foo", "type": "INT", "default": 1}, id="has default as int"),
             pytest.param(
+                {"name": "Foo", "type": "INT", "default": -1}, id="has default as negative int"
+            ),
+            pytest.param(
                 {"name": "Foo", "type": "INT", "default": "1"}, id="has default as string"
             ),
             pytest.param({"name": "Foo", "type": "INT", "minValue": 1}, id="has min value as int"),
