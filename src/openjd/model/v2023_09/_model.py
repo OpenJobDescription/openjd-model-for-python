@@ -1394,7 +1394,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
     minValue: Optional[int] = None  # noqa: N815
     maxValue: Optional[int] = None  # noqa: N815
     allowedValues: Optional[AllowedIntParameterList] = None  # noqa: N815
-    default: Optional[PositiveInt] = None
+    default: Optional[int] = None
 
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
