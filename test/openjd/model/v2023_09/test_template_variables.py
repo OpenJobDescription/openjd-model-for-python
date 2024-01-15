@@ -1088,6 +1088,44 @@ class TestJobTemplate:
                 1,
                 id="int range expression fails on fake format string",
             ),
+            # Test that we still properly collect parameter definitions for format string
+            # validation when we have a validation error in a parameter definition.
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "DemoJob",
+                    "parameterDefinitions": [
+                        {"name": "Foo", "type": "INT", "default": "Blah"},
+                        {"name": "Fuzz", "type": "INT"},
+                    ],
+                    "steps": [
+                        {
+                            "name": "DemoStep",
+                            "parameterSpace": {
+                                "taskParameterDefinitions": [
+                                    {"name": "Foo", "type": "INT", "range": "a-b"},
+                                    {"name": "Fuzz", "type": "INT", "range": "1-10"},
+                                ]
+                            },
+                            "script": {
+                                "actions": {
+                                    "onRun": {
+                                        "command": "echo",
+                                        "args": [
+                                            "{{Param.Foo}}",
+                                            "{{Param.Fuzz}}",
+                                            "{{Task.Param.Foo}}",
+                                            "{{Task.Param.Fuzz}}",
+                                        ],
+                                    }
+                                }
+                            },
+                        }
+                    ],
+                },
+                2,  # Validation of Job Foo & Task Foo
+                id="all parameter symbols are defined when validation errors",
+            ),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any], error_count: int) -> None:
