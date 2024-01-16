@@ -15,6 +15,14 @@ This library requires:
 1. Python 3.9 or higher; and
 2. Linux, MacOS, or Windows operating system.
 
+## Versioning
+
+This package's version follows [Semantic Versioning 2.0](https://semver.org/).
+
+1. The MAJOR version is currently 0.
+2. The MINOR version is incremented when backwards incompatible changes are introduced to the public API.
+3. The PATCH version is incremented when bug fixes or backwards compatible changes are introduced to the public API.
+
 ## Example Usage
 
 ### Reading and Validating a Template File
