@@ -64,8 +64,8 @@ job_template = JobTemplate(
             script=StepScript(
                 actions=StepActions(
                     onRun=Action(
-                        command="echo",
-                        args=["Hello world"]
+                        command="python",
+                        args=["-c", "print('Hello world!')"]
                     )
                 )
             )
@@ -109,6 +109,8 @@ print(json.dumps(obj))
 ### Creating a Job from a Job Template
 
 ```python
+import os
+from pathlib import Path
 from openjd.model import (
     DecodeValidationError,
     create_job,
@@ -116,6 +118,7 @@ from openjd.model import (
     preprocess_job_parameters
 )
 
+job_template_path = Path("/absolute/path/to/job/template.json")
 job_template = decode_job_template(
     template={
         "name": "DemoJob",
@@ -128,7 +131,7 @@ job_template = decode_job_template(
                 "name": "DemoStep",
                 "script": {
                     "actions": {
-                        "onRun": { "command": "echo", "args": [ "Foo={{Param.Foo}}" ] }
+                        "onRun": { "command": "python", "args": [ "-c", "print(r'Foo={{Param.Foo}}')" ] }
                     }
                 }
             }
@@ -140,13 +143,15 @@ try:
         job_template=job_template,
         job_parameter_values={
             "Foo": "12"
-        }
+        },
+        job_template_dir=job_template_path.parent,
+        current_working_dir=Path(os.getcwd())
     )
     job = create_job(
         job_template=job_template,
         job_parameter_values=parameters
     )
-except DecodeValidationError as e:
+except (DecodeValidationError, RuntimeError) as e:
     print(str(e))
 ```
 
@@ -168,7 +173,7 @@ job_template = decode_job_template(
                 "name": "Step1",
                 "script": {
                     "actions": {
-                        "onRun": { "command": "echo", "args": [ "Step1" ] }
+                        "onRun": { "command": "python", "args": [ "-c", "print('Step1')" ] }
                     }
                 }
             },
@@ -177,7 +182,7 @@ job_template = decode_job_template(
                 "dependencies": [ { "dependsOn": "Step1" }],
                 "script": {
                     "actions": {
-                        "onRun": { "command": "echo", "args": [ "Step2" ] }
+                        "onRun": { "command": "python", "args": [ "-c", "print('Step2')" ] }
                     }
                 }
             }
@@ -225,8 +230,8 @@ job_template = decode_job_template(
                 "script": {
                     "actions": {
                         "onRun": {
-                            "command": "echo",
-                            "args": [ "Foo={{Task.Param.Foo}}", "Bar={{Task.Param.Bar}}"]
+                            "command": "python",
+                            "args": [ "-c", "print(f'Foo={{Task.Param.Foo}}, Bar={{Task.Param.Bar}}"]
                         }
                     }
                 }
