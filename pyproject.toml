@@ -8,11 +8,31 @@ dynamic = ["version"]
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.9"
-
+description = "Provides a Python implementation of the data model for Open Job Description's template schemas."
+# https://pypi.org/classifiers/
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: MacOS",
+  "License :: OSI Approved :: Apache Software License",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries"
+]
 dependencies = [
   "pyyaml == 6.0.*",
   "pydantic ~= 1.10",
 ]
+
+[project.urls]
+Homepage = "https://github.com/OpenJobDescription/openjd-specifications/wiki"
+Source = "https://github.com/OpenJobDescription/openjd-model-for-python"
 
 [tool.hatch.build]
 artifacts = [
