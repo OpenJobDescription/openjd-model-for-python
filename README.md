@@ -179,13 +179,21 @@ job_template = decode_job_template(
             },
             {
                 "name": "Step2",
-                "dependencies": [ { "dependsOn": "Step1" }],
+                "dependencies": [ { "dependsOn": "Step1" }, { "dependsOn": "Step3" }],
                 "script": {
                     "actions": {
                         "onRun": { "command": "python", "args": [ "-c", "print('Step2')" ] }
                     }
                 }
-            }
+            },
+            {
+                "name": "Step3",
+                "script": {
+                    "actions": {
+                        "onRun": { "command": "echo", "args": [ "Step3" ] }
+                    }
+                }
+            },
         ]
     }
 )
@@ -200,8 +208,13 @@ for step in job.steps:
     if step_node.out_edges:
         name_list = ', '.join(edge.dependent.step.name for edge in step_node.out_edges)
         print(f"The following Steps depend upon '{step.name}': {name_list}")
+
+print(f"\nSteps in topological order: {[step.name for step in dependency_graph.topo_sorted()]}")
 # The following Steps depend upon 'Step1': Step2
-# Step 'Step2' depends upon: Step1
+# Step 'Step2' depends upon: Step1, Step3
+# The following Steps depend upon 'Step3': Step2
+
+# Steps in topological order: ['Step1', 'Step3', 'Step2']
 ```
 
 ### Working with a Step's Tasks
