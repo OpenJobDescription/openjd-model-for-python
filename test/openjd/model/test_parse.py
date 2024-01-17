@@ -12,6 +12,7 @@ from openjd.model import (
     decode_environment_template,
     decode_job_template,
     document_string_to_object,
+    model_to_object,
 )
 from openjd.model._types import OpenJDModel
 from openjd.model.v2023_09 import JobTemplate as JobTemplate_2023_09
@@ -60,6 +61,46 @@ class TestDocStringToObject:
         # THEN
         with pytest.raises(DecodeValidationError):
             document_string_to_object(document=document, document_type=doctype)
+
+
+class TestModelToObject:
+    @pytest.mark.parametrize(
+        "template",
+        [
+            pytest.param(
+                {
+                    "name": "DemoJob",
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "parameterDefinitions": [{"name": "Foo", "type": "FLOAT", "default": "12"}],
+                    "steps": [
+                        {
+                            "name": "DemoStep",
+                            "parameterSpace": {
+                                "taskParameterDefinitions": [
+                                    {"name": "Foo", "type": "FLOAT", "range": ["1.1", "1.2"]}
+                                ]
+                            },
+                            "script": {
+                                "actions": {
+                                    "onRun": {"command": "echo", "args": ["Foo={{Param.Foo}}"]}
+                                }
+                            },
+                        }
+                    ],
+                },
+                id="translates Decimal to string",
+            )
+        ],
+    )
+    def test(self, template: dict[str, Any]) -> None:
+        # GIVEN
+        model = decode_job_template(template=template)
+
+        # WHEN
+        result = model_to_object(model=model)
+
+        # THEN
+        assert result == template
 
 
 class TestDecodeJobTemplate:
