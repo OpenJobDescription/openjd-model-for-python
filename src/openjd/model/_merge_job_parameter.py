@@ -1,11 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from collections import defaultdict
 from decimal import Decimal
 from typing import Any, NamedTuple, Optional, Union, cast
 
 from ._errors import CompatibilityError
 from ._parse import parse_model
-from ._types import JobParameterDefinition
+from ._types import JobParameterDefinition, JobTemplate, EnvironmentTemplate, SchemaVersion
 from .v2023_09 import (
     JobParameterType,
     JobPathParameterDefinition,
@@ -38,6 +39,78 @@ class SourcedIntParameterDefinition(NamedTuple):
 class SourcedFloatParameterDefinition(NamedTuple):
     source: str
     definition: JobFloatParameterDefinition
+
+
+def merge_job_parameter_definitions(
+    *,
+    job_template: Optional[JobTemplate] = None,
+    environment_templates: Optional[list[EnvironmentTemplate]] = None,
+) -> list[JobParameterDefinition]:
+    """This function merges the definitions of the Job Parameters in a given list of EnvironmentTemplates with
+    that in a JobTemplate; both the environment and job templates are optional, however. In the act of doing so,
+    it also checks that any multiply-defined job parameters' definitions are compatible with one another.
+
+    The merge order for these definitions is to first process all of the given environments in the order given,
+    and then to process the job template last.
+
+    Args:
+        job_template (Optional[JobTemplate], optional): A Job Template whose parameter definitions will
+            be merged last. Defaults to None.
+        environment_templates (Optional[list[EnvironmentTemplate]], optional): A list of Environment Templates
+            whose parameter definitions will be merged in the order given. Defaults to None.
+
+    Raises:
+        CompatibilityError: Raised if the given template's job parameter definitions are not compatible.
+
+    Returns:
+        list[JobParameterDefinition]: The result of merging the Job Parameter Definitions from all of the given
+            templates.
+    """
+    if job_template and job_template.specificationVersion not in (SchemaVersion.v2023_09,):
+        raise NotImplementedError(f"Not implemented for schema version {job_template.version}")
+    if environment_templates and any(
+        env.specificationVersion not in (SchemaVersion.ENVIRONMENT_v2023_09,)
+        for env in environment_templates
+    ):
+        raise NotImplementedError(
+            f"Not implemented for Environment Template schema versions other than {str(SchemaVersion.ENVIRONMENT_v2023_09)}"
+        )
+
+    # param name -> list[SourcedParamDefinition]
+    collected_definitions = defaultdict[str, list[SourcedParamDefinition]](list)
+
+    # external environments' definitions always come before the job template, so collect them first.
+    for env in environment_templates or []:
+        if not env.parameterDefinitions:
+            continue
+        for param in env.parameterDefinitions:
+            collected_definitions[param.name].append(
+                SourcedParamDefinition(
+                    source=f"EnvironmentTemplate for {env.environment.name}", definition=param
+                )
+            )
+
+    if job_template is not None and job_template.parameterDefinitions is not None:
+        for param in job_template.parameterDefinitions:
+            collected_definitions[param.name].append(
+                SourcedParamDefinition(source="JobTemplate", definition=param)
+            )
+
+    errors = list[str]()
+    return_value = list[JobParameterDefinition]()
+
+    for name, source in collected_definitions.items():
+        try:
+            return_value.append(merge_job_parameter_definitions_for_one(source))
+        except CompatibilityError as e:
+            compat_errors = "\n\t".join(str(e).split("\n"))
+            errors.append(
+                f"The definitions for job parameter '{name}' are in conflict:\n\t{compat_errors}"
+            )
+
+    if errors:
+        raise CompatibilityError("\n".join(errors))
+    return return_value
 
 
 def merge_job_parameter_definitions_for_one(
