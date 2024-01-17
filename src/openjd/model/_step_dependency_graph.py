@@ -119,3 +119,71 @@ class StepDependencyGraph:
         the number of edges where the Step is the 'origin' in the edge.
         """
         return max(len(node.out_edges) for node in self._nodes.values())
+
+    def topo_sorted(self) -> list[Step]:
+        """Return a sorted list of the Steps in the graph, in topological order.
+
+        This is a stable sort as follows. Each Step, in order of appearance in the template,
+        is placed as early as it can be without being earlier than a dependency or earlier than
+        an already placed Step.
+
+        Example uses for this ordering:
+        1. To run all the Steps of a job in serial order. In topological order, every
+            Step will run after all its dependencies.
+        2. To submit a job to a render farm, one step at a time. In topological order,
+            all the dependencies of each Step will have already been submitted, so all
+            the IDs needed to specify dependencies in the destination render farm are
+            available.
+        """
+        # Note: Python's stdlib includes graphlib.TopologicalSorter, but it does not
+        #       act as a stable sort in the way we've defined in the docstring.
+
+        started_names: set[str] = set()
+        completed_names: set[str] = set()
+        name_to_index: dict[str, int] = {name: index for index, name in enumerate(self._nodes)}
+        node_stack: list[StepDependencyGraphNode] = []
+        result: list[Step] = []
+
+        # Process the nodes in the order they were defined in the template
+        for node in self._nodes.values():
+            # Add the node to the stack
+            node_stack.append(node)
+            # Process it and its dependencies until the stack is empty
+            while len(node_stack) > 0:
+                top_node = node_stack[-1]
+                if top_node.step.name in completed_names:
+                    # Node was already completed, nothing more to process
+                    node_stack.pop()
+                elif top_node.step.name in started_names:
+                    # Node is now complete, append to the result list
+                    result.append(top_node.step)
+                    completed_names.add(top_node.step.name)
+                else:
+                    # Node is ready to start
+                    started_names.add(top_node.step.name)
+                    # Add all the dependencies that aren't completed to the stack
+                    dep_names = [
+                        dep.origin.step.name
+                        for dep in top_node.in_edges
+                        if dep.origin.step.name not in completed_names
+                    ]
+                    # Sort them in reverse of the index order from the template, to process them earliest first
+                    dep_names = sorted(
+                        dep_names, key=lambda name: name_to_index[name], reverse=True
+                    )
+                    for dep_name in dep_names:
+                        # If a dependency was started but not completed, we found a circular dependency
+                        # The template validation should have caught this if it was parsed from an object,
+                        # but if the model object was assembled by hand, this could happen.
+                        if dep_name in started_names and dep_name not in completed_names:
+                            cycle = " -> ".join(
+                                cycle_node.step.name
+                                for cycle_node in node_stack
+                                if cycle_node.step.name in started_names
+                            )
+                            raise ValueError(
+                                f"A circular dependency was found in the step dependency graph:\n{cycle} -> {dep_name}"
+                            )
+                        node_stack.append(self._nodes[dep_name])
+
+        return result
