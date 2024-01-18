@@ -15,9 +15,8 @@ from ._internal import (
     CombinationExpressionNode,
     CombinationExpressionParser,
     CombinationExpressionProductNode,
-    IntRangeExpression,
-    RangeExpressionParser,
 )
+from ._range_expr import IntRangeExpr
 from ._types import ParameterValue, ParameterValueType, StepParameterSpace, TaskParameterSet
 from .v2023_09 import (
     RangeExpressionTaskParameterDefinition as RangeExpressionTaskParameterDefinition_2023_09,
@@ -437,11 +436,11 @@ class RangeExpressionIdentifierNode(Node):
     name: str
     type: ParameterValueType
     range: str
-    range_expression: IntRangeExpression = field(init=False, repr=False, compare=False)
+    range_expression: IntRangeExpr = field(init=False, repr=False, compare=False)
     _len: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        self.range_expression = RangeExpressionParser().parse(self.range)
+        self.range_expression = IntRangeExpr.from_str(self.range)
         self._len = len(self.range_expression)
 
     def __len__(self) -> int:

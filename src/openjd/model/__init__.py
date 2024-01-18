@@ -10,6 +10,7 @@ from ._errors import (
     TokenError,
     UnsupportedSchema,
 )
+from ._range_expr import IntRangeExpr
 from ._parse import (
     DocumentType,
     decode_template,
@@ -61,6 +62,7 @@ __all__ = (
     "EnvironmentTemplate",
     "ExpressionError",
     "FormatStringError",
+    "IntRangeExpr",
     "Job",
     "JobParameterDefinition",
     "JobParameterInputValues",

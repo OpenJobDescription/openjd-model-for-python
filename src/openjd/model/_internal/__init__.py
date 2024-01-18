@@ -9,8 +9,6 @@ from ._combination_expr import Parser as CombinationExpressionParser
 from ._combination_expr import ProductNode as CombinationExpressionProductNode
 from ._create_job import instantiate_model
 from ._model_variable_references import validate_model_template_variable_references
-from ._range_expr import IntRange, IntRangeExpression
-from ._range_expr import Parser as RangeExpressionParser
 
 __all__ = (
     "instantiate_model",
@@ -21,9 +19,6 @@ __all__ = (
     "CombinationExpressionNode",
     "CombinationExpressionParser",
     "CombinationExpressionProductNode",
-    "RangeExpressionParser",
-    "IntRangeExpression",
-    "IntRange",
 )
 
 T = TypeVar("T")
