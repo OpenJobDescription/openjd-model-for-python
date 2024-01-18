@@ -8,12 +8,12 @@ from functools import total_ordering
 from itertools import chain
 from typing import Tuple
 
-from .._errors import ExpressionError, TokenError
-from .._tokenstream import Token, TokenStream, TokenType
+from ._errors import ExpressionError, TokenError
+from ._tokenstream import Token, TokenStream, TokenType
 
 
-class IntRangeExpression(Sized):
-    """An Int Range Expression is made up of one or more IntRanges"""
+class IntRangeExpr(Sized):
+    """An Int Range Expression is a set of integer values represented as a sorted list of IntRange objects."""
 
     _start: int
     _end: int
@@ -22,7 +22,17 @@ class IntRangeExpression(Sized):
     _range_length_indicies: list[int]
 
     def __init__(self, ranges: list[IntRange]):
-        self._ranges = sorted(ranges)
+        # Sort the ranges, then combine them where possible
+        sorted_ranges = sorted(ranges)
+        self._ranges = [sorted_ranges[0]]
+        for range in sorted_ranges[1:]:
+            if (
+                self._ranges[-1].step == range.step
+                and self._ranges[-1].end + range.step == range.start
+            ):
+                self._ranges[-1] = IntRange(self._ranges[-1].start, range.end, range.step)
+            else:
+                self._ranges.append(range)
         self._start = self.ranges[0].start
         self._end = self.ranges[-1].end
 
@@ -38,13 +48,51 @@ class IntRangeExpression(Sized):
 
         self._validate()
 
+    @staticmethod
+    def from_str(range_str: str) -> IntRangeExpr:
+        """Creates a range expression object from a range stored as a string."""
+        return Parser().parse(range_str)
+
+    @staticmethod
+    def from_list(values: list[int | str]) -> IntRangeExpr:
+        """Creates a range expression object from a list of integers/strings containing integers."""
+        if len(values) == 0:
+            return IntRangeExpr([])
+        elif len(values) == 1:
+            value = int(values[0])
+            return IntRangeExpr([IntRange(value, value)])
+        else:
+            # Convert to integers, remove duplicates, and sort
+            values_as_int: list[int] = sorted({int(i) for i in values})
+            # Find all the ranges, and concatenate them
+            ranges = []
+            start = values_as_int[0]
+            step = None
+
+            for value in values_as_int[1:]:
+                if step is None:
+                    end = value
+                    step = end - start
+                else:
+                    if value - end == step:
+                        end = value
+                    else:
+                        ranges.append(IntRange(start, end, step))
+                        start = value
+                        step = None
+            ranges.append(IntRange(start, end, step or 1))
+            return IntRangeExpr(ranges)
+
     def __len__(self) -> int:
         return self._length
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, IntRangeExpression):
+        if not isinstance(other, IntRangeExpr):
             raise NotImplementedError
         return self.ranges == other.ranges
+
+    def __str__(self) -> str:
+        return ",".join(str(range) for range in self.ranges)
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.ranges})"
@@ -74,12 +122,12 @@ class IntRangeExpression(Sized):
 
     @property
     def start(self) -> int:
-        """read-only property"""
+        """The smallest value in the range expression."""
         return self._start
 
     @property
     def end(self) -> int:
-        """read-only property"""
+        """The largest value in the range expression"""
         return self._end
 
     @property
@@ -133,6 +181,14 @@ class IntRange(Sized):
         self._range = range(self._start, self._end + offset, self._step)
 
         self._validate()
+
+    def __str__(self) -> str:
+        if len(self) == 1:
+            return str(self._start)
+        elif self.step == 1:
+            return f"{self._start}-{self._end}"
+        else:
+            return f"{self._start}-{self._end}:{self._step}"
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(start={self._start}, end={self._end}, step={self._step})"
@@ -229,8 +285,8 @@ class Parser:
         <WS> ::= whitespace character: tabs or spaces
     """
 
-    def parse(self, expr: str) -> IntRangeExpression:
-        """Generate an IntRangeExpression for the given string range expression.
+    def parse(self, expr: str) -> IntRangeExpr:
+        """Generate an IntRangeExpr for the given string range expression.
 
         Raises:
             TokenError: If an unexpected token is encountered.
@@ -332,7 +388,7 @@ class Parser:
         except ValueError:
             raise ExpressionError("Failed to create Range") from ValueError
 
-    def _expression(self) -> IntRangeExpression:
+    def _expression(self) -> IntRangeExpr:
         """Matches a range expression.
 
         Grammar:
@@ -349,7 +405,7 @@ class Parser:
             ExpressionError: If the expresssion is malformed.
 
         Returns:
-            IntRangeExpression: The full range expression parsed
+            IntRangeExpr: The full range expression parsed
         """
         range_ = self._range()
         ranges: list[IntRange] = [range_]
@@ -366,6 +422,6 @@ class Parser:
             pass
 
         try:
-            return IntRangeExpression(ranges)
+            return IntRangeExpr(ranges)
         except ValueError as error:
-            raise ExpressionError("Failed to create IntRangeExpression") from error
+            raise ExpressionError("Failed to create IntRangeExpr") from error

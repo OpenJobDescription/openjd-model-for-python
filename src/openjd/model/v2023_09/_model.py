@@ -32,10 +32,10 @@ from .._capabilities import (
 )
 from .._internal import (
     CombinationExpressionParser,
-    RangeExpressionParser,
     validate_model_template_variable_references,
     validate_unique_elements,
 )
+from .._range_expr import IntRangeExpr
 from .._types import (
     DefinesTemplateVariables,
     JobCreateAsMetadata,
@@ -487,7 +487,7 @@ class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
         """At this point, the format expressions have been resolved
         and we can determine if it's a valid RangeExpression"""
         try:
-            RangeExpressionParser().parse(value)
+            IntRangeExpr.from_str(value)
         except Exception as e:
             raise ValueError(str(e))
 
@@ -577,7 +577,7 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
             # they've all been evaluated
             if len(value.expressions) == 0:
                 try:
-                    RangeExpressionParser().parse(value)
+                    IntRangeExpr.from_str(value)
                 except Exception as e:
                     raise ValueError(str(e))
         return value

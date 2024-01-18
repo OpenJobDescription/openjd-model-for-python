@@ -1,15 +1,13 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from itertools import zip_longest
+from typing import Union
 
 import pytest
 
 from openjd.model import ExpressionError, TokenError
-from openjd.model._internal import (
-    IntRange,
-    IntRangeExpression,
-    RangeExpressionParser,
-)
+from openjd.model import IntRangeExpr
+from openjd.model._range_expr import IntRange, Parser as RangeExpressionParser
 
 
 class TestRangeExpressionParser:
@@ -87,6 +85,7 @@ class TestRangeExpressionParser:
 
         # THEN
         assert len(full_range) == 1
+        assert str(full_range) == range_expr
         for i in full_range:
             assert i == int(range_expr) == full_range.start == full_range.end
 
@@ -126,15 +125,15 @@ class TestRangeExpressionParser:
         assert full_range.end == max(start, end)
 
     @pytest.mark.parametrize(
-        "range_expr,start,end,total_range",
+        "range_expr,start,end,total_range,range_str",
         [
-            pytest.param("1-100,101-200", 1, 200, 200),
-            pytest.param("0-1,3-4,7-9,10", 0, 10, 8),
-            pytest.param("20-29,0-9,10-19", 0, 29, 30),
+            pytest.param("1-100,101-200", 1, 200, 200, "1-200"),
+            pytest.param("0-1,3-4,7-9,10", 0, 10, 8, "0-1,3-4,7-10"),
+            pytest.param("20-29,0-9,10-19", 0, 29, 30, "0-29"),
         ],
     )
     def test_parse_multiple_positive_non_overlapping_ranges(
-        self, range_expr: str, start: int, end: int, total_range: int
+        self, range_expr: str, start: int, end: int, total_range: int, range_str: str
     ) -> None:
         # GIVEN
         parser = RangeExpressionParser()
@@ -146,6 +145,7 @@ class TestRangeExpressionParser:
         assert full_range.start == start
         assert full_range.end == end
         assert len(full_range) == total_range
+        assert str(full_range) == range_str
 
     @pytest.mark.parametrize(
         "range_expr",
@@ -170,21 +170,61 @@ class TestRangeExpressionParser:
             parser.parse(range_expr)
 
 
-class TestIntRangeExpression:
-    def test_range_sorting(self):
+class TestIntRangeExpr:
+    def test_range_sorting_and_merging(self):
         # GIVEN
         first = IntRange(start=-9, end=0)
         second = IntRange(start=1, end=10)
         third = IntRange(start=11, end=20)
 
-        sorted_ranges = [first, second, third]
+        sorted_merged_ranges = [IntRange(start=-9, end=20)]
+        range_str = "-9-20"
 
         # WHEN
-        full_range = IntRangeExpression([third, second, first])
+        full_range = IntRangeExpr([third, second, first])
 
         # THEN
-        for actual, expected in zip_longest(full_range.ranges, sorted_ranges):
-            assert actual == expected
+        assert full_range.ranges == sorted_merged_ranges
+        assert str(full_range) == range_str
+
+    @pytest.mark.parametrize(
+        "range_input_str,range_str",
+        [
+            pytest.param("  5 ", "5", id="one int"),
+            pytest.param("9,0,3,2,8,10,1,4,7,6,5", "0-10", id="values 0-10 out of order"),
+            pytest.param("3-5,0-2,8-12:2", "0-5,8-12:2", id="ranges out of order with steps"),
+        ],
+    )
+    def test_range_expr_from_str(self, range_input_str: str, range_str: str):
+        # GIVEN
+
+        # WHEN
+        full_range = IntRangeExpr.from_str(range_input_str)
+
+        # THEN
+        assert str(full_range) == range_str
+
+    @pytest.mark.parametrize(
+        "range_list,range_str",
+        [
+            pytest.param([5], "5", id="one int"),
+            pytest.param(["7"], "7", id="one int as a str"),
+            pytest.param([9, 0, 3, 2, 8, 10, 1, 4, 7, 6, 5], "0-10", id="values 0-10 out of order"),
+            pytest.param(
+                [1, 3, 5, 6, 7, 8, 10, 13, 16],
+                "1-5:2,6-8,10-16:3",
+                id="runs with different step size",
+            ),
+        ],
+    )
+    def test_range_expr_from_list(self, range_list: list[Union[int, str]], range_str: str):
+        # GIVEN
+
+        # WHEN
+        full_range = IntRangeExpr.from_list(range_list)
+
+        # THEN
+        assert str(full_range) == range_str
 
     def test_sorting_with_descending_ranges(self):
         # GIVEN
@@ -195,7 +235,7 @@ class TestIntRangeExpression:
         sorted_ranges = [first, second, third]
 
         # WHEN
-        full_range = IntRangeExpression([second, third, first])
+        full_range = IntRangeExpr([second, third, first])
 
         # THEN
         for actual, expected in zip_longest(full_range.ranges, sorted_ranges):
@@ -210,7 +250,7 @@ class TestIntRangeExpression:
         sorted_ranges = [first, second, third]
 
         # WHEN
-        full_range = IntRangeExpression([second, first, third])
+        full_range = IntRangeExpr([second, first, third])
 
         # THEN
         for actual, expected in zip_longest(full_range.ranges, sorted_ranges):
@@ -231,7 +271,7 @@ class TestIntRangeExpression:
         second = IntRange(start=5, end=10, step=1)
         third = IntRange(start=13, end=20, step=1)
 
-        range_expression = IntRangeExpression([third, second, first])
+        range_expression = IntRangeExpr([third, second, first])
 
         # WHEN / THEN
         with pytest.raises(IndexError):
@@ -255,7 +295,7 @@ class TestIntRangeExpression:
         second = IntRange(start=5, end=10, step=1)
         third = IntRange(start=13, end=20, step=1)
 
-        range_expression = IntRangeExpression([third, second, first])
+        range_expression = IntRangeExpr([third, second, first])
 
         # WHEN
         actual = range_expression[index]
@@ -275,7 +315,7 @@ class TestIntRangeExpression:
     def test_iterable(self, range_expr: str) -> None:
         # GIVEN / WHEN
         parser: RangeExpressionParser = RangeExpressionParser()
-        full_range: IntRangeExpression = parser.parse(range_expr)
+        full_range: IntRangeExpr = parser.parse(range_expr)
         expected_range: range = range(full_range.start, full_range.end + 1, 1)
 
         # THEN
@@ -284,7 +324,7 @@ class TestIntRangeExpression:
 
     def test_read_only_properties(self) -> None:
         # GIVEN
-        full_range: IntRangeExpression = IntRangeExpression([IntRange(start=0, end=10, step=1)])
+        full_range: IntRangeExpr = IntRangeExpr([IntRange(start=0, end=10, step=1)])
         original_ranges_contents: list[IntRange] = full_range.ranges
 
         # WHEN
