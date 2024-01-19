@@ -65,20 +65,26 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
     """
 
     _parameters: dict[str, TaskParameter]
-    _expr_tree: Node
+    _expr_tree: Union[Node, list]
     _parsedtree: CombinationExpressionNode
 
-    def __init__(self, *, space: StepParameterSpace):
-        if space.combination is None:
-            # space.taskParameterDefinitions is a dict[str,TaskParameter]
-            combination = "*".join(name for name in space.taskParameterDefinitions)
+    def __init__(self, *, space: Optional[StepParameterSpace]):
+        # Special case the zero-dimensional space with one element
+        if space is None:
+            self._parameters = {}
+            self._parsetree = None
+            self._expr_tree = [{}]
         else:
-            combination = space.combination
-        self._parameters = dict(space.taskParameterDefinitions)
+            if space.combination is None:
+                # space.taskParameterDefinitions is a dict[str,TaskParameter]
+                combination = "*".join(name for name in space.taskParameterDefinitions)
+            else:
+                combination = space.combination
+            self._parameters = dict(space.taskParameterDefinitions)
 
-        # Raises: TokenError, ExpressionError
-        self._parsetree = CombinationExpressionParser().parse(combination)
-        self._expr_tree = self._create_expr_tree(self._parsetree)
+            # Raises: TokenError, ExpressionError
+            self._parsetree = CombinationExpressionParser().parse(combination)
+            self._expr_tree = self._create_expr_tree(self._parsetree)
 
     @property
     def names(self) -> AbstractSet[str]:
@@ -107,7 +113,10 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
                 self._root.next(result)
                 return result
 
-        return Iter(self._expr_tree)
+        if isinstance(self._expr_tree, Node):
+            return Iter(self._expr_tree)
+        else:
+            return iter(self._expr_tree)
 
     def __len__(self) -> int:
         """The number of task parameter sets that are defined by this parameter space"""

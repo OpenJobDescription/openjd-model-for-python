@@ -8,7 +8,11 @@ from openjd.model import (
     ParameterValue,
     ParameterValueType,
     StepParameterSpaceIterator,
+    create_job,
+    parse_model,
 )
+
+from openjd.model.v2023_09 import JobTemplate as JobTemplate_2023_09
 from openjd.model.v2023_09 import (
     RangeExpressionTaskParameterDefinition as RangeExpressionTaskParameterDefinition_2023_09,
 )
@@ -50,6 +54,52 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
 
         # THEN
         assert result.names == set(("Param1", "Param2"))
+
+    def test_no_param_iteration(self):
+        # GIVEN
+        expected = [{}]
+        # The parameter space is None in the mdoel when there are no parameters
+        template_data = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Job",
+            "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}],
+        }
+        job_template = parse_model(model=JobTemplate_2023_09, obj=template_data)
+        job = create_job(job_template=job_template, job_parameter_values=dict())
+
+        space = job.steps[0].parameterSpace
+        iterator = StepParameterSpaceIterator(space=space)
+
+        # WHEN
+        result = list(iterator)
+
+        # THEN
+        assert result == expected
+
+    def test_no_param_getelem(self):
+        # GIVEN
+        # The parameter space in a job with no task parameters
+        template_data = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Job",
+            "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}],
+        }
+        job_template = parse_model(model=JobTemplate_2023_09, obj=template_data)
+        job = create_job(job_template=job_template, job_parameter_values=dict())
+
+        space = job.steps[0].parameterSpace
+
+        # WHEN
+        result = StepParameterSpaceIterator(space=space)
+
+        # THEN
+        with pytest.raises(IndexError):
+            result[1]
+        with pytest.raises(IndexError):
+            result[-2]
+        expected = {}
+        assert result[0] == expected
+        assert result[-1] == expected
 
     @pytest.mark.parametrize(
         "range_int_param",
