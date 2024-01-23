@@ -56,10 +56,11 @@ __all__ = (
     "OpenJDModel",
     "ParameterValue",
     "ParameterValueType",
-    "SchemaVersion",
+    "SpecificationRevision",
     "Step",
     "StepParameterSpace",
     "TaskParameterSet",
+    "TemplateSpecificationVersion",
 )
 
 
@@ -90,8 +91,10 @@ JobParameterInputValues = dict[str, str]
 JobParameterValues = dict[str, ParameterValue]
 
 
-class SchemaVersion(str, Enum):
-    """Enumerant of all Open Job Description specification versions supported by this library.
+class TemplateSpecificationVersion(str, Enum):
+    """Enumerant of all Open Job Description Specification version strings for
+    templates. This is generally the value of a template's 'specificationVersion'
+    field.
 
     Special values:
       UNDEFINED -- Purely for internal testing.
@@ -102,24 +105,41 @@ class SchemaVersion(str, Enum):
     """
 
     UNDEFINED = "UNDEFINED"
-    v2023_09 = "jobtemplate-2023-09"
+    JOBTEMPLATE_v2023_09 = "jobtemplate-2023-09"
     ENVIRONMENT_v2023_09 = "environment-2023-09"
+    # Future:
+    # JOBTEMPLATE_EXPERIMENTAL = "jobtemplate-experimental"
+    # ENVIRONMENT_EXPERIMENTAL = "environment-experimental"
 
     @staticmethod
-    def job_template_versions() -> tuple[SchemaVersion, ...]:
-        return (SchemaVersion.v2023_09,)
+    def job_template_versions() -> tuple[TemplateSpecificationVersion, ...]:
+        return (TemplateSpecificationVersion.JOBTEMPLATE_v2023_09,)
 
     @staticmethod
-    def is_job_template(version: SchemaVersion) -> bool:
-        return version in SchemaVersion.job_template_versions()
+    def is_job_template(version: TemplateSpecificationVersion) -> bool:
+        return version in TemplateSpecificationVersion.job_template_versions()
 
     @staticmethod
-    def environment_template_versions() -> tuple[SchemaVersion, ...]:
-        return (SchemaVersion.ENVIRONMENT_v2023_09,)
+    def environment_template_versions() -> tuple[TemplateSpecificationVersion, ...]:
+        return (TemplateSpecificationVersion.ENVIRONMENT_v2023_09,)
 
     @staticmethod
-    def is_environment_template(version: SchemaVersion) -> bool:
-        return version in SchemaVersion.environment_template_versions()
+    def is_environment_template(version: TemplateSpecificationVersion) -> bool:
+        return version in TemplateSpecificationVersion.environment_template_versions()
+
+
+class SpecificationRevision(str, Enum):
+    """Enumerant of all published Open Job Description revisions. This appears as the value
+    of the 'revision' property in all model instances.
+
+    Special values:
+      UNDEFINED -- Purely for internal testing.
+    """
+
+    UNDEFINED = "UNDEFINED"
+    v2023_09 = "2023-09"
+    # Future:
+    #  EXPERIMENTAL = "experimental"
 
 
 class ResolutionScope(str, Enum):
@@ -257,9 +277,8 @@ class OpenJDModel(BaseModel):
         # Make the model instances immutable
         frozen = True
 
-    # The specific schema version that the model implements.
-    _version: ClassVar[SchemaVersion]  # deprecated
-    version: ClassVar[SchemaVersion]
+    # The specific schema revision that the model implements.
+    revision: ClassVar[SpecificationRevision]
 
     # ----
     # Metadata used for defining template variables for use in FormatStrings

@@ -3,7 +3,7 @@
 
 from dataclasses import dataclass
 
-from ._types import Job, SchemaVersion, Step, dataclass_kwargs
+from ._types import Job, SpecificationRevision, Step, dataclass_kwargs
 
 
 @dataclass(frozen=True, **dataclass_kwargs)
@@ -67,7 +67,7 @@ class StepDependencyGraph:
     def __init__(self, *, job: Job) -> None:
         # The only version supported at the moment.
         # Assert's here as a signal to change this class when we add a new spec rev.
-        assert job.version == SchemaVersion.v2023_09
+        assert job.revision == SpecificationRevision.v2023_09
 
         # Step 1 - create all of the graph nodes (one per step)
         self._nodes = dict()

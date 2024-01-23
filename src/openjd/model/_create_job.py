@@ -19,7 +19,8 @@ from ._types import (
     JobTemplate,
     ParameterValue,
     ParameterValueType,
-    SchemaVersion,
+    SpecificationRevision,
+    TemplateSpecificationVersion,
 )
 from ._convert_pydantic_error import pydantic_validationerrors_to_str, ErrorDict
 
@@ -193,13 +194,15 @@ def preprocess_job_parameters(
     Raises:
         ValueError - If any errors are detected with the given job parameter values.
     """
-    if job_template.version not in (SchemaVersion.v2023_09,):
-        raise NotImplementedError(f"Not implemented for schema version {job_template.version}")
+    if job_template.revision not in (SpecificationRevision.v2023_09,):
+        raise NotImplementedError(
+            f"Not implemented for Open Job Description Job Templates from revision {str(job_template.revision.value)}"
+        )
     if environment_templates and any(
-        env.version not in (SchemaVersion.v2023_09,) for env in environment_templates
+        env.revision not in (SpecificationRevision.v2023_09,) for env in environment_templates
     ):
         raise NotImplementedError(
-            f"Not implemented for Environment Template schema versions other than {str(SchemaVersion.ENVIRONMENT_v2023_09)}"
+            f"Not implemented for Open Job Description Environment Templates from revisions other than {str(SpecificationRevision.v2023_09.value)}"
         )
 
     return_value: JobParameterValues = dict[str, ParameterValue]()
@@ -225,7 +228,7 @@ def preprocess_job_parameters(
     if parameterDefinitions:
         # Set of all required, but undefined, job parameter values
         try:
-            if job_template.version == SchemaVersion.v2023_09:
+            if job_template.revision == SpecificationRevision.v2023_09:
                 return_value = _collect_defaults_2023_09(
                     parameterDefinitions,
                     job_parameter_values,
@@ -236,7 +239,7 @@ def preprocess_job_parameters(
                 _check_2023_09(parameterDefinitions, return_value)
             else:
                 raise NotImplementedError(
-                    f"Not implemented for schema version {job_template.version}"
+                    f"Not implemented for schema version {str(job_template.revision.value)}"
                 )
         except ValueError as err:
             errors.append(str(err))
@@ -306,7 +309,7 @@ def create_job(
     # Build out the symbol table for instantiating the Job.
     # We just prefix all job parameter names with the appropriate prefix.
     symtab = SymbolTable()
-    if job_template.specificationVersion == SchemaVersion.v2023_09:
+    if job_template.specificationVersion == TemplateSpecificationVersion.JOBTEMPLATE_v2023_09:
         from .v2023_09 import ValueReferenceConstants as ValueReferenceConstants_2023_09
 
         for name, param in all_job_parameter_values.items():

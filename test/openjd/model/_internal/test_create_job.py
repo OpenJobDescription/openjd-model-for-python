@@ -9,7 +9,7 @@ from pydantic import PositiveInt, ValidationError
 
 from openjd.model import SymbolTable
 from openjd.model._format_strings import FormatString
-from openjd.model import SchemaVersion
+from openjd.model import SpecificationRevision
 from openjd.model._internal._create_job import instantiate_model
 from openjd.model._types import (
     JobCreateAsMetadata,
@@ -20,7 +20,7 @@ from openjd.model._types import (
 
 class BaseModelForTesting(OpenJDModel):
     # Specific version doesn't matter for these tests
-    _version = SchemaVersion.UNDEFINED
+    revision = SpecificationRevision.UNDEFINED
 
 
 class TestInternalCreateJobNoMetadata:

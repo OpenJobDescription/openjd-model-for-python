@@ -43,13 +43,14 @@ from .._types import (
     JobParameterInterface,
     OpenJDModel,
     ResolutionScope,
-    SchemaVersion,
+    SpecificationRevision,
+    TemplateSpecificationVersion,
     TemplateVariableDef,
 )
 
 
 class OpenJDModel_v2023_09(OpenJDModel):  # noqa: N801
-    version = SchemaVersion.v2023_09
+    revision = SpecificationRevision.v2023_09
 
 
 class ValueReferenceConstants(Enum):
@@ -2158,7 +2159,7 @@ class JobTemplate(OpenJDModel_v2023_09):
     """Definition of an Open Job Description Job Template.
 
     Attributes:
-        specificationVersion (SchemaVersion.v2023_09): The OpenJD schema version
+        specificationVersion (TemplateSpecificationVersion.v2023_09): The OpenJD schema version
             whose data model this follows.
         name (JobTemplateName): The name of Jobs constructed by this template.
         steps (StepTemplateList): The Step Templates that comprise the Job Template.
@@ -2171,7 +2172,7 @@ class JobTemplate(OpenJDModel_v2023_09):
         schemaStr (Optional[str]): Ignored. Allowed for compatibility with json editing IDEs.
     """
 
-    specificationVersion: Literal[SchemaVersion.v2023_09]  # noqa: N815
+    specificationVersion: Literal[TemplateSpecificationVersion.JOBTEMPLATE_v2023_09]  # noqa: N815
     name: JobTemplateName
     steps: StepTemplateList
     description: Optional[Description] = None
@@ -2310,7 +2311,7 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
     """Definition of an Open Job Description Environment Template.
 
     Attributes:
-        specificationVersion (SchemaVersion.ENVIRONMENT_v2023_09): The OpenJD schema version
+        specificationVersion (TemplateSpecificationVersion.ENVIRONMENT_v2023_09): The OpenJD schema version
             whose data model this follows.
         parameterDefinitions (Optional[JobParameterDefinitionList]): The job parameters that are available for use
             within this template, and that must have values defined for them when creating jobs while this
@@ -2318,7 +2319,7 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
         environment (Environment): The definition of the Environment that is applied.
     """
 
-    specificationVersion: Literal[SchemaVersion.ENVIRONMENT_v2023_09]
+    specificationVersion: Literal[TemplateSpecificationVersion.ENVIRONMENT_v2023_09]
     parameterDefinitions: Optional[JobParameterDefinitionList] = None
     environment: Environment
 

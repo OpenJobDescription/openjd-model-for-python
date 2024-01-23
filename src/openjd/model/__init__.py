@@ -38,10 +38,11 @@ from ._types import (
     OpenJDModel,
     ParameterValue,
     ParameterValueType,
-    SchemaVersion,
+    SpecificationRevision,
     Step,
     StepParameterSpace,
     TaskParameterSet,
+    TemplateSpecificationVersion,
 )
 from ._version import version
 
@@ -72,7 +73,7 @@ __all__ = (
     "OpenJDModel",
     "ParameterValue",
     "ParameterValueType",
-    "SchemaVersion",
+    "SpecificationRevision",
     "Step",
     "StepDependencyGraph",
     "StepDependencyGraphNode",
@@ -81,6 +82,7 @@ __all__ = (
     "StepParameterSpaceIterator",
     "SymbolTable",
     "TaskParameterSet",
+    "TemplateSpecificationVersion",
     "TokenError",
     "UnsupportedSchema",
     "version",
