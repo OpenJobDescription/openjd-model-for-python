@@ -6,7 +6,12 @@ from typing import Any, NamedTuple, Optional, Union, cast
 
 from ._errors import CompatibilityError
 from ._parse import parse_model
-from ._types import JobParameterDefinition, JobTemplate, EnvironmentTemplate, SchemaVersion
+from ._types import (
+    JobParameterDefinition,
+    JobTemplate,
+    EnvironmentTemplate,
+    TemplateSpecificationVersion,
+)
 from .v2023_09 import (
     JobParameterType,
     JobPathParameterDefinition,
@@ -66,14 +71,16 @@ def merge_job_parameter_definitions(
         list[JobParameterDefinition]: The result of merging the Job Parameter Definitions from all of the given
             templates.
     """
-    if job_template and job_template.specificationVersion not in (SchemaVersion.v2023_09,):
-        raise NotImplementedError(f"Not implemented for schema version {job_template.version}")
+    if job_template and job_template.specificationVersion not in (
+        TemplateSpecificationVersion.JOBTEMPLATE_v2023_09,
+    ):
+        raise NotImplementedError(f"Not implemented for schema: {str(job_template.revision.value)}")
     if environment_templates and any(
-        env.specificationVersion not in (SchemaVersion.ENVIRONMENT_v2023_09,)
+        env.specificationVersion not in (TemplateSpecificationVersion.ENVIRONMENT_v2023_09,)
         for env in environment_templates
     ):
         raise NotImplementedError(
-            f"Not implemented for Environment Template schema versions other than {str(SchemaVersion.ENVIRONMENT_v2023_09)}"
+            f"Not implemented for Environment Template schemas other than: {str(TemplateSpecificationVersion.ENVIRONMENT_v2023_09.value)}"
         )
 
     # param name -> list[SourcedParamDefinition]
@@ -136,11 +143,11 @@ def merge_job_parameter_definitions_for_one(
         raise CompatibilityError("Parameter names differ. Please report this as a bug.")
     merged_properties["name"] = name
 
-    # The two parameters must be from compatible SchemaVersions
+    # The two parameters must be from compatible revision versions.
     # This is the same schema version right now, but may be relaxed as new versions are added.
-    schema_version = params[-1].definition.version
-    if any(param.definition.version != schema_version for param in params):
-        raise CompatibilityError("Parameter model versions differ.")
+    schema_revision = params[-1].definition.revision
+    if any(param.definition.revision != schema_revision for param in params):
+        raise CompatibilityError("Parameter models are from different specification revisions.")
 
     # All parameters must be the same parameter type.
     param_type = params[-1].definition.type
