@@ -477,14 +477,14 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         result = StepParameterSpaceIterator(space=space)
 
         # THEN
-        element: Callable[
-            [int, str, int, int], dict[str, ParameterValue]
-        ] = lambda p1, p2, p3, p4: {
-            "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
-            "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),
-            "Param3": ParameterValue(type=ParameterValueType.INT, value=str(p3)),
-            "Param4": ParameterValue(type=ParameterValueType.INT, value=str(p4)),
-        }
+        element: Callable[[int, str, int, int], dict[str, ParameterValue]] = (
+            lambda p1, p2, p3, p4: {
+                "Param1": ParameterValue(type=ParameterValueType.INT, value=str(p1)),
+                "Param2": ParameterValue(type=ParameterValueType.STRING, value=str(p2)),
+                "Param3": ParameterValue(type=ParameterValueType.INT, value=str(p3)),
+                "Param4": ParameterValue(type=ParameterValueType.INT, value=str(p4)),
+            }
+        )
         expected_values = [
             element(1, "a", 10, 20),
             element(1, "b", 10, 21),

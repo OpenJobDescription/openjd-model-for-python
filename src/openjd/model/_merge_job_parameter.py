@@ -231,9 +231,11 @@ def _merge_allowed_values(
         )
 
     return (
-        cast(Union[list[str], list[int], list[Decimal]], sorted(return_value))
-        if return_value
-        else None,
+        (
+            cast(Union[list[str], list[int], list[Decimal]], sorted(return_value))
+            if return_value
+            else None
+        ),
         errors,
     )
 
