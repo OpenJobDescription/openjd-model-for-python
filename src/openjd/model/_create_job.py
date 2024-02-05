@@ -314,12 +314,12 @@ def create_job(
 
         for name, param in all_job_parameter_values.items():
             if param.type != "PATH":
-                symtab[
-                    f"{ValueReferenceConstants_2023_09.JOB_PARAMETER_PREFIX.value}.{name}"
-                ] = all_job_parameter_values[name].value
-            symtab[
-                f"{ValueReferenceConstants_2023_09.JOB_PARAMETER_RAWPREFIX.value}.{name}"
-            ] = all_job_parameter_values[name].value
+                symtab[f"{ValueReferenceConstants_2023_09.JOB_PARAMETER_PREFIX.value}.{name}"] = (
+                    all_job_parameter_values[name].value
+                )
+            symtab[f"{ValueReferenceConstants_2023_09.JOB_PARAMETER_RAWPREFIX.value}.{name}"] = (
+                all_job_parameter_values[name].value
+            )
     else:
         raise NotImplementedError(
             f"Spec version {job_template.specificationVersion} not implemented."
