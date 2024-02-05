@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .._symbol_table import SymbolTable
+from ._edit_distance import closest
 
 
 class Node(ABC):
@@ -54,6 +55,11 @@ class Node(ABC):
         pass
 
 
+# A heuristic. Any closest match with an edit distance greater than this will
+# not be returned as a closest match for error reporting purposes.
+MAX_MATCH_DISTANCE_THRESHOLD = 5
+
+
 @dataclass
 class FullNameNode(Node):
     """Expression tree node representing a fully qualified identifier name.
@@ -64,9 +70,14 @@ class FullNameNode(Node):
 
     def validate_symbol_refs(self, *, symbols: set[str]) -> None:
         if self.name not in symbols:
-            raise ValueError(
-                f"{self.name} is referenced by an expression, but is out of scope or has no value"
-            )
+            msg = f"Variable {self.name} does not exist at this location."
+            distance, closest_matches = closest(symbols, self.name)
+            if distance < MAX_MATCH_DISTANCE_THRESHOLD:
+                if len(closest_matches) == 1:
+                    msg += f" Did you mean: {''.join(closest_matches)}"
+                elif len(closest_matches) > 1:
+                    msg += f" Did you mean one of: {', '.join(sorted(closest_matches))}"
+            raise ValueError(msg)
 
     def evaluate(self, *, symtab: SymbolTable) -> Any:
         if self.name not in symtab:
