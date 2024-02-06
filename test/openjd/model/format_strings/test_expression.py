@@ -34,6 +34,45 @@ class TestInterpolationExpression:
         with pytest.raises(TokenError):
             InterpolationExpression(expr)
 
+    def test_validate_success(self) -> None:
+        # GIVEN
+        symbols = set(("Test.Name",))
+        expr = InterpolationExpression("Test.Name")
+
+        # THEN
+        expr.validate_symbol_refs(symbols=symbols)  # Does not raise
+
+    @pytest.mark.parametrize(
+        "symbols, expr, error_matches",
+        [
+            pytest.param(
+                set(),
+                "Test.Foo",
+                "Variable Test.Foo does not exist at this location.",
+                id="empty set",
+            ),
+            pytest.param(
+                set(("Test.Foo", "Test.Boo", "Test.Another")),
+                "Tst.Foo",
+                "Variable Tst.Foo does not exist at this location. Did you mean: Test.Foo",
+                id="one candidate",
+            ),
+            pytest.param(
+                set(("Test.Foo", "Test.Boo", "Test.Another")),
+                "Test.Zoo",
+                "Variable Test.Zoo does not exist at this location. Did you mean one of: Test.Boo, Test.Foo",
+                id="two candidates",
+            ),
+        ],
+    )
+    def test_validate_error(self, symbols: set[str], expr: str, error_matches: str) -> None:
+        # GIVEN
+        test = InterpolationExpression(expr)
+
+        # THEN
+        with pytest.raises(ValueError, match=error_matches):
+            test.validate_symbol_refs(symbols=symbols)
+
     def test_evaluate_success(self):
         # GIVEN
         symtab = SymbolTable()
