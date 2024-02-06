@@ -8,11 +8,11 @@ from ._combination_expr import Node as CombinationExpressionNode
 from ._combination_expr import Parser as CombinationExpressionParser
 from ._combination_expr import ProductNode as CombinationExpressionProductNode
 from ._create_job import instantiate_model
-from ._model_variable_references import validate_model_template_variable_references
+from ._variable_reference_validation import prevalidate_model_template_variable_references
 
 __all__ = (
     "instantiate_model",
-    "validate_model_template_variable_references",
+    "prevalidate_model_template_variable_references",
     "validate_unique_elements",
     "CombinationExpressionAssociationNode",
     "CombinationExpressionIdentifierNode",

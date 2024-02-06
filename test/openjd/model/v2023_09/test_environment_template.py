@@ -196,6 +196,35 @@ class TestEnvironmentTemplate:
                 6,
                 id="unknown parameter reference",
             ),
+            # Test that we still properly collect parameter definitions for format string
+            # validation when we have a validation error in a parameter definition.
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "parameterDefinitions": [
+                        {"name": "Foo", "type": "INT", "default": "Blah"},
+                        {"name": "Fuzz", "type": "INT"},
+                    ],
+                    "environment": {
+                        "name": "DemoEnvironment",
+                        "script": {
+                            "actions": {
+                                "onEnter": {
+                                    "command": "echo",
+                                    "args": [
+                                        "{{Param.Foo}}",
+                                        "{{Param.Fuzz}}",
+                                        "{{Task.Param.Foo}}",
+                                        "{{Task.Param.Fuzz}}",
+                                    ],
+                                }
+                            }
+                        },
+                    },
+                },
+                2,  # Validation of Job Foo & Task Foo
+                id="all parameter symbols are defined when validation errors",
+            ),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any], expected_num_errors: int) -> None:

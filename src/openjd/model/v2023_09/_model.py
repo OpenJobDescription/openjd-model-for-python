@@ -32,8 +32,10 @@ from .._capabilities import (
 )
 from .._internal import (
     CombinationExpressionParser,
-    validate_model_template_variable_references,
     validate_unique_elements,
+)
+from .._internal._variable_reference_validation import (
+    prevalidate_model_template_variable_references,
 )
 from .._range_expr import IntRangeExpr
 from .._types import (
@@ -2215,9 +2217,11 @@ class JobTemplate(OpenJDModel_v2023_09):
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 
-    @root_validator
-    def _validate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
-        errors = validate_model_template_variable_references(cls, values)
+    @root_validator(pre=True)
+    def _prevalidate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
+        errors = prevalidate_model_template_variable_references(
+            cast(Type[OpenJDModel], cls), values
+        )
         if errors:
             raise ValidationError(errors, JobTemplate)
         return values
@@ -2336,9 +2340,11 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 
-    @root_validator
-    def _validate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
-        errors = validate_model_template_variable_references(cls, values)
+    @root_validator(pre=True)
+    def _prevalidate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
+        errors = prevalidate_model_template_variable_references(
+            cast(Type[OpenJDModel], cls), values
+        )
         if errors:
             raise ValidationError(errors, EnvironmentTemplate)
         return values
