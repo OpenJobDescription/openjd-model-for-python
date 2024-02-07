@@ -65,7 +65,7 @@ jobs:
           NEXT_SEMVER=$(python -c 'import sys, re; print(re.match(r"chore\(release\): ([0-9]+\.[0-9]+\.[0-9]+).*", sys.argv[1]).group(1))' "$COMMIT_TITLE")
 
           # The format of the tag must match the pattern in pyproject.toml -> tool.semantic_release.tag_format
-          TAG="v$NEXT_SEMVER"
+          TAG="$NEXT_SEMVER"
 
           git config --local user.email "client-software-ci@amazon.com"
           git config --local user.name "client-software-ci"
