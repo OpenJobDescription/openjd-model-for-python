@@ -13,6 +13,9 @@ on:
         - minor
         - major
 
+concurrency:
+  group: release
+
 jobs:
   TestMainline:
     name: Test Mainline

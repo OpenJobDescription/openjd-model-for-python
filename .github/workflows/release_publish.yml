@@ -8,6 +8,9 @@ on:
     paths:
       - CHANGELOG.md
 
+concurrency:
+  group: release
+
 jobs:
   VerifyCommit:
     runs-on: ubuntu-latest
@@ -22,7 +25,7 @@ jobs:
 
       - name: VerifyAuthor
         run: |
-          EXPECTED_AUTHOR="client-software-ci@amazon.com"
+          EXPECTED_AUTHOR="129794699+client-software-ci@users.noreply.github.com"
           AUTHOR=$(git show -s --format='%ae' HEAD)
           if [[ $AUTHOR != $EXPECTED_AUTHOR ]]; then
             echo "ERROR: Expected author email to be '$EXPECTED_AUTHOR', but got '$AUTHOR'. Aborting release."
@@ -128,7 +131,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.Release.outputs.tag }}
+          ref: release
           fetch-depth: 0
 
       - name: Configure AWS credentials
