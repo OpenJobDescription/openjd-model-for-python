@@ -38,6 +38,7 @@ jobs:
     needs: VerifyCommit
     runs-on: ubuntu-latest
     permissions:
+      id-token: write
       contents: write
     env:
       CODEARTIFACT_REGION: "us-west-2"
