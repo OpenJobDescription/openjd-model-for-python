@@ -1,3 +1,17 @@
+## 0.3.0 (2024-02-08)
+
+### BREAKING CHANGES
+* redefine model versioning enums (#44) ([`c90352f`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/c90352f43e155216cba564872148349066e3b356))
+
+### Features
+* suggest template variables when symbol is unknown (#48) ([`435971a`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/435971ac240c5fedf1c24310e9a3f50d487abaf6))
+* Extend IntRangeExpression and make it an external interface ([`df7071c`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/df7071c4f81abc579d020ad5ed56a70b4a9d51b1))
+* Add topo_sorted() function to the StepDependencyGraph ([`9a49c41`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/9a49c417336b34670e95834630dfbf07956909c7))
+
+### Bug Fixes
+* improve validation errors when parameter defs have errors (#47) ([`6ba9a72`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/6ba9a724b35c5cc4bab68a5d2e6f6e69fa3ed85a))
+* Support iterating zero-dimensional step parameter spaces ([`c891ee1`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/c891ee1d3feed627b707bc42a2628010e61e634c))
+
 ## 0.2.0 (2024-01-18)
 
 ### BREAKING CHANGES
