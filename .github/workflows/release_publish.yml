@@ -99,7 +99,7 @@ jobs:
       # Tag must be made before building so the generated _version.py files have the correct version
       - name: Build
         run: |
-          CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain ${{ secrets.CODEARTIFACT_DOMAIN }} --domain-owner ${{ secrets.CODEARTIFACT_ACCOUNT_ID }} --query authorizationToken --output text --region us-west-2)
+          export CODEARTIFACT_AUTH_TOKEN=$(aws codeartifact get-authorization-token --domain ${{ secrets.CODEARTIFACT_DOMAIN }} --domain-owner ${{ secrets.CODEARTIFACT_ACCOUNT_ID }} --query authorizationToken --output text --region us-west-2)
           pip install --upgrade hatch
           hatch build
 
