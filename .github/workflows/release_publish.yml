@@ -37,6 +37,7 @@ jobs:
   Release:
     needs: VerifyCommit
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       id-token: write
       contents: write
@@ -113,6 +114,7 @@ jobs:
   MergeBack:
     needs: Release
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     steps:
@@ -121,6 +123,7 @@ jobs:
         with:
           ref: mainline
           fetch-depth: 0
+          token: ${{ secrets.CI_TOKEN }}
 
       - name: MergeBackMainline
         run: |

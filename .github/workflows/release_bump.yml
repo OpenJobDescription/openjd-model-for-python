@@ -27,6 +27,7 @@ jobs:
   Bump:
     needs: TestMainline
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
       pull-requests: write
