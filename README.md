@@ -32,7 +32,7 @@ For example, if you would like to verify your download of the wheel for version 
     openjd_model-1.2.3-py3-none-any.whl.sig
     ```
 
-2) Install the `gpg` command line tool. The installation process varies by operation system. Please refer to the GnuPG website for instructions: https://gnupg.org/download/
+2) Install the `gpg` command line tool. The installation process varies by operating system. Please refer to the GnuPG website for instructions: https://gnupg.org/download/
 
 3) Save the following contents to a file called `openjobdescription-pgp.asc`:
     ```
