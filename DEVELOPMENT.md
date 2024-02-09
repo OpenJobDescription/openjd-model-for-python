@@ -33,7 +33,7 @@ We use this convention in this package in two ways:
 1. In filenames.
     1. Any file whose name is not prefixed with an underscore **is** a part of the public
     interface of this package. The name may not change and public symbols (classes, modules,
-    functions, etc) defined in the file may not be moved to other files or renamed without a
+    functions, etc.) defined in the file may not be moved to other files or renamed without a
     major version number change.
     2. Any file whose name is prefixed with an underscore is an internal module of the package
     and is not part of the public interface. These files can be renamed, refactored, have symbols
@@ -96,7 +96,7 @@ from typing import Dict as _Dict
 Another convention that we are adopting in this package is that all functions/methods that are a
 part of the package's external interface should refrain from using positional-or-keyword arguments.
 All arguments should be keyword-only unless the argument name has no true external meaning (e.g.
-arg1, arg2, etc for `min`). Benefits of this convention are:
+arg1, arg2, etc. for `min`). Benefits of this convention are:
 
 1. All uses of the public APIs of this package are forced to be self-documenting; and
 2. The benefits set forth in PEP 570 ( https://www.python.org/dev/peps/pep-0570/#problems-without-positional-only-parameters ).
