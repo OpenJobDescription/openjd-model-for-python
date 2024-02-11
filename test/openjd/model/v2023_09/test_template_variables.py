@@ -19,7 +19,10 @@ STEP_SCRIPT = {"actions": {"onRun": {"command": "foo"}}}
 STEP_TEMPLATE = {"name": "StepName", "script": STEP_SCRIPT}
 STEP_SCRIPT_FOO = {
     "actions": {
-        "onRun": {"command": "foo {{Param.Foo}} {{RawParam.Foo}} {{Session.WorkingDirectory}}"}
+        "onRun": {
+            "command": "foo {{Param.Foo}} {{RawParam.Foo}} {{Session.WorkingDirectory}}",
+            "args": ["foo {{Param.Foo}} {{RawParam.Foo}} {{Session.WorkingDirectory}}"],
+        }
     }
 }
 STEP_TEMPLATE_FOO = {"name": "StepName", "script": STEP_SCRIPT_FOO}
@@ -520,8 +523,18 @@ class TestJobTemplate:
                     "name": "Foo",
                     "steps": [STEP_TEMPLATE_FOO],
                 },
-                2,
+                4,
                 id="step missing parameter",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Foo",
+                    "parmDef": [FOO_PARAMETER_INT],
+                    "steps": [STEP_TEMPLATE_FOO],
+                },
+                5,  # extra field + 2 param refs in each of command+args
+                id="key error and path parameter 'Foo' missing",
             ),
             pytest.param(
                 {
@@ -540,7 +553,7 @@ class TestJobTemplate:
                     "steps": [STEP_TEMPLATE_FOO],
                     "jobEnvironments": [ENVIRONMENT_FOO],
                 },
-                4,
+                6,
                 id="step and environment missing parameter",
             ),
             pytest.param(

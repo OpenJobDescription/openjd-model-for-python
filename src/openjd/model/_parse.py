@@ -4,11 +4,12 @@ import json
 from dataclasses import is_dataclass
 from decimal import Decimal
 from enum import Enum
-from typing import Any, ClassVar, Type, TypeVar, Union, cast
+from typing import Any, ClassVar, Optional, Type, TypeVar, Union, cast
 
 import yaml
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
+from pydantic.error_wrappers import ErrorWrapper
 
 from ._errors import DecodeValidationError
 from ._types import EnvironmentTemplate, JobTemplate, OpenJDModel, TemplateSpecificationVersion
@@ -47,16 +48,30 @@ def _parse_model(*, model: Type[T], obj: Any) -> T:
     if is_dataclass(model):
         return cast(T, cast(PydanticDataclass, model).__pydantic_model__.parse_obj(obj))
     else:
-        return cast(T, cast(BaseModel, model).parse_obj(obj))
+        prevalidator_error: Optional[PydanticValidationError] = None
+        if hasattr(model, "_root_template_prevalidator"):
+            try:
+                getattr(model, "_root_template_prevalidator")(obj)
+            except PydanticValidationError as exc:
+                prevalidator_error = exc
+        try:
+            result = cast(T, cast(BaseModel, model).parse_obj(obj))
+        except PydanticValidationError as exc:
+            errors: list[ErrorWrapper] = cast(list[ErrorWrapper], exc.raw_errors)
+            if prevalidator_error is not None:
+                errors.extend(cast(list[ErrorWrapper], prevalidator_error.raw_errors))
+            raise PydanticValidationError(errors, model)
+        if prevalidator_error is not None:
+            raise prevalidator_error
+        return result
 
 
 def parse_model(*, model: Type[T], obj: Any) -> T:
     try:
         return _parse_model(model=model, obj=obj)
     except PydanticValidationError as exc:
-        raise DecodeValidationError(
-            pydantic_validationerrors_to_str(model, cast(list[ErrorDict], exc.errors()))
-        )
+        errors: list[ErrorDict] = cast(list[ErrorDict], exc.errors())
+        raise DecodeValidationError(pydantic_validationerrors_to_str(model, errors))
 
 
 def document_string_to_object(*, document: str, document_type: DocumentType) -> dict[str, Any]:
