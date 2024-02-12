@@ -1,3 +1,10 @@
+## 0.3.1 (2024-02-12)
+
+
+
+### Bug Fixes
+* no longer shortcircuit validation if there are parameter reference errors (#71) ([`d554bfd`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d554bfd7a5b23ee04ff80b98dd7c1a1cbcfb5590))
+
 ## 0.3.0 (2024-02-08)
 
 ### BREAKING CHANGES
