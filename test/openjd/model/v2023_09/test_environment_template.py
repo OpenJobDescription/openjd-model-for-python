@@ -222,7 +222,7 @@ class TestEnvironmentTemplate:
                         },
                     },
                 },
-                2,  # Validation of Job Foo & Task Foo
+                3,  # "Blah" is not a valid integer + Validation of Job Foo & Task Foo
                 id="all parameter symbols are defined when validation errors",
             ),
         ),

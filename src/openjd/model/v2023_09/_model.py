@@ -2217,8 +2217,11 @@ class JobTemplate(OpenJDModel_v2023_09):
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 
-    @root_validator(pre=True)
-    def _prevalidate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def _root_template_prevalidator(cls, values: dict[str, Any]) -> dict[str, Any]:
+        # The name of this validator is very important. It is specifically looked for
+        # in the _parse_model function to run this validation as a pre-root-validator
+        # without the usual short-circuit of pre-root-validators that pydantic does.
         errors = prevalidate_model_template_variable_references(
             cast(Type[OpenJDModel], cls), values
         )
@@ -2340,8 +2343,11 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 
-    @root_validator(pre=True)
-    def _prevalidate_template_variable_references(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @classmethod
+    def _root_template_prevalidator(cls, values: dict[str, Any]) -> dict[str, Any]:
+        # The name of this validator is very important. It is specifically looked for
+        # in the _parse_model function to run this validation as a pre-root-validator
+        # without the usual short-circuit of pre-root-validators that pydantic does.
         errors = prevalidate_model_template_variable_references(
             cast(Type[OpenJDModel], cls), values
         )
