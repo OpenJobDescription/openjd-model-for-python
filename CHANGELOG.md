@@ -1,3 +1,10 @@
+## 0.4.0 (2024-02-13)
+
+### BREAKING CHANGES
+* prepare for public release (#69) ([`14af439`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/14af43964756718dfa1690562adf79d678a3627d))
+
+
+
 ## 0.3.1 (2024-02-12)
 
 
