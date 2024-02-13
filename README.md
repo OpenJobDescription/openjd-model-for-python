@@ -1,9 +1,13 @@
 # Open Job Description - Models For Python
 
+[![pypi](https://img.shields.io/pypi/v/openjd-model.svg)](https://pypi.python.org/pypi/openjd-model)
+
 Open Job Description is a flexible open specification for defining render jobs which are portable
-between studios and render solutions. This package provides a Python implementation of the data model
-for Open Job Description's template schemas. It can be used to parse, validate, and create JSON/Yaml
-documents for the Open Job Description specification.
+between studios and render management solutions. This package provides a Python implementation of the
+data model for Open Job Description's template schemas. It can parse, validate, create JSON/Yaml
+documents for the Open Job Description specification, and more. A main use-case that this library
+targets is interoperability by creating applications to translate a Job from Open Job Description
+to the render management software of your choice.
 
 For more information about Open Job Description and our goals with it, please see the
 Open Job Description [Wiki on GitHub](https://github.com/OpenJobDescription/openjd-specifications/wiki).
@@ -24,6 +28,13 @@ versions will increment during this initial development stage, they are describe
 1. The MAJOR version is currently 0, indicating initial development. 
 2. The MINOR version is currently incremented when backwards incompatible changes are introduced to the public API. 
 3. The PATCH version is currently incremented when bug fixes or backwards compatible changes are introduced to the public API. 
+
+## Contributing
+
+We encourage all contributions to this package.  Whether it's a bug report, new feature, correction, or additional
+documentation, we greatly value feedback and contributions from our community.
+
+Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for our contributing guidelines.
 
 ## Example Usage
 
