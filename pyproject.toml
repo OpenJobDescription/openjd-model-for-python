@@ -31,7 +31,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/OpenJobDescription/openjd-specifications/wiki"
+Homepage = "https://github.com/OpenJobDescription/openjd-model-for-python"
 Source = "https://github.com/OpenJobDescription/openjd-model-for-python"
 
 [tool.hatch.build]
