@@ -118,7 +118,7 @@ class ValueReferenceConstants(Enum):
 #    C1 = 0x80-0x9F
 #         https://www.unicode.org/charts/PDF/U0080.pdf
 _Cc_characters = r"\u0000-\u001F\u007F-\u009F"
-_standard_string_regex = f"(?-m:^[^{_Cc_characters}]+\Z)"
+_standard_string_regex = rf"(?-m:^[^{_Cc_characters}]+\Z)"
 
 # Latin alphanumeric, starting with a letter
 _identifier_regex = r"(?-m:^[A-Za-z_][A-Za-z0-9_]*\Z)"
@@ -131,7 +131,9 @@ _identifier_regex = r"(?-m:^[A-Za-z_][A-Za-z0-9_]*\Z)"
 #    c. Wildcard characters "*", "?", "[", "]".
 #    d. Characters commonly disallowed in paths "#", "%", "&", "{", "}", "<", ">",
 #       "$", "!", "'", "\"", ":", "@", "`", "|", "=".
-_file_dialog_filter_pattern_regex = f"(?-m:^(?:\\*|\\*\\.\\*|\\*\\.[^{_Cc_characters}\\/\\*\\?\\[\\]#%&\\{{\\}}<>\\$\\!\\'\\\":@`\\|=]+)\Z)"
+_file_dialog_filter_pattern_regex = (
+    rf"(?-m:^(?:\*|\*\.\*|\*\.[^{_Cc_characters}\\/\*\?\[\]#%&\{{\}}<>\$\!'\\\":@`|=]+)\Z)"
+)
 
 
 class JobTemplateName(FormatString):
