@@ -1,3 +1,11 @@
+## 0.4.1 (2024-02-26)
+
+
+
+### Bug Fixes
+* correct the bad &#39;\Z&#39; escape sequence in a regex (#79) ([`a1cf4b0`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/a1cf4b00f8615592703a90433ef2fc019b421817))
+* update homepage url (#76) ([`f33810b`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/f33810bd735844d5539f16670302093682cbf5fa))
+
 ## 0.4.0 (2024-02-13)
 
 ### BREAKING CHANGES
