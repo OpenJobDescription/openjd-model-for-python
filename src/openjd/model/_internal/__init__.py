@@ -8,11 +8,13 @@ from ._combination_expr import Node as CombinationExpressionNode
 from ._combination_expr import Parser as CombinationExpressionParser
 from ._combination_expr import ProductNode as CombinationExpressionProductNode
 from ._create_job import instantiate_model
+from ._param_space_dim_validation import validate_step_parameter_space_dimensions
 from ._variable_reference_validation import prevalidate_model_template_variable_references
 
 __all__ = (
     "instantiate_model",
     "prevalidate_model_template_variable_references",
+    "validate_step_parameter_space_dimensions",
     "validate_unique_elements",
     "CombinationExpressionAssociationNode",
     "CombinationExpressionIdentifierNode",
