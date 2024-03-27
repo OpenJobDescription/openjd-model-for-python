@@ -32,6 +32,7 @@ from .._capabilities import (
 )
 from .._internal import (
     CombinationExpressionParser,
+    validate_step_parameter_space_dimensions,
     validate_unique_elements,
 )
 from .._internal._variable_reference_validation import (
@@ -728,6 +729,25 @@ class StepParameterSpace(OpenJDModel_v2023_09):
     # identifier)
     taskParameterDefinitions: dict[Identifier, TaskRangeParameter]
     combination: Optional[CombinationExpr] = None
+
+    @validator("combination")
+    def _validate_parameter_space(cls, v: str, values: dict[str, Any]) -> str:
+        if v is None:
+            return v
+        param_defs = cast(dict[Identifier, TaskRangeParameter], values["taskParameterDefinitions"])
+        parameter_range_lengths = {
+            id: (
+                len(param.range)
+                if isinstance(param.range, list)
+                else len(IntRangeExpr.from_str(param.range))
+            )
+            for id, param in param_defs.items()
+        }
+        try:
+            validate_step_parameter_space_dimensions(parameter_range_lengths, v)
+        except ExpressionError as e:
+            raise ValueError(str(e)) from None
+        return v
 
 
 class StepParameterSpaceDefinition(OpenJDModel_v2023_09):

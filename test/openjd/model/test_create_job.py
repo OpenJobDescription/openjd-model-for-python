@@ -4,6 +4,7 @@ import os
 import tempfile
 import pytest
 from pathlib import Path
+from typing import Any
 
 from openjd.model import (
     DecodeValidationError,
@@ -735,5 +736,51 @@ class TestCreateJob_2023_09:
         # THEN
         assert (
             "1 validation errors for JobTemplate\nname:\n\tensure this value has at most 128 characters"
+            in str(excinfo.value)
+        )
+
+    def test_uneven_parameter_space_association(self) -> None:
+        # Test that when the arguments to an Association operator in a
+        # parameter space combination expression have differing lengths then
+        # we raise an appropriate exception.
+        #
+        # Note: This validation is run in the create job flow because we need
+        # to have a fully instantiated the step parameter space's task parameter
+        # definitions to know how large each parameter range is.
+
+        # GIVEN
+        job_template = _parse_model(
+            model=JobTemplate_2023_09,
+            obj={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "Job",
+                "steps": [
+                    {
+                        "name": "Step",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {"name": "A", "type": "INT", "range": "1-10"},
+                                {"name": "B", "type": "INT", "range": [1, 2]},
+                            ],
+                            "combination": "(A,B)",
+                        },
+                        "script": {"actions": {"onRun": {"command": "do something"}}},
+                    }
+                ],
+            },
+        )
+        parameter_values = dict[str, Any]()
+
+        # WHEN
+        with pytest.raises(DecodeValidationError) as excinfo:
+            # This'll have an error when instantiating the Job due to the Job's name being too long.
+            create_job(
+                job_template=job_template,
+                job_parameter_values=parameter_values,
+            )
+
+        # THEN
+        assert (
+            "1 validation errors for JobTemplate\nsteps[0] -> steps[0] -> parameterSpace -> combination:\n\tAssociative expressions must have arguments with identical ranges. Expression (A, B) has argument lengths (10, 2)."
             in str(excinfo.value)
         )
