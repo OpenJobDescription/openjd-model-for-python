@@ -1,3 +1,10 @@
+## 0.4.2 (2024-03-27)
+
+
+### Features
+* add validation that associative op&#39;s args are equal length (#96) ([`5d3c9bb`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/5d3c9bbd8c9b2e2c1dbc259bbd01f581edf28455))
+
+
 ## 0.4.1 (2024-02-26)
 
 
