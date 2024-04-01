@@ -1,6 +1,8 @@
 # Open Job Description - Models For Python
 
 [![pypi](https://img.shields.io/pypi/v/openjd-model.svg)](https://pypi.python.org/pypi/openjd-model)
+[![python](https://img.shields.io/pypi/pyversions/openjd-model.svg?style=flat)](https://pypi.python.org/pypi/openjd-model)
+[![license](https://img.shields.io/pypi/l/openjd-model.svg?style=flat)](https://github.com/OpenJobDescription/openjd-model/blob/mainline/LICENSE)
 
 Open Job Description is a flexible open specification for defining render jobs which are portable
 between studios and render management solutions. This package provides a Python implementation of the
