@@ -133,7 +133,10 @@ _identifier_regex = r"(?-m:^[A-Za-z_][A-Za-z0-9_]*\Z)"
 #    d. Characters commonly disallowed in paths "#", "%", "&", "{", "}", "<", ">",
 #       "$", "!", "'", "\"", ":", "@", "`", "|", "=".
 _file_dialog_filter_pattern_regex = (
-    rf"(?-m:^(?:\*|\*\.\*|\*\.[^{_Cc_characters}\\/\*\?\[\]#%&\{{\}}<>\$\!'\\\":@`|=]+)\Z)"
+    rf"(?-m:^(?:\*|\*\.\*|\*\."
+    rf"[^{_Cc_characters}\\/\*"
+    rf"\?\[\]#%&\{{\}}<>\$\!'"
+    rf"\\\":@`|=]+)\Z)"
 )
 
 
