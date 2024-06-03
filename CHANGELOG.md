@@ -1,10 +1,3 @@
-## 0.4.3 (2024-06-03)
-
-
-
-### Bug Fixes
-* fix lint, Break up long regex over multiple lines (#116) ([`3801c80`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/3801c8034956112954c6f76a6cedf49e6d5a7f31))
-
 ## 0.4.2 (2024-03-27)
 
 
