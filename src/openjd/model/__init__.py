@@ -10,6 +10,7 @@ from ._errors import (
     TokenError,
     UnsupportedSchema,
 )
+from ._merge_job_parameter import merge_job_parameter_definitions
 from ._range_expr import IntRangeExpr
 from ._parse import (
     DocumentType,
@@ -52,6 +53,7 @@ __all__ = (
     "decode_environment_template",
     "decode_job_template",
     "document_string_to_object",
+    "merge_job_parameter_definitions",
     "model_to_object",
     "parse_model",
     "preprocess_job_parameters",
