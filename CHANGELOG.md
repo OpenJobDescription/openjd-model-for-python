@@ -1,3 +1,10 @@
+## 0.4.4 (2024-06-24)
+
+
+### Features
+* add merge_job_parameter_definitions to public api (#126) ([`c2c4fae`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/c2c4fae39494313a2eb67fd6cb5d2080f2b14b94))
+
+
 ## 0.4.3 (2024-06-11)
 
 
