@@ -8,7 +8,7 @@ sync = "pip install -r requirements-testing.txt"
 test = "pytest --cov-config pyproject.toml {args:test}"
 typing = "mypy {args:src test}"
 style = [
-  "ruff {args:src test}",
+  "ruff check {args:src test}",
   "black --check --diff {args:src test}",
 ]
 fmt = [
