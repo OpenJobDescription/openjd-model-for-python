@@ -4,7 +4,7 @@ from typing import Any
 import string
 
 import pytest
-from pydantic import ValidationError
+from pydantic.v1 import ValidationError
 
 from openjd.model._parse import _parse_model
 from openjd.model.v2023_09 import (

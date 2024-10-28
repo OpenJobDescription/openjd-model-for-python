@@ -4,7 +4,7 @@ from os.path import normpath
 from pathlib import Path
 from typing import Optional, cast
 
-from pydantic import ValidationError
+from pydantic.v1 import ValidationError
 
 from ._errors import CompatibilityError, DecodeValidationError
 from ._symbol_table import SymbolTable

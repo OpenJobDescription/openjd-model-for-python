@@ -3,7 +3,7 @@
 import re
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic.v1 import BaseModel, ValidationError
 
 from openjd.model._format_strings._dyn_constrained_str import DynamicConstrainedStr
 

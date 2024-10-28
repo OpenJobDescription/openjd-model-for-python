@@ -10,7 +10,7 @@ from ._dyn_constrained_str import DynamicConstrainedStr
 from ._expression import InterpolationExpression
 
 if TYPE_CHECKING:
-    from pydantic.typing import CallableGenerator
+    from pydantic.v1.typing import CallableGenerator
 
 
 @dataclass

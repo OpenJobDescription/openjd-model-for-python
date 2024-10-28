@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from pydantic import BaseModel, root_validator, Field
+from pydantic.v1 import BaseModel, root_validator, Field
 from typing import Literal, Union
 
 from openjd.model._convert_pydantic_error import (

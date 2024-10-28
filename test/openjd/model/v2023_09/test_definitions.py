@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import pytest
-from pydantic import BaseModel
+from pydantic.v1 import BaseModel
 from typing import Type
 import openjd.model.v2023_09 as mod
 from inspect import getmembers, getmodule, isclass

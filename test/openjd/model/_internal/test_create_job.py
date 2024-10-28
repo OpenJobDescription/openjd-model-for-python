@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional, Union, cast
 
 import pytest
-from pydantic import PositiveInt, ValidationError
+from pydantic.v1 import PositiveInt, ValidationError
 
 from openjd.model import SymbolTable
 from openjd.model._format_strings import FormatString

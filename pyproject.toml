@@ -30,7 +30,7 @@ classifiers = [
 ]
 dependencies = [
   "pyyaml == 6.0.*",
-  "pydantic ~= 1.10",
+  "pydantic >= 1.10.17",
 ]
 
 [project.urls]
@@ -99,7 +99,7 @@ mypy_path = "src"
 
 # See: https://docs.pydantic.dev/mypy_plugin/
 #  - Helps mypy understand pydantic typing.
-plugins = "pydantic.mypy"
+plugins = "pydantic.v1.mypy"
 
 [tool.ruff]
 line-length = 100

@@ -4,9 +4,9 @@ from collections import defaultdict
 from typing import Any, Optional, Type
 from inspect import isclass
 
-from pydantic.error_wrappers import ErrorWrapper
-import pydantic.fields
-from pydantic.typing import is_literal_type
+from pydantic.v1.error_wrappers import ErrorWrapper
+import pydantic.v1.fields
+from pydantic.v1.typing import is_literal_type
 
 from .._types import OpenJDModel, ResolutionScope
 from .._format_strings import FormatString, FormatStringError
@@ -104,7 +104,7 @@ __all__ = ["prevalidate_model_template_variable_references"]
 # 4. Since this validation is a pre-validator, we basically have to re-implement a fragment of Pydantic's model parser for this
 #    depth first traversal. Thus, you'll need to know the following about Pydantic v1.x's data model and parser to understand this
 #    implementation:
-#    a) All models are derived from pydantic.BaseModel
+#    a) All models are derived from pydantic.v1.BaseModel
 #    b) pydantic.BaseModel.__fields__: dict[str, pydantic.ModelField] is injected into all BaseModels by pydantic's BaseModel metaclass.
 #       This member is what gives pydantic information about each of the fields defined in the model class. The key of the dict is the
 #       name of the field in the model.
@@ -228,7 +228,7 @@ def _validate_model_template_variable_references(
     value_symbols = _collect_variable_definitions(cls, values, current_scope, symbol_prefix)
 
     # Recursively validate the contents of FormatStrings within the model.
-    # Note: cls.__fields__: dict[str, pydantic.fields.ModelField]
+    # Note: cls.__fields__: dict[str, pydantic.v1.fields.ModelField]
     for field_name, field_model in cls.__fields__.items():
         field_value = values.get(field_name, None)
         if field_value is None:
@@ -248,7 +248,7 @@ def _validate_model_template_variable_references(
         # Add in all of the symbols passed down from the parent.
         validation_symbols.update_self(symbols)
 
-        if field_model.shape == pydantic.fields.SHAPE_SINGLETON:
+        if field_model.shape == pydantic.v1.fields.SHAPE_SINGLETON:
             _validate_singleton(
                 errors,
                 field_model,
@@ -258,7 +258,7 @@ def _validate_model_template_variable_references(
                 validation_symbols,
                 (*loc, field_name),
             )
-        elif field_model.shape == pydantic.fields.SHAPE_LIST:
+        elif field_model.shape == pydantic.v1.fields.SHAPE_LIST:
             if not isinstance(field_value, list):
                 continue
             assert field_model.sub_fields is not None  # For the type checker
@@ -273,7 +273,7 @@ def _validate_model_template_variable_references(
                     validation_symbols,
                     (*loc, field_name, i),
                 )
-        elif field_model.shape == pydantic.fields.SHAPE_DICT:
+        elif field_model.shape == pydantic.v1.fields.SHAPE_DICT:
             if not isinstance(field_value, dict):
                 continue
             assert field_model.sub_fields is not None  # For the type checker
@@ -300,7 +300,7 @@ def _validate_model_template_variable_references(
 
 def _validate_singleton(
     errors: list[ErrorWrapper],
-    field_model: pydantic.fields.ModelField,
+    field_model: pydantic.v1.fields.ModelField,
     field_value: Any,
     current_scope: ResolutionScope,
     symbol_prefix: str,
@@ -356,7 +356,7 @@ def _validate_singleton(
 
 def _validate_general_union(
     errors: list[ErrorWrapper],
-    field_model: pydantic.fields.ModelField,
+    field_model: pydantic.v1.fields.ModelField,
     field_value: Any,
     current_scope: ResolutionScope,
     symbol_prefix: str,
@@ -375,11 +375,11 @@ def _validate_general_union(
     # and attempt to process the value as that type.
     assert field_model.sub_fields is not None  # For the type checker
     for sub_field in field_model.sub_fields:
-        if sub_field.shape == pydantic.fields.SHAPE_SINGLETON:
+        if sub_field.shape == pydantic.v1.fields.SHAPE_SINGLETON:
             _validate_singleton(
                 errors, sub_field, field_value, current_scope, symbol_prefix, symbols, loc
             )
-        elif sub_field.shape == pydantic.fields.SHAPE_LIST:
+        elif sub_field.shape == pydantic.v1.fields.SHAPE_LIST:
             if not isinstance(field_value, list):
                 # The given value must be a list in this case.
                 continue
@@ -414,8 +414,8 @@ def _check_format_string(
 
 
 def _get_model_for_singleton_value(
-    field_model: pydantic.fields.ModelField, value: Any
-) -> Optional[pydantic.fields.ModelField]:
+    field_model: pydantic.v1.fields.ModelField, value: Any
+) -> Optional[pydantic.v1.fields.ModelField]:
     """Given a ModelField and the value that we're given for that field, determine
     the actual ModelField for the value in the event that the ModelField may be for
     a discriminated union."""
@@ -509,7 +509,7 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             symbol_name = f"{symbol_prefix}{symbol}"
         _add_symbol(symbols["__self__"], current_scope, symbol_name)
 
-    # Note: cls.__fields__: dict[str, pydantic.fields.ModelField]
+    # Note: cls.__fields__: dict[str, pydantic.v1.fields.ModelField]
     for field_name, field_model in cls.__fields__.items():
         field_value = values.get(field_name, None)
         if field_value is None:
@@ -519,11 +519,11 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             # Literals cannot define variables, so skip this field.
             continue
 
-        if field_model.shape == pydantic.fields.SHAPE_SINGLETON:
+        if field_model.shape == pydantic.v1.fields.SHAPE_SINGLETON:
             result = _collect_singleton(field_model, field_value, current_scope, symbol_prefix)
             if result:
                 symbols[field_name] = result
-        elif field_model.shape == pydantic.fields.SHAPE_LIST:
+        elif field_model.shape == pydantic.v1.fields.SHAPE_LIST:
             # If the shape expects a list, but the value isn't one then we have a validation error.
             # The error will get flagged by subsequent passes of the model validation.
             if not isinstance(field_value, list):
@@ -535,7 +535,7 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
                 result = _collect_singleton(item_model, item, current_scope, symbol_prefix)
                 if result:
                     symbols[field_name].update_self(result)
-        elif field_model.shape == pydantic.fields.SHAPE_DICT:
+        elif field_model.shape == pydantic.v1.fields.SHAPE_DICT:
             # dict[] fields can't define symbols.
             continue
         else:
@@ -566,7 +566,7 @@ def _add_symbol(into: ScopedSymtabs, scope: ResolutionScope, symbol_name: str) -
 
 
 def _collect_singleton(
-    model: pydantic.fields.ModelField,
+    model: pydantic.v1.fields.ModelField,
     value: Any,
     current_scope: ResolutionScope,
     symbol_prefix: str,

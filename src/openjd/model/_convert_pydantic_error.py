@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from typing import TypedDict, Union, Type
-from pydantic import BaseModel
+from pydantic.v1 import BaseModel
 from inspect import getmodule
 
 # Calling pydantic's ValidationError.errors() returns a list[ErrorDict], but

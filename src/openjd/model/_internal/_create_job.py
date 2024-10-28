@@ -2,8 +2,8 @@
 
 from typing import Any, Union
 
-from pydantic import ValidationError
-from pydantic.error_wrappers import ErrorWrapper
+from pydantic.v1 import ValidationError
+from pydantic.v1.error_wrappers import ErrorWrapper
 
 from .._symbol_table import SymbolTable
 from .._format_strings import FormatString, FormatStringError

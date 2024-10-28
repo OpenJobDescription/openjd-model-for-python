@@ -7,9 +7,9 @@ from enum import Enum
 from typing import Any, ClassVar, Optional, Type, TypeVar, Union, cast
 
 import yaml
-from pydantic import BaseModel
-from pydantic import ValidationError as PydanticValidationError
-from pydantic.error_wrappers import ErrorWrapper
+from pydantic.v1 import BaseModel
+from pydantic.v1 import ValidationError as PydanticValidationError
+from pydantic.v1.error_wrappers import ErrorWrapper
 
 from ._errors import DecodeValidationError
 from ._types import EnvironmentTemplate, JobTemplate, OpenJDModel, TemplateSpecificationVersion

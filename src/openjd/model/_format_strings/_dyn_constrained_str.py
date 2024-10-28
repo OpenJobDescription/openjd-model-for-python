@@ -3,12 +3,12 @@
 import re
 from typing import TYPE_CHECKING, Any, Callable, Optional, Pattern, Union
 
-from pydantic.errors import AnyStrMaxLengthError, AnyStrMinLengthError, StrRegexError
-from pydantic.utils import update_not_none
-from pydantic.validators import strict_str_validator
+from pydantic.v1.errors import AnyStrMaxLengthError, AnyStrMinLengthError, StrRegexError
+from pydantic.v1.utils import update_not_none
+from pydantic.v1.validators import strict_str_validator
 
 if TYPE_CHECKING:
-    from pydantic.typing import CallableGenerator
+    from pydantic.v1.typing import CallableGenerator
 
 
 class DynamicConstrainedStr(str):

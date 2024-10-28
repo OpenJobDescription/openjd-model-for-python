@@ -4,7 +4,7 @@ from typing import Any
 import string
 
 import pytest
-from pydantic import BaseModel, ValidationError
+from pydantic.v1 import BaseModel, ValidationError
 
 from openjd.model.v2023_09 import (
     AmountCapabilityName,
