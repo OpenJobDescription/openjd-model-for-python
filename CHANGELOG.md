@@ -1,3 +1,12 @@
+## 0.5.0 (2024-11-05)
+
+### BREAKING CHANGES
+* compatibility with pydantic v2 (#148) ([`c359496`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/c359496b6485da9cf2793eb9105fe5012e0292cb))
+
+
+### Bug Fixes
+* format string errors no longer embed the entire format string (#135) ([`5872f7c`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/5872f7c6b301fc8f2bcc76412d7964fcf970fca3))
+
 ## 0.4.4 (2024-06-24)
 
 
