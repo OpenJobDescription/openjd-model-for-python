@@ -274,6 +274,10 @@ class OpenJDModel(BaseModel):
     # The specific schema revision that the model implements.
     revision: ClassVar[SpecificationRevision]
 
+    # The model parsing context required by this model. Each revision of
+    # the specification defines this, and it must be default-constructible.
+    model_parsing_context_type: ClassVar[Type]
+
     # ----
     # Metadata used for defining template variables for use in FormatStrings
 

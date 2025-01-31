@@ -4,6 +4,7 @@ import json
 from dataclasses import is_dataclass
 from decimal import Decimal
 from enum import Enum
+from collections.abc import Iterable
 from typing import Any, ClassVar, Optional, Type, TypeVar, Union, cast
 
 import yaml
@@ -44,9 +45,14 @@ class PydanticDataclass:
 T = TypeVar("T", bound=OpenJDModel)
 
 
-def _parse_model(*, model: Type[T], obj: Any) -> T:
+def _parse_model(*, model: Type[T], obj: Any, context: Any = None) -> T:
+    if context is None:
+        context = model.model_parsing_context_type()
     if is_dataclass(model):
-        return cast(T, cast(PydanticDataclass, model).__pydantic_model__.model_validate(obj))
+        return cast(
+            T,
+            cast(PydanticDataclass, model).__pydantic_model__.model_validate(obj, context=context),
+        )
     else:
         prevalidator_error: Optional[PydanticValidationError] = None
         if hasattr(model, "_root_template_prevalidator"):
@@ -55,7 +61,7 @@ def _parse_model(*, model: Type[T], obj: Any) -> T:
             except PydanticValidationError as exc:
                 prevalidator_error = exc
         try:
-            result = cast(T, cast(BaseModel, model).model_validate(obj))
+            result = cast(T, cast(BaseModel, model).model_validate(obj, context=context))
         except PydanticValidationError as exc:
             if prevalidator_error is not None:
                 errors = list[InitErrorDetails]()
@@ -74,9 +80,15 @@ def _parse_model(*, model: Type[T], obj: Any) -> T:
         return result
 
 
-def parse_model(*, model: Type[T], obj: Any) -> T:
+def parse_model(
+    *, model: Type[T], obj: Any, supported_extensions: Optional[Iterable[str]] = None
+) -> T:
     try:
-        return _parse_model(model=model, obj=obj)
+        return _parse_model(
+            model=model,
+            obj=obj,
+            context=model.model_parsing_context_type(supported_extensions=supported_extensions),
+        )
     except PydanticValidationError as exc:
         errors: list[ErrorDetails] = exc.errors()
         raise DecodeValidationError(pydantic_validationerrors_to_str(model, errors))
@@ -141,12 +153,22 @@ def model_to_object(*, model: OpenJDModel) -> dict[str, Any]:
     return as_dict
 
 
-def decode_job_template(*, template: dict[str, Any]) -> JobTemplate:
+def decode_job_template(
+    *, template: dict[str, Any], supported_extensions: Optional[Iterable[str]] = None
+) -> JobTemplate:
     """Given a dictionary containing a Job Template, this will decode the template, run validation checks on it,
     and then return the decoded template.
 
+    This function places no restriction on the version of the specification. The caller
+    can inspect the `specificationVersion` property of the returned object to validate this.
+
+    By default, no extensions are supported. The caller can opt in to specific extensions,
+    by providing them as a list.
+
     Args:
         template (dict[str, Any]): A Job Template as a dictionary object.
+        supported_extensions (list[str]): A list of extension names to support. This list is intersected
+            with the extensions names supported by the implementation before processing.
 
     Returns:
         JobTemplate: The decoded job template.
@@ -189,7 +211,9 @@ def decode_job_template(*, template: dict[str, Any]) -> JobTemplate:
         )
 
     if schema_version == TemplateSpecificationVersion.JOBTEMPLATE_v2023_09:
-        return parse_model(model=JobTemplate_2023_09, obj=template)
+        return parse_model(
+            model=JobTemplate_2023_09, obj=template, supported_extensions=supported_extensions
+        )
     else:
         raise NotImplementedError(
             f"Template decode for schema {schema_version.value} is not yet implemented."
@@ -203,12 +227,22 @@ def decode_template(*, template: dict[str, Any]) -> JobTemplate:
     return decode_job_template(template=template)
 
 
-def decode_environment_template(*, template: dict[str, Any]) -> EnvironmentTemplate:
+def decode_environment_template(
+    *, template: dict[str, Any], supported_extensions: Optional[Iterable[str]] = None
+) -> EnvironmentTemplate:
     """Given a dictionary containing an Environment Template, this will decode the template, run validation checks on it,
     and then return the decoded template.
 
+    This function places no restriction on the version of the specification. The caller
+    can inspect the `specificationVersion` property of the returned object to validate this.
+
+    By default, no extensions are supported. The caller can opt in to specific extensions,
+    by providing them as a list.
+
     Args:
         template (dict[str, Any]): An Environment Template as a dictionary object.
+        supported_extensions (list[str]): A list of extension names to support. This list is intersected
+            with the extensions names supported by the implementation before processing.
 
     Returns:
         EnvironmentTemplate: The decoded environment template.
@@ -246,7 +280,11 @@ def decode_environment_template(*, template: dict[str, Any]) -> EnvironmentTempl
         )
 
     if schema_version == TemplateSpecificationVersion.ENVIRONMENT_v2023_09:
-        return parse_model(model=EnvironmentTemplate_2023_09, obj=template)
+        return parse_model(
+            model=EnvironmentTemplate_2023_09,
+            obj=template,
+            supported_extensions=supported_extensions,
+        )
     else:
         raise NotImplementedError(
             f"Template decode for schema {schema_version.value} is not yet implemented."
