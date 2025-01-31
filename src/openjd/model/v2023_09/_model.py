@@ -6,7 +6,7 @@ import re
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from graphlib import CycleError, TopologicalSorter
-from typing import Any, ClassVar, Literal, Optional, Type, Union, cast
+from typing import Any, ClassVar, Literal, Optional, Type, Union, cast, Iterable
 from typing_extensions import Annotated, Self
 
 from pydantic import (
@@ -52,8 +52,44 @@ from .._types import (
 )
 
 
+class ModelParsingContext:
+    """Context required while parsing an OpenJDModel. An instance of this class
+    must be provided when calling model_validate.
+
+        OpenJDModelSubclass.model_validate(data, context=ModelParsingContext())
+
+    Individual validators receive this value as ValidationInfo.context.
+    """
+
+    extensions: set[str]
+    """Initially, is the set of supported extension names. When the 'extensions'
+    field of the template is processed, this becomes the set of extensions that
+    the the template requested."""
+
+    def __init__(self, *, supported_extensions: Optional[Iterable[str]] = None) -> None:
+        self.extensions = set(supported_extensions or [])
+
+
 class OpenJDModel_v2023_09(OpenJDModel):  # noqa: N801
     revision = SpecificationRevision.v2023_09
+    model_parsing_context_type = ModelParsingContext
+
+    @staticmethod
+    def supported_extension_names() -> set[str]:
+        """Returns the list of all extension names supported by the 2023-09 specification version."""
+        return {v.value for v in ExtensionName}
+
+
+class ExtensionName(str, Enum):
+    """Enumerant of all extensions supported for the 2023-09 specification revision.
+    This appears in the 'extensions' list property of all model instances.
+    """
+
+    # # https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0001-task-chunking.md
+    # TASK_CHUNKING = "TASK_CHUNKING"
+
+
+ExtensionNameList = Annotated[list[str], Field(min_length=1)]
 
 
 class ValueReferenceConstants(Enum):
@@ -2351,6 +2387,7 @@ class Job(OpenJDModel_v2023_09):
     description: Optional[Description] = None
     parameters: Optional[JobParameters] = None
     jobEnvironments: Optional[JobEnvironmentsList] = None
+    extensions: Optional[list[ExtensionName]] = None
 
 
 class JobTemplate(OpenJDModel_v2023_09):
@@ -2359,6 +2396,7 @@ class JobTemplate(OpenJDModel_v2023_09):
     Attributes:
         specificationVersion (TemplateSpecificationVersion.v2023_09): The OpenJD schema version
             whose data model this follows.
+        extensions (Optional[ExtensionNameList]): If provided, a non-empty list of named extensions to enable.
         name (JobTemplateName): The name of Jobs constructed by this template.
         steps (StepTemplateList): The Step Templates that comprise the Job Template.
         description (Optional[str]): A free form string that can be used to describe the Job.
@@ -2371,6 +2409,7 @@ class JobTemplate(OpenJDModel_v2023_09):
     """
 
     specificationVersion: Literal[TemplateSpecificationVersion.JOBTEMPLATE_v2023_09]  # noqa: N815
+    extensions: Optional[ExtensionNameList] = None
     name: JobTemplateName
     steps: StepTemplateList
     description: Optional[Description] = None
@@ -2392,6 +2431,42 @@ class JobTemplate(OpenJDModel_v2023_09):
         reshape_field_to_dict={"parameterDefinitions": "name"},
         rename_fields={"parameterDefinitions": "parameters"},
     )
+
+    @field_validator("extensions")
+    @classmethod
+    def _unique_extension_names(
+        cls, value: Optional[ExtensionNameList]
+    ) -> Optional[ExtensionNameList]:
+        if value is not None:
+            return validate_unique_elements(
+                value, item_value=lambda v: v, property="extension name"
+            )
+        return value
+
+    @field_validator("extensions")
+    @classmethod
+    def _permitted_extension_names(
+        cls, value: Optional[ExtensionNameList], info: ValidationInfo
+    ) -> Optional[ExtensionNameList]:
+        context = cast(ModelParsingContext, info.context)
+        if value is not None:
+            # Before processing the extensions field, context.extensions is the list of supported extensions.
+            # Take the intersection of the input supported extensions with what is implemented
+            # in this list, as the implementation needs to support an extension for it to be supported.
+            supported_extensions = context.extensions.intersection(cls.supported_extension_names())
+
+            unsupported_extensions = set(value).difference(supported_extensions)
+            if unsupported_extensions:
+                raise ValueError(
+                    f"Unsupported extension names: {', '.join(sorted(unsupported_extensions))}"
+                )
+
+            # After processing the extensions field, context.extensions is the list of
+            # extension names used by the template.
+            context.extensions = set(value)
+        else:
+            context.extensions = set()
+        return value
 
     @field_validator("steps")
     @classmethod
@@ -2523,6 +2598,7 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
     Attributes:
         specificationVersion (TemplateSpecificationVersion.ENVIRONMENT_v2023_09): The OpenJD schema version
             whose data model this follows.
+        extensions (Optional[ExtensionNameList]): If provided, a non-empty list of named extensions to enable.
         parameterDefinitions (Optional[JobParameterDefinitionList]): The job parameters that are available for use
             within this template, and that must have values defined for them when creating jobs while this
             environment template is included.
@@ -2530,6 +2606,7 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
     """
 
     specificationVersion: Literal[TemplateSpecificationVersion.ENVIRONMENT_v2023_09]
+    extensions: Optional[ExtensionNameList] = None
     parameterDefinitions: Optional[JobParameterDefinitionList] = None
     environment: Environment
 
@@ -2537,6 +2614,42 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
     _template_variable_sources = {
         "environment": {"parameterDefinitions"},
     }
+
+    @field_validator("extensions")
+    @classmethod
+    def _unique_extension_names(
+        cls, value: Optional[ExtensionNameList]
+    ) -> Optional[ExtensionNameList]:
+        if value is not None:
+            return validate_unique_elements(
+                value, item_value=lambda v: v, property="extension name"
+            )
+        return value
+
+    @field_validator("extensions")
+    @classmethod
+    def _permitted_extension_names(
+        cls, value: Optional[ExtensionNameList], info: ValidationInfo
+    ) -> Optional[ExtensionNameList]:
+        context = cast(ModelParsingContext, info.context)
+        if value is not None:
+            # Before processing the extensions field, context.extensions is the list of supported extensions.
+            # Take the intersection of the input supported extensions with what is implemented
+            # in this list, as the implementation needs to support an extension for it to be supported.
+            supported_extensions = context.extensions.intersection(cls.supported_extension_names())
+
+            unsupported_extensions = set(value).difference(supported_extensions)
+            if unsupported_extensions:
+                raise ValueError(
+                    f"Unsupported extension names: {', '.join(sorted(unsupported_extensions))}"
+                )
+
+            # After processing the extensions field, context.extensions is the list of
+            # extension names used by the template.
+            context.extensions = set(value)
+        else:
+            context.extensions = set()
+        return value
 
     @field_validator("parameterDefinitions")
     @classmethod
