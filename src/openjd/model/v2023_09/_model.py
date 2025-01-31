@@ -6,23 +6,23 @@ import re
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from graphlib import CycleError, TopologicalSorter
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, Optional, Type, Union, cast
-from typing_extensions import Annotated
+from typing import Any, ClassVar, Literal, Optional, Type, Union, cast
+from typing_extensions import Annotated, Self
 
-from pydantic.v1 import (
+from pydantic import (
+    field_validator,
+    model_validator,
+    StringConstraints,
     Field,
     PositiveInt,
     PositiveFloat,
     StrictBool,
     StrictInt,
     ValidationError,
-    conint,
-    conlist,
-    constr,
-    root_validator,
-    validator,
+    ValidationInfo,
 )
-from pydantic.v1.error_wrappers import ErrorWrapper
+from pydantic_core import InitErrorDetails
+from pydantic.fields import ModelPrivateAttr
 
 from .._format_strings import FormatString
 from .._errors import ExpressionError, TokenError
@@ -119,10 +119,10 @@ class ValueReferenceConstants(Enum):
 #    C1 = 0x80-0x9F
 #         https://www.unicode.org/charts/PDF/U0080.pdf
 _Cc_characters = r"\u0000-\u001F\u007F-\u009F"
-_standard_string_regex = rf"(?-m:^[^{_Cc_characters}]+\Z)"
+_standard_string_regex = rf"(?-m:^[^{_Cc_characters}]+\z)"
 
 # Latin alphanumeric, starting with a letter
-_identifier_regex = r"(?-m:^[A-Za-z_][A-Za-z0-9_]*\Z)"
+_identifier_regex = r"(?-m:^[A-Za-z_][A-Za-z0-9_]*\z)"
 
 # Regex for defining file filter patterns allowed for use in file dialogs.
 # 1. Allowable values: "*", "*.*", and "*.[:file-extension-chars:]+".
@@ -136,7 +136,7 @@ _file_dialog_filter_pattern_regex = (
     rf"(?-m:^(?:\*|\*\.\*|\*\."
     rf"[^{_Cc_characters}\\/\*"
     rf"\?\[\]#%&\{{\}}<>\$\!'"
-    rf"\\\":@`|=]+)\Z)"
+    rf"\\\":@`|=]+)\z)"
 )
 
 
@@ -144,27 +144,33 @@ class JobTemplateName(FormatString):
     _min_length = 1
 
 
-if TYPE_CHECKING:
-    JobName = str
-    Identifier = str
-    Description = str
-    EnvironmentName = str
-    StepName = str
-    ParameterStringValue = str
-else:
-    JobName = constr(min_length=1, max_length=128, strict=True, regex=_standard_string_regex)
-    Identifier = constr(min_length=1, max_length=64, strict=True, regex=_identifier_regex)
-    Description = constr(
+JobName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=128, strict=True, pattern=_standard_string_regex),
+]
+Identifier = Annotated[
+    str, StringConstraints(min_length=1, max_length=64, strict=True, pattern=_identifier_regex)
+]
+Description = Annotated[
+    str,
+    StringConstraints(
         min_length=1,
         max_length=2048,
         strict=True,
         # All unicode except the [Cc] (control characters) category
         # Allow CR, LF, and TAB.
-        regex=f"(?-m:^(?:[^{_Cc_characters}]|[\r\n\t])+\Z)",
-    )
-    EnvironmentName = constr(min_length=1, max_length=64, strict=True, regex=_standard_string_regex)
-    StepName = constr(min_length=1, max_length=64, strict=True, regex=_standard_string_regex)
-    ParameterStringValue = constr(min_length=0, max_length=1024, strict=True)
+        pattern=f"(?-m:^(?:[^{_Cc_characters}]|[\r\n\t])+\\z)",
+    ),
+]
+EnvironmentName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64, strict=True, pattern=_standard_string_regex),
+]
+StepName = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64, strict=True, pattern=_standard_string_regex),
+]
+ParameterStringValue = Annotated[str, StringConstraints(min_length=0, max_length=1024, strict=True)]
 
 # ==================================================================
 # ============================= Script types =======================
@@ -177,13 +183,13 @@ else:
 class CommandString(FormatString):
     _min_length = 1
     # All unicode except the [Cc] (control characters) category
-    _regex = f"(?-m:^[^{_Cc_characters}]+\Z)"
+    _regex = f"(?-m:^[^{_Cc_characters}]+\\Z)"
 
 
 class ArgString(FormatString):
     # All unicode except the [Cc] (control characters) category
     # Allow CR, LF, and TAB.
-    _regex = f"(?-m:^[^{_Cc_characters}]*\Z)"
+    _regex = f"(?-m:^[^{_Cc_characters}]*\\Z)"
 
 
 class CancelationMode(str, Enum):
@@ -191,10 +197,7 @@ class CancelationMode(str, Enum):
     TERMINATE = "TERMINATE"
 
 
-if TYPE_CHECKING:
-    NotifyPeriodType = int
-else:
-    NotifyPeriodType = conint(ge=1, le=600)
+NotifyPeriodType = Annotated[int, Field(ge=1, le=600)]
 
 
 class CancelationMethodNotifyThenTerminate(OpenJDModel_v2023_09):
@@ -245,10 +248,7 @@ class CancelationMethodTerminate(OpenJDModel_v2023_09):
     mode: Literal[CancelationMode.TERMINATE]
 
 
-if TYPE_CHECKING:
-    ArgListType = list[ArgString]
-else:
-    ArgListType = conlist(ArgString, min_items=1)
+ArgListType = Annotated[list[ArgString], Field(min_length=1)]
 
 
 class Action(OpenJDModel_v2023_09):
@@ -298,7 +298,8 @@ class EnvironmentActions(OpenJDModel_v2023_09):
     onEnter: Optional[Action] = Field(None)  # noqa: N815
     onExit: Optional[Action] = Field(None)  # noqa: N815
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def _requires_oneof(cls, values: dict[str, Any]) -> dict[str, Any]:
         """A validator that runs on the model data before parsing."""
         on_enter = values.get("onEnter")
@@ -315,11 +316,8 @@ class EmbeddedFileTypes(str, Enum):
     TEXT = "TEXT"
 
 
-if TYPE_CHECKING:
-    Filename = str
-else:
-    # TODO - regex of allowable filename characters
-    Filename = constr(min_length=1, max_length=64, strict=True)
+# TODO - regex of allowable filename characters
+Filename = Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)]
 
 
 class DataString(FormatString):
@@ -360,10 +358,7 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
 
 # --------------------- Script types ----------------------------
 
-if TYPE_CHECKING:
-    EmbeddedFiles = list[EmbeddedFileText]
-else:
-    EmbeddedFiles = conlist(EmbeddedFileText, min_items=1)
+EmbeddedFiles = Annotated[list[EmbeddedFileText], Field(min_length=1)]
 
 
 class StepScript(OpenJDModel_v2023_09):
@@ -394,7 +389,8 @@ class StepScript(OpenJDModel_v2023_09):
         "embeddedFiles": {"embeddedFiles", "__self__"},
     }
 
-    @validator("embeddedFiles")
+    @field_validator("embeddedFiles")
+    @classmethod
     def _unique_names(cls, v: Optional[EmbeddedFiles]) -> Optional[EmbeddedFiles]:
         if v is not None:
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
@@ -429,7 +425,8 @@ class EnvironmentScript(OpenJDModel_v2023_09):
         "embeddedFiles": {"embeddedFiles", "__self__"},
     }
 
-    @validator("embeddedFiles")
+    @field_validator("embeddedFiles")
+    @classmethod
     def _unique_names(cls, v: Optional[EmbeddedFiles]) -> Optional[EmbeddedFiles]:
         if v is not None:
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
@@ -462,18 +459,16 @@ class RangeString(FormatString):
     _min_length = 1
 
 
-if TYPE_CHECKING:
-    # Note: Ordering within the Unions is important. Pydantic will try to match in
-    # the order given.
-    IntRangeList = list[Union[int, TaskParameterStringValue]]
-    FloatRangeList = list[Union[Decimal, TaskParameterStringValue]]
-    StringRangeList = list[TaskParameterStringValue]
-    TaskParameterStringValueAsJob = str
-else:
-    IntRangeList = conlist(Union[int, TaskParameterStringValue], min_items=1, max_items=1024)
-    FloatRangeList = conlist(Union[Decimal, TaskParameterStringValue], min_items=1, max_items=1024)
-    StringRangeList = conlist(TaskParameterStringValue, min_items=1, max_items=1024)
-    TaskParameterStringValueAsJob = constr(min_length=0, max_length=1024)
+# Note: Ordering within the Unions is important. Pydantic will try to match in
+# the order given.
+IntRangeList = Annotated[
+    list[Union[int, TaskParameterStringValue]], Field(min_length=1, max_length=1024)
+]
+FloatRangeList = Annotated[
+    list[Union[Decimal, TaskParameterStringValue]], Field(min_length=1, max_length=1024)
+]
+StringRangeList = Annotated[list[TaskParameterStringValue], Field(min_length=1, max_length=1024)]
+TaskParameterStringValueAsJob = Annotated[str, StringConstraints(min_length=0, max_length=1024)]
 
 TaskRangeList = list[TaskParameterStringValueAsJob]
 TaskRangeExpression = RangeString
@@ -483,7 +478,19 @@ TaskRangeExpression = RangeString
 class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
     # element type of items in the range
     type: TaskParameterType
+    # NOTE: Pydantic V1 was allowing non-string values in this range, V2 is enforcing that type.
     range: TaskRangeList
+
+    @field_validator("range", mode="before")
+    @classmethod
+    def _coerce_to_string(cls, value: Any) -> Any:
+        # Coerce any int, float, or Decimal values into str
+        def coerce(v: Any) -> Any:
+            if isinstance(v, (int, float, Decimal)):
+                return str(v)
+            return v
+
+        return [coerce(item) for item in value]
 
 
 class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -491,7 +498,8 @@ class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
     type: TaskParameterType
     range: TaskRangeExpression
 
-    @validator("range")
+    @field_validator("range")
+    @classmethod
     def _validate_range_expression(cls, value: Any) -> Any:
         """At this point, the format expressions have been resolved
         and we can determine if it's a valid RangeExpression"""
@@ -538,48 +546,66 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
         exclude_fields={"name"},
     )
 
-    @validator("range", pre=True)
+    @field_validator("range", mode="before")
+    @classmethod
     def _validate_range_element_type(cls, value: Any) -> Any:
-        # pydandic will automatically type coerse values into integers. We explicitly
+        # pydantic will automatically type coerse values into integers. We explicitly
         # want to reject non-integer values, so this *pre* validator validates the
         # value *before* pydantic tries to type coerse it.
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
-            errors = list[ErrorWrapper]()
-            for v in value:
-                if isinstance(v, bool) or not isinstance(v, (int, str)):
+            errors = list[InitErrorDetails]()
+            for i, item in enumerate(value):
+                if isinstance(item, bool) or not isinstance(item, (int, str)):
                     errors.append(
-                        ErrorWrapper(
-                            ValueError("Value must be an integer or integer string."), ("range", v)
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={
+                                "error": ValueError("Value must be an integer or integer string.")
+                            },
+                            input=item,
                         )
                     )
             if errors:
-                raise ValidationError(errors, IntTaskParameterDefinition)
+                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
         elif isinstance(value, RangeString):
             # TODO: nothing to do - it's guaranteed to be a format string at this point
             pass
 
         return value
 
-    @validator("range")
+    @field_validator("range")
+    @classmethod
     def _validate_range_elements(cls, value: Any) -> Any:
         if isinstance(value, list):
-            errors = list[ErrorWrapper]()
-            for v in value:
-                if isinstance(v, TaskParameterStringValue):
+            errors = list[InitErrorDetails]()
+            for i, item in enumerate(value):
+                if isinstance(item, TaskParameterStringValue):
                     # A TaskParameterStringValue is a FormatString.
                     # FormatString.expressions is the list of all expressions in the format string
                     # ( e.g. "{{ Param.Foo }}").
-                    # Reject the string if it contains any expressions.
-                    if len(v.expressions) == 0:
-                        errors.append(
-                            ErrorWrapper(
-                                ValueError("String literal must contain an integer."), ("range", v)
+                    # Validate the string if it does not contain any expressions, in order to catch
+                    # errors earlier when possible.
+                    if len(item.expressions) == 0:
+                        try:
+                            int(item)
+                        except ValueError:
+                            errors.append(
+                                InitErrorDetails(
+                                    type="value_error",
+                                    loc=(i,),
+                                    ctx={
+                                        "error": ValueError(
+                                            "String literal must contain an integer."
+                                        )
+                                    },
+                                    input=item,
+                                )
                             )
-                        )
             if errors:
-                raise ValidationError(errors, IntTaskParameterDefinition)
+                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
         else:
             # If there are no format expressions, we can validate the range expression.
             # otherwise we defer to the RangeExressionTaskParameter model when
@@ -619,29 +645,58 @@ class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
         exclude_fields={"name"},
     )
 
-    @validator("range", each_item=True, pre=True)
-    def _validate_range_element_type(cls, v: Any) -> Any:
-        # pydandic will automatically type coerse values into floats. We explicitly
+    @field_validator("range", mode="before")
+    @classmethod
+    def _validate_range_element_type(cls, value: Any) -> Any:
+        # pydantic will automatically type coerce values into floats. We explicitly
         # want to reject non-integer values, so this *pre* validator validates the
-        # value *before* pydantic tries to type coerse it.
+        # value *before* pydantic tries to type coerce it.
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
-        if isinstance(v, bool) or not isinstance(v, (int, float, str)):
-            raise ValueError("Item must be a float, int, or float string.")
-        return v
+        if isinstance(value, list):
+            errors = list[InitErrorDetails]()
+            for i, item in enumerate(value):
+                if isinstance(item, bool) or not isinstance(item, (int, float, str)):
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=("range", i),
+                            ctx={"error": ValueError("Value must be a float or float string.")},
+                            input=item,
+                        )
+                    )
+            if errors:
+                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        return value
 
-    @validator("range", each_item=True)
+    @field_validator("range")
+    @classmethod
     def _validate_range_elements(
-        cls, v: Union[Decimal, TaskParameterStringValue]
-    ) -> Union[Decimal, TaskParameterStringValue]:
-        if isinstance(v, TaskParameterStringValue):
-            # A TaskParameterStringValue is a FormatString.
-            # FormatString.expressions is the list of all expressions in the format string
-            # ( e.g. "{{ Param.Foo }}").
-            # Reject the string if it contains any expressions.
-            if len(v.expressions) == 0:
-                raise ValueError("String literal must contain an integer or float.")
-        return v
+        cls, value: list[Union[Decimal, TaskParameterStringValue]]
+    ) -> list[Union[Decimal, TaskParameterStringValue]]:
+        errors = list[InitErrorDetails]()
+        for i, item in enumerate(value):
+            if isinstance(item, TaskParameterStringValue):
+                # A TaskParameterStringValue is a FormatString.
+                # FormatString.expressions is the list of all expressions in the format string
+                # ( e.g. "{{ Param.Foo }}").
+                # Validate the string if it does not contain any expressions, in order to catch
+                # errors earlier when possible.
+                if len(item.expressions) == 0:
+                    try:
+                        float(item)
+                    except ValueError:
+                        errors.append(
+                            InitErrorDetails(
+                                type="value_error",
+                                loc=(i,),
+                                ctx={"error": ValueError("String literal must contain a float.")},
+                                input=item,
+                            )
+                        )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        return value
 
 
 class StringTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -707,20 +762,21 @@ TaskParameterDefinition = Union[
     PathTaskParameterDefinition,
 ]
 
-if TYPE_CHECKING:
-    TaskParameterList = list[TaskParameterDefinition]
-    CombinationExpr = str
-else:
-    TaskParameterList = conlist(
-        Annotated[TaskParameterDefinition, Field(..., discriminator="type")],
-        min_items=1,
-        max_items=16,
-    )
-    # Limit the CombinationExpr to characters allowed in an Identifier plus whitespace
-    # and the operator characters.
-    CombinationExpr = constr(
-        min_length=1, max_length=1280, strict=True, regex=r"(?-m:^[A-Za-z0-9\*\(\), ]+\Z)"
-    )
+TaskParameterList = Annotated[
+    list[Annotated[TaskParameterDefinition, Field(..., discriminator="type")]],
+    Field(
+        min_length=1,
+        max_length=16,
+    ),
+]
+# Limit the CombinationExpr to characters allowed in an Identifier plus whitespace
+# and the operator characters.
+CombinationExpr = Annotated[
+    str,
+    StringConstraints(
+        min_length=1, max_length=1280, strict=True, pattern=r"(?-m:^[A-Za-z0-9\*\(\), ]+\z)"
+    ),
+]
 
 TaskRangeParameter = Union[RangeListTaskParameterDefinition, RangeExpressionTaskParameterDefinition]
 
@@ -733,11 +789,14 @@ class StepParameterSpace(OpenJDModel_v2023_09):
     taskParameterDefinitions: dict[Identifier, TaskRangeParameter]
     combination: Optional[CombinationExpr] = None
 
-    @validator("combination")
-    def _validate_parameter_space(cls, v: str, values: dict[str, Any]) -> str:
+    @field_validator("combination")
+    @classmethod
+    def _validate_parameter_space(cls, v: str, info: ValidationInfo) -> str:
         if v is None:
             return v
-        param_defs = cast(dict[Identifier, TaskRangeParameter], values["taskParameterDefinitions"])
+        param_defs = cast(
+            dict[Identifier, TaskRangeParameter], info.data["taskParameterDefinitions"]
+        )
         parameter_range_lengths = {
             id: (
                 len(param.range)
@@ -772,22 +831,19 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
         reshape_field_to_dict={"taskParameterDefinitions": "name"},
     )
 
-    @validator("taskParameterDefinitions")
+    @field_validator("taskParameterDefinitions")
+    @classmethod
     def _validate_parameters(cls, v: TaskParameterList) -> TaskParameterList:
         # Must have a unique name for each Task parameter
         return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
 
-    @root_validator
-    def _validate_combination(cls, values: dict[str, Any]) -> dict[str, Any]:
-        if values.get("combination") is None:
-            return values
-        if values.get("taskParameterDefinitions") is None:
-            return values
+    @model_validator(mode="after")
+    def _validate_combination(self) -> Self:
+        if self.combination is None or self.taskParameterDefinitions is None:
+            return self
 
-        parameter_list: TaskParameterList = cast(
-            TaskParameterList, values["taskParameterDefinitions"]
-        )
-        combination: CombinationExpr = cast(CombinationExpr, values["combination"])
+        parameter_def_list: TaskParameterList = self.taskParameterDefinitions
+        combination: CombinationExpr = self.combination
 
         # Ensure that the 'combination' string:
         #   a) is a properly formed combination expression; and
@@ -801,26 +857,36 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
         expr_identifiers = list[str]()
         parse_tree.collect_identifiers(expr_identifiers)
         unique_expr_identifiers = set(expr_identifiers)
-        parameter_names = [param.name for param in parameter_list]
+        parameter_names = [param.name for param in parameter_def_list]
         unique_parameter_names = set(parameter_names)
 
-        errors = list[ErrorWrapper]()
+        errors = list[InitErrorDetails]()
         if len(unique_expr_identifiers) < len(unique_parameter_names):
             # Missing some parameter identifiers in the expression
             missing = sorted(list(unique_parameter_names - unique_expr_identifiers))
             errors.append(
-                ErrorWrapper(
-                    ValueError(f"Expression missing parameters: {','.join(missing)}"),
-                    ("combination",),
+                InitErrorDetails(
+                    type="value_error",
+                    loc=("combination",),
+                    ctx={
+                        "error": ValueError(f"Expression missing parameters: {','.join(missing)}")
+                    },
+                    input=combination,
                 )
             )
         if len(unique_parameter_names) < len(unique_expr_identifiers):
             # Have some extra parameters referenced in the expression
             extra = sorted(list(unique_expr_identifiers - unique_parameter_names))
             errors.append(
-                ErrorWrapper(
-                    ValueError(f"Expression references undefined parameters: {','.join(extra)}"),
-                    ("combination",),
+                InitErrorDetails(
+                    type="value_error",
+                    loc=("combination",),
+                    ctx={
+                        "error": ValueError(
+                            f"Expression references undefined parameters: {','.join(extra)}"
+                        )
+                    },
+                    input=combination,
                 )
             )
         if len(expr_identifiers) != len(unique_expr_identifiers):
@@ -829,30 +895,32 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
                 [id for id in expr_identifiers if id not in unique_expr_identifiers]
             )
             errors.append(
-                ErrorWrapper(
-                    ValueError(
-                        f"Expression can only reference each parameter once: {','.join(duplicates)} "
-                    ),
-                    ("combination",),
+                InitErrorDetails(
+                    type="value_error",
+                    loc=("combination",),
+                    ctx={
+                        "error": ValueError(
+                            f"Expression can only reference each parameter once: {','.join(duplicates)} "
+                        )
+                    },
+                    input=combination,
                 )
             )
 
         if errors:
-            raise ValidationError(errors, StepParameterSpaceDefinition)
+            raise ValidationError.from_exception_data(self.__class__.__name__, errors)
 
-        return values
+        return self
 
 
 # ==================================================================
 # ====================== Environments Variables ====================
 # ==================================================================
 
-if TYPE_CHECKING:
-    EnvironmentVariableNameString = str
-else:
-    EnvironmentVariableNameString = constr(
-        min_length=1, max_length=256, regex=r"(?-m:^[a-zA-Z_][a-zA-Z0-9_]*\Z)"
-    )
+EnvironmentVariableNameString = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=256, pattern=r"(?-m:^[a-zA-Z_][a-zA-Z0-9_]*\z)"),
+]
 
 
 class EnvironmentVariableValueString(FormatString):
@@ -889,13 +957,15 @@ class Environment(OpenJDModel_v2023_09):
 
     _template_variable_scope = ResolutionScope.SESSION
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def _validate_has_script_or_variables(cls, values: dict[str, Any]) -> dict[str, Any]:
         if values.get("script") is None and values.get("variables") is None:
             raise ValueError("Environment must have either a script or variables.")
         return values
 
-    @validator("variables")
+    @field_validator("variables")
+    @classmethod
     def _validate_variables(
         cls, variables: Optional[EnvironmentVariableObject]
     ) -> Optional[EnvironmentVariableObject]:
@@ -918,26 +988,22 @@ class JobParameterType(str, Enum):
     FLOAT = "FLOAT"
 
 
-if TYPE_CHECKING:
-    AllowedParameterStringValueList = list[ParameterStringValue]
-    AllowedIntParameterList = list[int]
-    AllowedFloatParameterList = list[Decimal]
-    UserInterfaceLabelStringValue = str
-    FileDialogFilterPatternStringValue = str
-    FileDialogFilterPatternStringValueList = list[FileDialogFilterPatternStringValue]
-else:
-    AllowedParameterStringValueList = conlist(ParameterStringValue, min_items=1)
-    AllowedIntParameterList = conlist(int, min_items=1)
-    AllowedFloatParameterList = conlist(Decimal, min_items=1)
-    UserInterfaceLabelStringValue = constr(
-        min_length=1, max_length=64, strict=True, regex=_standard_string_regex
-    )
-    FileDialogFilterPatternStringValue = constr(
-        min_length=1, max_length=20, strict=True, regex=_file_dialog_filter_pattern_regex
-    )
-    FileDialogFilterPatternStringValueList = conlist(
-        FileDialogFilterPatternStringValue, min_items=1, max_items=20
-    )
+AllowedParameterStringValueList = Annotated[list[ParameterStringValue], Field(min_length=1)]
+AllowedIntParameterList = Annotated[list[int], Field(min_length=1)]
+AllowedFloatParameterList = Annotated[list[Decimal], Field(min_length=1)]
+UserInterfaceLabelStringValue = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=64, strict=True, pattern=_standard_string_regex),
+]
+FileDialogFilterPatternStringValue = Annotated[
+    str,
+    StringConstraints(
+        min_length=1, max_length=20, strict=True, pattern=_file_dialog_filter_pattern_regex
+    ),
+]
+FileDialogFilterPatternStringValueList = Annotated[
+    list[FileDialogFilterPatternStringValue], Field(min_length=1, max_length=20)
+]
 
 
 # Target model for a job parameter when instantiating a job.
@@ -972,8 +1038,8 @@ class JobStringParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """
 
     control: StringUserInterfaceControl
-    label: Optional[UserInterfaceLabelStringValue]
-    groupLabel: Optional[UserInterfaceLabelStringValue]
+    label: Optional[UserInterfaceLabelStringValue] = None
+    groupLabel: Optional[UserInterfaceLabelStringValue] = None
 
 
 class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
@@ -996,7 +1062,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     name: Identifier
     type: Literal[JobParameterType.STRING]
-    userInterface: Optional[JobStringParameterDefinitionUserInterface]
+    userInterface: Optional[JobStringParameterDefinitionUserInterface] = None
     description: Optional[Description] = None
     # Note: Ordering of the following fields is essential for the validators to work correctly.
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -1027,66 +1093,88 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         },
     )
 
-    @validator("minLength")
-    def _validate_min_length(cls, v: Optional[int]) -> Optional[int]:
-        if v is None:
-            return v
-        if v <= 0:
+    @field_validator("minLength")
+    @classmethod
+    def _validate_min_length(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
             raise ValueError("Required: 0 < minLength.")
-        return v
+        return value
 
-    @validator("maxLength")
-    def _validate_max_length(cls, v: Optional[int], values: dict[str, Any]) -> Optional[int]:
-        if v is None:
-            return v
-        if v <= 0:
+    @field_validator("maxLength")
+    @classmethod
+    def _validate_max_length(cls, value: Optional[int], info: ValidationInfo) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
             raise ValueError("Required: 0 < maxLength.")
-        min_length = values.get("minLength")
+        min_length = info.data.get("minLength")
         if min_length is None:
-            return v
-        if min_length > v:
+            return value
+        if min_length > value:
             raise ValueError("Required: minLength <= maxLength.")
-        return v
+        return value
 
-    @validator("allowedValues", each_item=True)
+    @field_validator("allowedValues")
+    @classmethod
     def _validate_allowed_values_item(
-        cls, v: ParameterStringValue, values: dict[str, Any]
-    ) -> ParameterStringValue:
-        min_length = values.get("minLength")
-        if min_length is not None:
-            if len(v) < min_length:
-                raise ValueError("Value is shorter than minLength.")
-        max_length = values.get("maxLength")
-        if max_length is not None:
-            if len(v) > max_length:
-                raise ValueError("Value is longer than maxLength.")
-        return v
+        cls, value: AllowedParameterStringValueList, info: ValidationInfo
+    ) -> AllowedParameterStringValueList:
+        min_length = info.data.get("minLength")
+        max_length = info.data.get("maxLength")
+        errors = list[InitErrorDetails]()
+        for i, item in enumerate(value):
+            if min_length is not None:
+                if len(item) < min_length:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={"error": ValueError("Value is shorter than minLength.")},
+                            input=item,
+                        )
+                    )
+            if max_length is not None:
+                if len(item) > max_length:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={"error": ValueError("Value is longer than maxLength.")},
+                            input=item,
+                        )
+                    )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        return value
 
-    @validator("default")
+    @field_validator("default")
+    @classmethod
     def _validate_default(
-        cls, v: ParameterStringValue, values: dict[str, Any]
+        cls, value: ParameterStringValue, info: ValidationInfo
     ) -> ParameterStringValue:
-        min_length = values.get("minLength")
+        min_length = info.data.get("minLength")
         if min_length is not None:
-            if len(v) < min_length:
+            if len(value) < min_length:
                 raise ValueError("Value is shorter than minLength.")
-        max_length = values.get("maxLength")
+        max_length = info.data.get("maxLength")
         if max_length is not None:
-            if len(v) > max_length:
+            if len(value) > max_length:
                 raise ValueError("Value is longer than maxLength.")
 
-        allowed_values = values.get("allowedValues")
+        allowed_values = info.data.get("allowedValues")
         if allowed_values is not None:
-            if v not in allowed_values:
+            if value not in allowed_values:
                 raise ValueError("Must be an allowed value.")
-        return v
+        return value
 
-    @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_user_interface_compatibility(self) -> Self:
         # validate that the user interface control is compatible with the value constraints
-        if values.get("userInterface"):
-            user_interface_control = values["userInterface"].control
-            if values.get("allowedValues") and user_interface_control in (
+        if self.userInterface:
+            user_interface_control = self.userInterface.control
+            if self.allowedValues and user_interface_control in (
                 StringUserInterfaceControl.LINE_EDIT,
                 StringUserInterfaceControl.MULTILINE_EDIT,
             ):
@@ -1094,20 +1182,20 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
                     f"User interface control {user_interface_control.name} cannot be used when 'allowedValues' is provided"
                 )
             if (
-                not values.get("allowedValues")
+                not self.allowedValues
                 and user_interface_control == StringUserInterfaceControl.DROPDOWN_LIST
             ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} requires that 'allowedValues' be provided"
                 )
             if user_interface_control == StringUserInterfaceControl.CHECK_BOX:
-                allowed_values = set(v.upper() for v in values.get("allowedValues", []))
+                allowed_values = set(v.upper() for v in self.allowedValues or [])
                 if allowed_values not in ALLOWED_VALUES_FOR_CHECK_BOX:
                     raise ValueError(
                         f"User interface control {user_interface_control.name} requires that 'allowedValues' be "
                         + f"one of {ALLOWED_VALUES_FOR_CHECK_BOX} (case and order insensitive)"
                     )
-        return values
+        return self
 
     # override
     def _check_constraints(self, value: Any) -> None:
@@ -1160,12 +1248,9 @@ class JobPathParameterDefinitionFileFilter(OpenJDModel_v2023_09):
     patterns: FileDialogFilterPatternStringValueList
 
 
-if TYPE_CHECKING:
-    JobPathParameterDefinitionFileFilterList = list[JobPathParameterDefinitionFileFilter]
-else:
-    JobPathParameterDefinitionFileFilterList = conlist(
-        JobPathParameterDefinitionFileFilter, min_items=1, max_items=20
-    )
+JobPathParameterDefinitionFileFilterList = Annotated[
+    list[JobPathParameterDefinitionFileFilter], Field(min_length=1, max_length=20)
+]
 
 
 class JobPathParameterDefinitionUserInterface(OpenJDModel_v2023_09):
@@ -1185,10 +1270,10 @@ class JobPathParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """
 
     control: PathUserInterfaceControl
-    label: Optional[UserInterfaceLabelStringValue]
-    groupLabel: Optional[UserInterfaceLabelStringValue]
-    fileFilters: Optional[JobPathParameterDefinitionFileFilterList]
-    fileFilterDefault: Optional[JobPathParameterDefinitionFileFilter]
+    label: Optional[UserInterfaceLabelStringValue] = None
+    groupLabel: Optional[UserInterfaceLabelStringValue] = None
+    fileFilters: Optional[JobPathParameterDefinitionFileFilterList] = None
+    fileFilterDefault: Optional[JobPathParameterDefinitionFileFilter] = None
 
 
 class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
@@ -1215,9 +1300,9 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
 
     name: Identifier
     type: Literal[JobParameterType.PATH]
-    objectType: Optional[JobPathParameterDefinitionObjectType]
-    dataFlow: Optional[JobPathParameterDefinitionDataFlow]
-    userInterface: Optional[JobPathParameterDefinitionUserInterface]
+    objectType: Optional[JobPathParameterDefinitionObjectType] = None
+    dataFlow: Optional[JobPathParameterDefinitionDataFlow] = None
+    userInterface: Optional[JobPathParameterDefinitionUserInterface] = None
     description: Optional[Description] = None
     # Note: Ordering of the following fields is essential for the validators to work correctly.
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -1250,66 +1335,88 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         },
     )
 
-    @validator("minLength")
-    def _validate_min_length(cls, v: Optional[int]) -> Optional[int]:
-        if v is None:
-            return v
-        if v <= 0:
+    @field_validator("minLength")
+    @classmethod
+    def _validate_min_length(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
             raise ValueError("Required: 0 < minLength.")
-        return v
+        return value
 
-    @validator("maxLength")
-    def _validate_max_length(cls, v: Optional[int], values: dict[str, Any]) -> Optional[int]:
-        if v is None:
-            return v
-        if v <= 0:
+    @field_validator("maxLength")
+    @classmethod
+    def _validate_max_length(cls, value: Optional[int], info: ValidationInfo) -> Optional[int]:
+        if value is None:
+            return value
+        if value <= 0:
             raise ValueError("Required: 0 < maxLength.")
-        min_length = values.get("minLength")
+        min_length = info.data.get("minLength")
         if min_length is None:
-            return v
-        if min_length > v:
+            return value
+        if min_length > value:
             raise ValueError("Required: minLength <= maxLength.")
-        return v
+        return value
 
-    @validator("allowedValues", each_item=True)
+    @field_validator("allowedValues")
+    @classmethod
     def _validate_allowed_values_item(
-        cls, v: ParameterStringValue, values: dict[str, Any]
+        cls, value: ParameterStringValue, info: ValidationInfo
     ) -> ParameterStringValue:
-        min_length = values.get("minLength")
-        if min_length is not None:
-            if len(v) < min_length:
-                raise ValueError("Value is shorter than minLength.")
-        max_length = values.get("maxLength")
-        if max_length is not None:
-            if len(v) > max_length:
-                raise ValueError("Value is longer than maxLength.")
-        return v
+        min_length = info.data.get("minLength")
+        max_length = info.data.get("maxLength")
+        errors = list[InitErrorDetails]()
+        for i, item in enumerate(value):
+            if min_length is not None:
+                if len(item) < min_length:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=("allowedValues", i),
+                            ctx={"error": ValueError("Value is shorter than minLength.")},
+                            input=item,
+                        )
+                    )
+            if max_length is not None:
+                if len(item) > max_length:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=("allowedValues", i),
+                            ctx={"error": ValueError("Value is longer than maxLength.")},
+                            input=item,
+                        )
+                    )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        return value
 
-    @validator("default")
+    @field_validator("default")
+    @classmethod
     def _validate_default(
-        cls, v: ParameterStringValue, values: dict[str, Any]
+        cls, value: ParameterStringValue, info: ValidationInfo
     ) -> ParameterStringValue:
-        min_length = values.get("minLength")
+        min_length = info.data.get("minLength")
         if min_length is not None:
-            if len(v) < min_length:
+            if len(value) < min_length:
                 raise ValueError("Value is shorter than minLength.")
-        max_length = values.get("maxLength")
+        max_length = info.data.get("maxLength")
         if max_length is not None:
-            if len(v) > max_length:
+            if len(value) > max_length:
                 raise ValueError("Value is longer than maxLength.")
 
-        allowed_values = values.get("allowedValues")
+        allowed_values = info.data.get("allowedValues")
         if allowed_values is not None:
-            if v not in allowed_values:
+            if value not in allowed_values:
                 raise ValueError("Must be an allowed value.")
-        return v
+        return value
 
-    @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_user_interface_compatibility(self) -> Self:
         # validate that the user interface control is compatible with the value constraints
-        if values.get("userInterface"):
-            user_interface_control = values["userInterface"].control
-            if values.get("allowedValues") and user_interface_control in (
+        if self.userInterface:
+            user_interface_control = self.userInterface.control
+            if self.allowedValues and user_interface_control in (
                 PathUserInterfaceControl.CHOOSE_INPUT_FILE,
                 PathUserInterfaceControl.CHOOSE_OUTPUT_FILE,
                 PathUserInterfaceControl.CHOOSE_DIRECTORY,
@@ -1318,14 +1425,14 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
                     f"User interface control {user_interface_control.name} cannot be used when 'allowedValues' is provided"
                 )
             if (
-                not values.get("allowedValues")
+                not self.allowedValues
                 and user_interface_control == PathUserInterfaceControl.DROPDOWN_LIST
             ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} requires that 'allowedValues' be provided"
                 )
             if (
-                values["userInterface"].fileFilters or values["userInterface"].fileFilterDefault
+                self.userInterface.fileFilters or self.userInterface.fileFilterDefault
             ) and user_interface_control not in [
                 PathUserInterfaceControl.CHOOSE_INPUT_FILE,
                 PathUserInterfaceControl.CHOOSE_OUTPUT_FILE,
@@ -1335,23 +1442,25 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
                     + " or 'fileFilterDefault is provided"
                 )
             if (
-                values.get("objectType") == JobPathParameterDefinitionObjectType.FILE
+                self.objectType == JobPathParameterDefinitionObjectType.FILE
                 and user_interface_control == PathUserInterfaceControl.CHOOSE_DIRECTORY
             ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used with 'objectType' of FILE"
                 )
-            if values.get(
-                "objectType"
-            ) == JobPathParameterDefinitionObjectType.DIRECTORY and user_interface_control in [
-                PathUserInterfaceControl.CHOOSE_INPUT_FILE,
-                PathUserInterfaceControl.CHOOSE_OUTPUT_FILE,
-            ]:
+            if (
+                self.objectType == JobPathParameterDefinitionObjectType.DIRECTORY
+                and user_interface_control
+                in [
+                    PathUserInterfaceControl.CHOOSE_INPUT_FILE,
+                    PathUserInterfaceControl.CHOOSE_OUTPUT_FILE,
+                ]
+            ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used with 'objectType' of DIRECTORY"
                 )
 
-        return values
+        return self
 
     # override
     def _check_constraints(self, value: Any) -> None:
@@ -1391,9 +1500,9 @@ class JobIntParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """
 
     control: IntUserInterfaceControl
-    label: Optional[UserInterfaceLabelStringValue]
-    groupLabel: Optional[UserInterfaceLabelStringValue]
-    singleStepDelta: Optional[PositiveInt]
+    label: Optional[UserInterfaceLabelStringValue] = None
+    groupLabel: Optional[UserInterfaceLabelStringValue] = None
+    singleStepDelta: Optional[PositiveInt] = None
 
 
 class JobIntParameterDefinition(OpenJDModel_v2023_09):
@@ -1416,7 +1525,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.INT]
-    userInterface: Optional[JobIntParameterDefinitionUserInterface]
+    userInterface: Optional[JobIntParameterDefinitionUserInterface] = None
     description: Optional[Description] = None
     # Note: Ordering of the following fields is essential for the validators to work correctly.
     minValue: Optional[int] = None  # noqa: N815
@@ -1448,106 +1557,143 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
     )
 
     @classmethod
-    def _precheck_is_int_type(cls, v: Any) -> None:
+    def _precheck_is_int_type(cls, value: Any) -> None:
         # prevent floats, bools, and other types from coercing into an int.
         # strings that contain floats are handled by pydantic's checks.
-        if not isinstance(v, (int, str)) or isinstance(v, bool):
+        if not isinstance(value, (int, str)) or isinstance(value, bool):
             raise ValueError("Value must be an integer or integer string.")
 
-    @validator("minValue", pre=True)
-    def _validate_min_value_type(cls, v: Optional[Any]) -> Optional[Any]:
-        if v is None:
-            return v
-        cls._precheck_is_int_type(v)
-        return v
+    @field_validator("minValue", mode="before")
+    @classmethod
+    def _validate_min_value_type(cls, value: Optional[Any]) -> Optional[Any]:
+        if value is None:
+            return value
+        cls._precheck_is_int_type(value)
+        return value
 
-    @validator("maxValue", pre=True)
-    def _validate_max_value_type(cls, v: Optional[Any]) -> Optional[Any]:
-        if v is None:
-            return v
-        cls._precheck_is_int_type(v)
-        return v
+    @field_validator("maxValue", mode="before")
+    @classmethod
+    def _validate_max_value_type(cls, value: Optional[Any]) -> Optional[Any]:
+        if value is None:
+            return value
+        cls._precheck_is_int_type(value)
+        return value
 
-    @validator("allowedValues", each_item=True, pre=True)
-    def _validate_allowed_values_item_type(cls, v: Any) -> Optional[Any]:
-        cls._precheck_is_int_type(v)
-        return v
+    @field_validator("allowedValues", mode="before")
+    @classmethod
+    def _validate_allowed_values_item_type(cls, value: Any) -> Any:
+        errors = list[InitErrorDetails]()
+        for i, item in enumerate(value):
+            if isinstance(item, bool) or not isinstance(item, (int, str)):
+                try:
+                    cls._precheck_is_int_type(value)
+                except ValueError as e:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={"error": e},
+                            input=item,
+                        )
+                    )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        return value
 
-    @validator("default", pre=True)
-    def _validate_default_value_type(cls, v: Optional[Any]) -> Optional[Any]:
-        if v is None:
-            return v
-        cls._precheck_is_int_type(v)
-        return v
+    @field_validator("default", mode="before")
+    @classmethod
+    def _validate_default_value_type(cls, value: Optional[Any]) -> Optional[Any]:
+        if value is None:
+            return value
+        cls._precheck_is_int_type(value)
+        return value
 
-    @validator("maxValue")
-    def _validate_max_value(cls, v: Optional[int], values: dict[str, Any]) -> Optional[int]:
-        if v is None:
-            return v
-        min_value = values.get("minValue")
+    @field_validator("maxValue")
+    @classmethod
+    def _validate_max_value(cls, value: Optional[int], info: ValidationInfo) -> Optional[int]:
+        if value is None:
+            return value
+        min_value = info.data.get("minValue")
         if min_value is None:
-            return v
-        if min_value > v:
+            return value
+        if min_value > value:
             raise ValueError("Required: minValue <= maxValue.")
-        return v
+        return value
 
-    @validator("allowedValues", each_item=True)
-    def _validate_allowed_values_item(cls, v: int, values: dict[str, Any]) -> int:
-        min_value = values.get("minValue")
+    @field_validator("allowedValues")
+    @classmethod
+    def _validate_allowed_values_item(cls, value: list[int], info: ValidationInfo) -> list[int]:
+        min_value = info.data.get("minValue")
+        max_value = info.data.get("maxValue")
+        errors = list[InitErrorDetails]()
+        for i, item in enumerate(value):
+            if min_value is not None:
+                if item < min_value:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={"error": ValueError("Value less than minValue.")},
+                            input=item,
+                        )
+                    )
+            if max_value is not None:
+                if item > max_value:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={"error": ValueError("Value larger than minValue.")},
+                            input=item,
+                        )
+                    )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        return value
+
+    @field_validator("default")
+    @classmethod
+    def _validate_default(cls, value: int, info: ValidationInfo) -> int:
+        min_value = info.data.get("minValue")
         if min_value is not None:
-            if v < min_value:
+            if value < min_value:
                 raise ValueError("Value less than minValue.")
-        max_value = values.get("maxValue")
+        max_value = info.data.get("maxValue")
         if max_value is not None:
-            if v > max_value:
-                raise ValueError("Value larger than maxValue.")
-        return v
-
-    @validator("default")
-    def _validate_default(cls, v: int, values: dict[str, Any]) -> int:
-        min_value = values.get("minValue")
-        if min_value is not None:
-            if v < min_value:
-                raise ValueError("Value less than minValue.")
-        max_value = values.get("maxValue")
-        if max_value is not None:
-            if v > max_value:
+            if value > max_value:
                 raise ValueError("Value larger than maxValue.")
 
-        allowed_values = values.get("allowedValues")
+        allowed_values = info.data.get("allowedValues")
         if allowed_values is not None:
-            if v not in allowed_values:
+            if value not in allowed_values:
                 raise ValueError("Must be an allowed value.")
-        return v
+        return value
 
-    @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_user_interface_compatibility(self) -> Self:
         # validate that the user interface control is compatible with the value constraints
-        if values.get("userInterface"):
-            user_interface_control = values["userInterface"].control
-            if (
-                values.get("allowedValues")
-                and user_interface_control == IntUserInterfaceControl.SPIN_BOX
-            ):
+        if self.userInterface:
+            user_interface_control = self.userInterface.control
+            if self.allowedValues and user_interface_control == IntUserInterfaceControl.SPIN_BOX:
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used when 'allowedValues' is provided"
                 )
             if (
-                not values.get("allowedValues")
+                not self.allowedValues
                 and user_interface_control == IntUserInterfaceControl.DROPDOWN_LIST
             ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} requires that 'allowedValues' be provided"
                 )
             if (
-                values["userInterface"].singleStepDelta
+                self.userInterface.singleStepDelta
                 and user_interface_control != IntUserInterfaceControl.SPIN_BOX
             ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used when 'singleStepDelta' is provided"
                 )
 
-        return values
+        return self
 
     # override
     def _check_constraints(self, value: Any) -> None:
@@ -1599,10 +1745,10 @@ class JobFloatParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """
 
     control: FloatUserInterfaceControl
-    label: Optional[UserInterfaceLabelStringValue]
-    groupLabel: Optional[UserInterfaceLabelStringValue]
-    decimals: Optional[PositiveInt]
-    singleStepDelta: Optional[PositiveFloat]
+    label: Optional[UserInterfaceLabelStringValue] = None
+    groupLabel: Optional[UserInterfaceLabelStringValue] = None
+    decimals: Optional[PositiveInt] = None
+    singleStepDelta: Optional[PositiveFloat] = None
 
 
 class JobFloatParameterDefinition(OpenJDModel_v2023_09):
@@ -1625,7 +1771,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.FLOAT]
-    userInterface: Optional[JobFloatParameterDefinitionUserInterface]
+    userInterface: Optional[JobFloatParameterDefinitionUserInterface] = None
     description: Optional[Description] = None
     # Note: Ordering of the following fields is essential for the validators to work correctly.
     minValue: Optional[Decimal] = None  # noqa: N815
@@ -1656,74 +1802,96 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
         },
     )
 
-    @validator("maxValue")
-    def _validate_max_value(cls, v: Optional[Decimal], values: dict[str, Any]) -> Optional[Decimal]:
-        if v is None:
-            return v
-        min_value = values.get("minValue")
+    @field_validator("maxValue")
+    @classmethod
+    def _validate_max_value(
+        cls, value: Optional[Decimal], info: ValidationInfo
+    ) -> Optional[Decimal]:
+        if value is None:
+            return value
+        min_value = info.data.get("minValue")
         if min_value is None:
-            return v
-        if min_value > v:
+            return value
+        if min_value > value:
             raise ValueError("Required: minValue <= maxValue.")
-        return v
+        return value
 
-    @validator("allowedValues", each_item=True)
-    def _validate_allowed_values_item(cls, v: Decimal, values: dict[str, Any]) -> Decimal:
-        min_value = values.get("minValue")
+    @field_validator("allowedValues")
+    @classmethod
+    def _validate_allowed_values_item(
+        cls, value: list[Decimal], info: ValidationInfo
+    ) -> list[Decimal]:
+        min_value = info.data.get("minValue")
+        max_value = info.data.get("maxValue")
+        errors = list[InitErrorDetails]()
+        for i, item in enumerate(value):
+            if min_value is not None:
+                if item < min_value:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={"error": ValueError("Value less than minValue.")},
+                            input=item,
+                        )
+                    )
+            if max_value is not None:
+                if item > max_value:
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={"error": ValueError("Value larger than maxValue.")},
+                            input=item,
+                        )
+                    )
+        if errors:
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        return value
+
+    @field_validator("default")
+    @classmethod
+    def _validate_default(cls, value: Decimal, info: ValidationInfo) -> Decimal:
+        min_value = info.data.get("minValue")
         if min_value is not None:
-            if v < min_value:
+            if value < min_value:
                 raise ValueError("Value less than minValue.")
-        max_value = values.get("maxValue")
+        max_value = info.data.get("maxValue")
         if max_value is not None:
-            if v > max_value:
-                raise ValueError("Value larger than maxValue.")
-        return v
-
-    @validator("default")
-    def _validate_default(cls, v: Decimal, values: dict[str, Any]) -> Decimal:
-        min_value = values.get("minValue")
-        if min_value is not None:
-            if v < min_value:
-                raise ValueError("Value less than minValue.")
-        max_value = values.get("maxValue")
-        if max_value is not None:
-            if v > max_value:
+            if value > max_value:
                 raise ValueError("Value larger than maxValue.")
 
-        allowed_values = values.get("allowedValues")
+        allowed_values = info.data.get("allowedValues")
         if allowed_values is not None:
-            if v not in allowed_values:
+            if value not in allowed_values:
                 raise ValueError("Must be an allowed value.")
-        return v
+        return value
 
-    @root_validator
-    def _validate_user_interface_compatibility(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_user_interface_compatibility(self) -> Self:
         # validate that the user interface control is compatible with the value constraints
-        if values.get("userInterface"):
-            user_interface_control = values["userInterface"].control
-            if (
-                values.get("allowedValues")
-                and user_interface_control == FloatUserInterfaceControl.SPIN_BOX
-            ):
+        if self.userInterface:
+            user_interface_control = self.userInterface.control
+            if self.allowedValues and user_interface_control == FloatUserInterfaceControl.SPIN_BOX:
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used when 'allowedValues' is provided"
                 )
             if (
-                not values.get("allowedValues")
+                not self.allowedValues
                 and user_interface_control == FloatUserInterfaceControl.DROPDOWN_LIST
             ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} requires that 'allowedValues' be provided"
                 )
             if (
-                values["userInterface"].singleStepDelta
+                self.userInterface.singleStepDelta
                 and user_interface_control != FloatUserInterfaceControl.SPIN_BOX
             ):
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used when 'singleStepDelta' is provided"
                 )
 
-        return values
+        return self
 
     # override
     def _check_constraints(self, value: Any) -> None:
@@ -1787,10 +1955,9 @@ class AttributeCapabilityValue(FormatString):
     _min_length = 1
 
 
-if TYPE_CHECKING:
-    AttributeCapabilityList = list[AttributeCapabilityValue]
-else:
-    AttributeCapabilityList = conlist(AttributeCapabilityValue, min_items=1, max_items=50)
+AttributeCapabilityList = Annotated[
+    list[AttributeCapabilityValue], Field(min_length=1, max_length=50)
+]
 
 
 class AmountRequirement(OpenJDModel_v2023_09):
@@ -1810,15 +1977,16 @@ class AmountRequirement(OpenJDModel_v2023_09):
     """
 
     name: str
-    min: Optional[Decimal]
-    max: Optional[Decimal]
+    min: Optional[Decimal] = None
+    max: Optional[Decimal] = None
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def validate_concrete_model(cls, values: dict[str, Any]) -> dict[str, Any]:
         # Reuse the AmountRequirementTemplate validation. Because all the template
         # variables have been substituted, it will now run validation it couldn't
         # before.
-        AmountRequirementTemplate.parse_obj(values)
+        AmountRequirementTemplate.model_validate(values)
         return values
 
 
@@ -1837,8 +2005,8 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
     """
 
     name: AmountCapabilityName
-    min: Optional[Decimal]
-    max: Optional[Decimal]
+    min: Optional[Decimal] = None
+    max: Optional[Decimal] = None
 
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=AmountRequirement),
@@ -1847,33 +2015,37 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
         },
     )
 
-    @validator("name")
+    @field_validator("name")
+    @classmethod
     def _validate_name(cls, v: str) -> str:
         validate_amount_capability_name(
             capability_name=v, standard_capabilities=_STANDARD_AMOUNT_CAPABILITIES_NAMES
         )
         return v
 
-    @validator("min")
-    def _validate_min(cls, v: Optional[Decimal], values: dict[str, Any]) -> Optional[Decimal]:
+    @field_validator("min")
+    @classmethod
+    def _validate_min(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         if v is None:
             return v
         if v < 0:
             raise ValueError(f"Value {v} must be zero or greater")
         return v
 
-    @validator("max")
-    def _validate_max(cls, v: Optional[Decimal], values: dict[str, Any]) -> Optional[Decimal]:
+    @field_validator("max")
+    @classmethod
+    def _validate_max(cls, v: Optional[Decimal], info: ValidationInfo) -> Optional[Decimal]:
         if v is None:
             return v
         if v <= 0:
             raise ValueError("Value must be greater than 0")
-        v_min = values.get("min")
+        v_min = info.data.get("min")
         if v_min is not None and v_min > v:
             raise ValueError("Value for 'max' must be greater or equal to 'min'")
         return v
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def _validate_has_one_optional(cls, values: dict[str, Any]) -> dict[str, Any]:
         if not ("min" in values or "max" in values):
             raise ValueError("At least one of 'min' or 'max' must be defined.")
@@ -1892,15 +2064,16 @@ class AttributeRequirement(OpenJDModel_v2023_09):
     """
 
     name: str
-    anyOf: Optional[list[str]]
-    allOf: Optional[list[str]]
+    anyOf: Optional[list[str]] = None
+    allOf: Optional[list[str]] = None
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def validate_concrete_model(cls, values: dict[str, Any]) -> dict[str, Any]:
         # Reuse the AttributeRequirementTemplate validation. Because all the template
         # variables have been substituted, it will now run validation it couldn't
         # before.
-        AttributeRequirementTemplate.parse_obj(values)
+        AttributeRequirementTemplate.model_validate(values)
         return values
 
 
@@ -1914,8 +2087,8 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
     """
 
     name: AttributeCapabilityName
-    anyOf: Optional[AttributeCapabilityList]  # noqa: N815
-    allOf: Optional[AttributeCapabilityList]  # noqa: N815
+    anyOf: Optional[AttributeCapabilityList] = None  # noqa: N815
+    allOf: Optional[AttributeCapabilityList] = None  # noqa: N815
 
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=AttributeRequirement),
@@ -1927,7 +2100,8 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
     )
     _attribute_capability_value_max_length: int = 100
 
-    @validator("name")
+    @field_validator("name")
+    @classmethod
     def _validate_name(cls, v: str) -> str:
         validate_attribute_capability_name(
             capability_name=v, standard_capabilities=_STANDARD_ATTRIBUTE_CAPABILITIES_NAMES
@@ -1936,10 +2110,10 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
 
     @classmethod
     def _validate_attribute_list(
-        cls, v: AttributeCapabilityList, values: dict[str, Any], is_allof: bool
+        cls, v: AttributeCapabilityList, info: ValidationInfo, is_allof: bool
     ) -> None:
         try:
-            capability_name = values["name"].lower()
+            capability_name = info.data["name"].lower()
         except KeyError:
             # Just return as though there is no error. The missing name field
             # will be reported by the validation of 'name'
@@ -1967,30 +2141,36 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
                     continue
                 if not cls._attribute_capability_value_regex.match(item):
                     raise ValueError(f"Value {item} is not a valid attribute capability value.")
-                if len(item) > cls._attribute_capability_value_max_length:
+                attribute_capability_value_max_length = cast(
+                    ModelPrivateAttr, cls._attribute_capability_value_max_length
+                ).get_default()
+                if len(item) > attribute_capability_value_max_length:
                     raise ValueError(
-                        f"Value {item} exceeds {cls._attribute_capability_value_max_length} character length limit."
+                        f"Value {item} exceeds {attribute_capability_value_max_length} character length limit."
                     )
 
-    @validator("allOf")
+    @field_validator("allOf")
+    @classmethod
     def _validate_allof(
-        cls, v: Optional[AttributeCapabilityList], values: dict[str, Any]
+        cls, v: Optional[AttributeCapabilityList], info: ValidationInfo
     ) -> Optional[AttributeCapabilityList]:
         if v is None:
             return v
-        cls._validate_attribute_list(v, values, True)
+        cls._validate_attribute_list(v, info, True)
         return v
 
-    @validator("anyOf")
+    @field_validator("anyOf")
+    @classmethod
     def _validate_anyof(
-        cls, v: Optional[AttributeCapabilityList], values: dict[str, Any]
+        cls, v: Optional[AttributeCapabilityList], info: ValidationInfo
     ) -> Optional[AttributeCapabilityList]:
         if v is None:
             return v
-        cls._validate_attribute_list(v, values, False)
+        cls._validate_attribute_list(v, info, False)
         return v
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def _validate_has_one_optional(cls, values: dict[str, Any]) -> dict[str, Any]:
         if not ("anyOf" in values or "allOf" in values):
             raise ValueError("At least one of 'anyOf' or 'allOf' must be defined.")
@@ -2012,7 +2192,8 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
 
     _max_allowed_requirements: int = 50
 
-    @validator("amounts")
+    @field_validator("amounts")
+    @classmethod
     def _validate_amounts(
         cls, v: Optional[list[AmountRequirementTemplate]]
     ) -> Optional[list[AmountRequirementTemplate]]:
@@ -2022,7 +2203,8 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
             raise ValueError("List must contain at least one element or not be defined.")
         return v
 
-    @validator("attributes")
+    @field_validator("attributes")
+    @classmethod
     def _validate_attributes(
         cls, v: Optional[list[AttributeRequirementTemplate]]
     ) -> Optional[list[AttributeRequirementTemplate]]:
@@ -2032,22 +2214,22 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
             raise ValueError("List must contain at least one element or not be defined.")
         return v
 
-    @root_validator
-    def _validate(cls, values: dict[str, Any]) -> dict[str, Any]:
-        if not ("amounts" in values or "attributes" in values):
+    @model_validator(mode="after")
+    def _validate(self) -> Self:
+        amounts = self.amounts
+        attributes = self.attributes
+        if amounts is None and attributes is None:
             raise ValueError(
                 "Must define at least one of 'amounts' or 'attributes' if defining this property."
             )
-        amounts = values.get("amounts")
-        attributes = values.get("attributes")
         total_amounts = len(amounts) if amounts is not None else 0
         total_attributes = len(attributes) if attributes is not None else 0
         total = total_amounts + total_attributes
-        if total > cls._max_allowed_requirements:
+        if total > self._max_allowed_requirements:
             raise ValueError(
-                f"The total number of requirements must not exceed {cls._max_allowed_requirements}. {total} requirements defined."
+                f"The total number of requirements must not exceed {self._max_allowed_requirements}. {total} requirements defined."
             )
-        return values
+        return self
 
 
 # ==================================================================
@@ -2059,12 +2241,8 @@ class StepDependency(OpenJDModel_v2023_09):
     dependsOn: StepName
 
 
-if TYPE_CHECKING:
-    StepEnvironmentList = list[Environment]
-    StepDependenciesList = list[StepDependency]
-else:
-    StepEnvironmentList = conlist(Environment, min_items=1)
-    StepDependenciesList = conlist(StepDependency, min_items=1)
+StepEnvironmentList = Annotated[list[Environment], Field(min_length=1)]
+StepDependenciesList = Annotated[list[StepDependency], Field(min_length=1)]
 
 
 # Target model for a StepTemplate when instantiating a job.
@@ -2110,7 +2288,8 @@ class StepTemplate(OpenJDModel_v2023_09):
     }
     _job_creation_metadata = JobCreationMetadata(create_as=JobCreateAsMetadata(model=Step))
 
-    @validator("dependencies")
+    @field_validator("dependencies")
+    @classmethod
     def _validate_no_duplicate_deps(
         cls, v: Optional[StepDependenciesList]
     ) -> Optional[StepDependenciesList]:
@@ -2121,7 +2300,8 @@ class StepTemplate(OpenJDModel_v2023_09):
             raise ValueError("Duplicate dependencies are not allowed.")
         return v
 
-    @validator("stepEnvironments")
+    @field_validator("stepEnvironments")
+    @classmethod
     def _unique_environment_names(
         cls, v: Optional[StepEnvironmentList]
     ) -> Optional[StepEnvironmentList]:
@@ -2129,32 +2309,21 @@ class StepTemplate(OpenJDModel_v2023_09):
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 
-    @root_validator
-    def _validate_no_self_dependency(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_no_self_dependency(self) -> Self:
         # Dependency of the step upon itself is not allowed.
-        deps: StepDependenciesList = values.get("dependencies", [])
+        deps: StepDependenciesList = self.dependencies or []
         if not deps:
-            return values
-        stepname = values.get("name")
+            return self
+        stepname = self.name
         if any(dep.dependsOn == stepname for dep in deps):
             raise ValueError("A step cannot depend upon itself.")
-        return values
+        return self
 
 
-if TYPE_CHECKING:
-    StepTemplateList = list[StepTemplate]
-    JobParameterDefinitionList = list[
-        Union[
-            JobIntParameterDefinition,
-            JobFloatParameterDefinition,
-            JobStringParameterDefinition,
-            JobPathParameterDefinition,
-        ]
-    ]
-    JobEnvironmentsList = list[Environment]
-else:
-    StepTemplateList = conlist(StepTemplate, min_items=1)
-    JobParameterDefinitionList = conlist(
+StepTemplateList = Annotated[list[StepTemplate], Field(min_length=1)]
+JobParameterDefinitionList = Annotated[
+    list[
         Annotated[
             Union[
                 JobIntParameterDefinition,
@@ -2163,12 +2332,14 @@ else:
                 JobPathParameterDefinition,
             ],
             Field(..., discriminator="type"),
-        ],
-        min_items=1,
-        max_items=50,
-    )
-    JobEnvironmentsList = conlist(Environment, min_items=1)
-
+        ]
+    ],
+    Field(
+        min_length=1,
+        max_length=50,
+    ),
+]
+JobEnvironmentsList = Annotated[list[Environment], Field(min_length=1)]
 
 JobParameters = dict[Identifier, JobParameter]
 
@@ -2222,11 +2393,13 @@ class JobTemplate(OpenJDModel_v2023_09):
         rename_fields={"parameterDefinitions": "parameters"},
     )
 
-    @validator("steps")
+    @field_validator("steps")
+    @classmethod
     def _unique_step_names(cls, v: StepTemplateList) -> StepTemplateList:
         return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
 
-    @validator("parameterDefinitions")
+    @field_validator("parameterDefinitions")
+    @classmethod
     def _unique_parameter_names(
         cls, v: Optional[JobParameterDefinitionList]
     ) -> Optional[JobParameterDefinitionList]:
@@ -2234,7 +2407,8 @@ class JobTemplate(OpenJDModel_v2023_09):
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 
-    @validator("jobEnvironments")
+    @field_validator("jobEnvironments")
+    @classmethod
     def _unique_environment_names(
         cls, v: Optional[JobEnvironmentsList]
     ) -> Optional[JobEnvironmentsList]:
@@ -2251,13 +2425,13 @@ class JobTemplate(OpenJDModel_v2023_09):
             cast(Type[OpenJDModel], cls), values
         )
         if errors:
-            raise ValidationError(errors, JobTemplate)
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
         return values
 
-    @root_validator
-    def _validate_no_step_dependency_cycles(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_no_step_dependency_cycles(self) -> Self:
         depgraph = dict[str, set[str]]()
-        steplist = values.get("steps", [])
+        steplist = self.steps or []
         for step in steplist:
             if step.dependencies is not None:
                 dependsOn = set[str](dep.dependsOn for dep in step.dependencies)
@@ -2271,72 +2445,76 @@ class JobTemplate(OpenJDModel_v2023_09):
             cycle = " -> ".join(exc.args[1])
             raise ValueError(f"Step dependencies form a cycle: {cycle}") from None
 
-        return values
+        return self
 
-    @root_validator
-    def _validate_step_deps_exist(cls, values: dict[str, Any]) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_step_deps_exist(self) -> Self:
         # Check that the deps referenced by all steps actually exist
 
-        steplist = values.get("steps", [])
+        steplist = self.steps or []
         if not steplist:
-            return values
+            return self
 
-        errors = list[ErrorWrapper]()
+        errors = list[InitErrorDetails]()
         stepnames = set[str](step.name for step in steplist)
         for i, step in enumerate(steplist):
             if step.dependencies is not None:
                 for j, dep in enumerate(step.dependencies):
                     if dep.dependsOn not in stepnames:
                         errors.append(
-                            ErrorWrapper(
-                                ValueError(f"Unknown step '{dep.dependsOn}'"),
+                            InitErrorDetails(
+                                type="value_error",
                                 # The path to the problematic dependsOn value
-                                ("step", i, "dependencies", j, "dependsOn"),
+                                loc=("step", i, "dependencies", j, "dependsOn"),
+                                ctx={"error": ValueError(f"Unknown step '{dep.dependsOn}'")},
+                                input=dep.dependsOn,
                             )
                         )
 
         if errors:
-            raise ValidationError(errors, JobTemplate)
+            raise ValidationError.from_exception_data(self.__class__.__name__, errors)
 
-        return values
+        return self
 
-    @root_validator
-    def _validate_env_names_dont_match_step_env_names(
-        cls, values: dict[str, Any]
-    ) -> dict[str, Any]:
+    @model_validator(mode="after")
+    def _validate_env_names_dont_match_step_env_names(self) -> Self:
         # Check that if we have job-level Environments defined that none of the defined Step-level
         # environments have the same name.
         # Names must be unique between Steps & Jobs.
 
-        steplist = values.get("steps", [])
+        steplist = self.steps or []
         if not steplist:
-            return values
+            return self
 
-        envlist = values.get("jobEnvironments", [])
+        envlist = self.jobEnvironments or []
         if not envlist:
-            return values
+            return self
 
         job_env_names = set(env.name for env in cast(JobEnvironmentsList, envlist))
 
-        errors = list[ErrorWrapper]()
+        errors = list[InitErrorDetails]()
         for i, step in enumerate(steplist):
             if step.stepEnvironments is not None:
                 for j, env in enumerate(step.stepEnvironments):
                     if env.name in job_env_names:
                         errors.append(
-                            ErrorWrapper(
-                                ValueError(
-                                    f"Name {env.name} must differ from the names of Environments defined at the root of the template."
-                                ),
+                            InitErrorDetails(
+                                type="value_error",
                                 # The path to the problematic environment name
-                                ("step", i, "stepEnvironments", j, "name"),
+                                loc=("step", i, "stepEnvironments", j, "name"),
+                                ctx={
+                                    "error": ValueError(
+                                        f"Name {env.name} must differ from the names of Environments defined at the root of the template."
+                                    )
+                                },
+                                input=env.name,
                             )
                         )
 
         if errors:
-            raise ValidationError(errors, JobTemplate)
+            raise ValidationError.from_exception_data(self.__class__.__name__, errors)
 
-        return values
+        return self
 
 
 class EnvironmentTemplate(OpenJDModel_v2023_09):
@@ -2360,7 +2538,8 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
         "environment": {"parameterDefinitions"},
     }
 
-    @validator("parameterDefinitions")
+    @field_validator("parameterDefinitions")
+    @classmethod
     def _unique_parameter_names(
         cls, v: Optional[JobParameterDefinitionList]
     ) -> Optional[JobParameterDefinitionList]:
@@ -2377,5 +2556,5 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
             cast(Type[OpenJDModel], cls), values
         )
         if errors:
-            raise ValidationError(errors, EnvironmentTemplate)
+            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
         return values

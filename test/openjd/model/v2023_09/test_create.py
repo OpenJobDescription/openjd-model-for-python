@@ -391,6 +391,6 @@ class TestCreateJob:
 
         # Note: The dict compare generates an easier to read diff if there's a test failure.
         #  It is not essential to the test.
-        assert result.dict() == expected.dict()
+        assert result.model_dump() == expected.model_dump()
         # This is the important assertion.
         assert result == expected

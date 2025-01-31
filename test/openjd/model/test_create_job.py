@@ -735,7 +735,7 @@ class TestCreateJob_2023_09:
 
         # THEN
         assert (
-            "1 validation errors for JobTemplate\nname:\n\tensure this value has at most 128 characters"
+            "1 validation errors for JobTemplate\nname:\n\tString should have at most 128 characters"
             in str(excinfo.value)
         )
 
@@ -781,6 +781,6 @@ class TestCreateJob_2023_09:
 
         # THEN
         assert (
-            "1 validation errors for JobTemplate\nsteps[0] -> steps[0] -> parameterSpace -> combination:\n\tAssociative expressions must have arguments with identical ranges. Expression (A, B) has argument lengths (10, 2)."
+            "1 validation errors for JobTemplate\nsteps[0] -> parameterSpace -> combination:\n\tAssociative expressions must have arguments with identical ranges. Expression (A, B) has argument lengths (10, 2)."
             in str(excinfo.value)
         )

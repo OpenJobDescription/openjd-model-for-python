@@ -7,13 +7,13 @@ from enum import Enum
 from typing import Any, ClassVar, Optional, Type, TypeVar, Union, cast
 
 import yaml
-from pydantic.v1 import BaseModel
-from pydantic.v1 import ValidationError as PydanticValidationError
-from pydantic.v1.error_wrappers import ErrorWrapper
+from pydantic import BaseModel
+from pydantic import ValidationError as PydanticValidationError
+from pydantic_core import ErrorDetails, InitErrorDetails
 
 from ._errors import DecodeValidationError
 from ._types import EnvironmentTemplate, JobTemplate, OpenJDModel, TemplateSpecificationVersion
-from ._convert_pydantic_error import pydantic_validationerrors_to_str, ErrorDict
+from ._convert_pydantic_error import pydantic_validationerrors_to_str
 from .v2023_09 import JobTemplate as JobTemplate_2023_09
 from .v2023_09 import EnvironmentTemplate as EnvironmentTemplate_2023_09
 
@@ -33,7 +33,7 @@ class DocumentType(str, Enum):
 
 
 # Pydantic injects a __pydantic_model__ attribute into all dataclasses. To be able to parse
-# dataclass models we need to be able to invoke Model.__pydantic_model__.parse_obj(), but
+# dataclass models we need to be able to invoke Model.__pydantic_model__.model_validate(), but
 # type checkers do not realize that pydantic dataclasses have a __pydantic_model__ attribute.
 # So, we type-cast into this class to invoke that method.
 class PydanticDataclass:
@@ -46,7 +46,7 @@ T = TypeVar("T", bound=OpenJDModel)
 
 def _parse_model(*, model: Type[T], obj: Any) -> T:
     if is_dataclass(model):
-        return cast(T, cast(PydanticDataclass, model).__pydantic_model__.parse_obj(obj))
+        return cast(T, cast(PydanticDataclass, model).__pydantic_model__.model_validate(obj))
     else:
         prevalidator_error: Optional[PydanticValidationError] = None
         if hasattr(model, "_root_template_prevalidator"):
@@ -55,12 +55,20 @@ def _parse_model(*, model: Type[T], obj: Any) -> T:
             except PydanticValidationError as exc:
                 prevalidator_error = exc
         try:
-            result = cast(T, cast(BaseModel, model).parse_obj(obj))
+            result = cast(T, cast(BaseModel, model).model_validate(obj))
         except PydanticValidationError as exc:
-            errors: list[ErrorWrapper] = cast(list[ErrorWrapper], exc.raw_errors)
             if prevalidator_error is not None:
-                errors.extend(cast(list[ErrorWrapper], prevalidator_error.raw_errors))
-            raise PydanticValidationError(errors, model)
+                errors = list[InitErrorDetails]()
+                for error_details in exc.errors() + prevalidator_error.errors():
+                    init_error_details = {
+                        key: value for key, value in error_details.items() if key != "msg"
+                    }
+                    errors.append(cast(InitErrorDetails, init_error_details))
+                raise PydanticValidationError.from_exception_data(
+                    title=exc.title, line_errors=errors
+                )
+            else:
+                raise
         if prevalidator_error is not None:
             raise prevalidator_error
         return result
@@ -70,7 +78,7 @@ def parse_model(*, model: Type[T], obj: Any) -> T:
     try:
         return _parse_model(model=model, obj=obj)
     except PydanticValidationError as exc:
-        errors: list[ErrorDict] = cast(list[ErrorDict], exc.errors())
+        errors: list[ErrorDetails] = exc.errors()
         raise DecodeValidationError(pydantic_validationerrors_to_str(model, errors))
 
 
@@ -105,7 +113,7 @@ def model_to_object(*, model: OpenJDModel) -> dict[str, Any]:
     """Given a model from this package, encode it as a dictionary such that it could
     be written to a JSON/YAML document."""
 
-    as_dict = model.dict()
+    as_dict = model.model_dump()
 
     # Some of the values in the model can be type 'Decimal', which doesn't
     # encode into json/yaml without special handling. So, we convert those in to

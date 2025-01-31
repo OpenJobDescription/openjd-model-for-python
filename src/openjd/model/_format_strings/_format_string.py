@@ -2,15 +2,12 @@
 
 from dataclasses import dataclass
 from numbers import Real
-from typing import TYPE_CHECKING, Optional, Union
+from typing import Optional, Union
 
 from .._errors import ExpressionError, TokenError
 from .._symbol_table import SymbolTable
 from ._dyn_constrained_str import DynamicConstrainedStr
 from ._expression import InterpolationExpression
-
-if TYPE_CHECKING:
-    from pydantic.v1.typing import CallableGenerator
 
 
 @dataclass
@@ -21,8 +18,9 @@ class ExpressionInfo:
     resolved_value: Optional[Union[Real, str]] = None
 
 
-class FormatStringError(Exception):
+class FormatStringError(ValueError):
     def __init__(self, *, string: str, start: int, end: int, expr: str = "", details: str = ""):
+        self.input = string
         expression = f"Expression: {expr}. " if expr else ""
         reason = f"Reason: {details}." if details else ""
         msg = (
@@ -202,24 +200,3 @@ class FormatString(DynamicConstrainedStr):
             result_list.append(expression_info)
 
         return result_list
-
-    # Pydantic datamodel interfaces
-    # ================================
-    # Reference: https://pydantic-docs.helpmanual.io/usage/types/#custom-data-types
-
-    @classmethod
-    def __get_validators__(cls) -> "CallableGenerator":
-        for validator in super().__get_validators__():
-            yield validator
-        yield cls._validate
-
-    @classmethod
-    def _validate(cls, value: str) -> "FormatString":
-        # Reference: https://pydantic-docs.helpmanual.io/usage/validators/
-        # Class constructor will raise validation errors on the value contents.
-        try:
-            return cls(value)
-        except FormatStringError as e:
-            # Pydantic validators must return a ValueError or AssertionError
-            # Convert the FormatStringError into a ValueError
-            raise ValueError(str(e))

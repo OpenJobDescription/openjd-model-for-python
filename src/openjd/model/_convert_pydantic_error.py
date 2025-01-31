@@ -1,37 +1,33 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import TypedDict, Union, Type
-from pydantic.v1 import BaseModel
+from typing import Type, Union
+from pydantic import BaseModel
+from pydantic_core import ErrorDetails
 from inspect import getmodule
 
-# Calling pydantic's ValidationError.errors() returns a list[ErrorDict], but
-# pydantic doesn't export the ErrorDict type publicly. So, we create it here for
-# type checking.
-# Note that we ignore the 'ctx' key since we don't use it.
-# See: https://github.com/pydantic/pydantic/blob/d9c2af3a701ca982945a590de1a1da98b3fb4003/pydantic/error_wrappers.py#L50
-Loc = tuple[Union[int, str], ...]
 
-
-class ErrorDict(TypedDict):
-    loc: Loc
-    msg: str
-    type: str
-
-
-def pydantic_validationerrors_to_str(root_model: Type[BaseModel], errors: list[ErrorDict]) -> str:
+def pydantic_validationerrors_to_str(
+    root_model: Type[BaseModel], errors: list[ErrorDetails]
+) -> str:
     """This is our own custom stringification of the Pydantic ValidationError to use
     in place of str(<ValidationError>). Pydantic's default stringification too verbose for
     our purpose, and contains information that we don't want.
     """
     results = list[str]()
-    for error in errors:
-        results.append(_error_dict_to_str(root_model, error))
+    for error_details in errors:
+        results.append(_error_dict_to_str(root_model, error_details))
     return f"{len(errors)} validation errors for {root_model.__name__}\n" + "\n".join(results)
 
 
-def _error_dict_to_str(root_model: Type[BaseModel], error: ErrorDict) -> str:
-    loc = error["loc"]
-    msg = error["msg"]
+def _error_dict_to_str(root_model: Type[BaseModel], error_details: ErrorDetails) -> str:
+    error_type = error_details["type"]
+    loc = error_details["loc"]
+    # Skip the "Value error," prefix by getting the exception message directly.
+    # This preserves the message formatting created when Pydantic V1 was in use.
+    if error_type == "value_error":
+        msg = str(error_details["ctx"]["error"])
+    else:
+        msg = error_details["msg"]
 
     # When a model's root_validator raises an error other than a ValidationError
     # (i.e. raises something like a ValueError or a TypeError) then pydantic
@@ -54,7 +50,7 @@ def _error_dict_to_str(root_model: Type[BaseModel], error: ErrorDict) -> str:
     return f"{_loc_to_str(root_model, loc)}:\n\t{msg}"
 
 
-def _loc_to_str(root_model: Type[BaseModel], loc: Loc) -> str:
+def _loc_to_str(root_model: Type[BaseModel], loc: tuple[Union[int, str], ...]) -> str:
     model_module = getmodule(root_model)
 
     # If a nested error is from a root validator, then just report the error as being

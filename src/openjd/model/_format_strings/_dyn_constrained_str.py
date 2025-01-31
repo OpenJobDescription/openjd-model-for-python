@@ -1,14 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from typing import Any, Callable, Optional, Pattern, Union
+
+from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import core_schema
 import re
-from typing import TYPE_CHECKING, Any, Callable, Optional, Pattern, Union
-
-from pydantic.v1.errors import AnyStrMaxLengthError, AnyStrMinLengthError, StrRegexError
-from pydantic.v1.utils import update_not_none
-from pydantic.v1.validators import strict_str_validator
-
-if TYPE_CHECKING:
-    from pydantic.v1.typing import CallableGenerator
 
 
 class DynamicConstrainedStr(str):
@@ -33,37 +30,43 @@ class DynamicConstrainedStr(str):
         return cls._max_length
 
     @classmethod
-    def __modify_schema__(cls, field_schema: dict[str, Any]) -> None:
-        update_not_none(
-            field_schema,
-            minLength=cls._min_length,
-            maxLength=cls._get_max_length(),
-        )
+    def _validate(cls, value: str) -> Any:
+        if not isinstance(value, str):
+            raise ValueError("String required")
 
-    @classmethod
-    def __get_validators__(cls) -> "CallableGenerator":
-        yield strict_str_validator  # Always strict string.
-        yield cls._validate_min_length
-        yield cls._validate_max_length
-        yield cls._validate_regex
-
-    @classmethod
-    def _validate_min_length(cls, value: str) -> str:
         if cls._min_length is not None and len(value) < cls._min_length:
-            raise AnyStrMinLengthError(limit_value=cls._min_length)
-        return value
-
-    @classmethod
-    def _validate_max_length(cls, value: str) -> str:
+            raise ValueError(f"String must be at least {cls._min_length} characters long")
         max_length = cls._get_max_length()
-        if max_length is not None and len(value) > max_length:
-            raise AnyStrMaxLengthError(limit_value=max_length)
-        return value
 
-    @classmethod
-    def _validate_regex(cls, value: str) -> str:
+        if max_length is not None and len(value) > max_length:
+            raise ValueError(f"String must be at most {max_length} characters long")
+
         if cls._regex is not None:
             if not re.match(cls._regex, value):
                 pattern: str = cls._regex if isinstance(cls._regex, str) else cls._regex.pattern
-                raise StrRegexError(pattern=pattern)
-        return value
+                raise ValueError(f"String does not match the required pattern: {pattern}")
+
+        return cls(value)
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: type[Any], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_plain_validator_function(cls._validate)
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        json_schema: dict[str, Any] = {"type": "string"}
+        if cls._min_length is not None:
+            json_schema["minLength"] = cls._min_length
+        max_length = cls._get_max_length()
+        if max_length is not None:
+            json_schema["maxLength"] = max_length
+        if cls._regex is not None:
+            json_schema["pattern"] = (
+                cls._regex if isinstance(cls._regex, str) else cls._regex.pattern
+            )
+
+        return json_schema

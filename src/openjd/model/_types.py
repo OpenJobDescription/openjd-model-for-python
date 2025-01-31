@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type, Union
 
-from pydantic.v1 import BaseModel, Extra
+from pydantic import ConfigDict, BaseModel
 
 from ._symbol_table import SymbolTable
 
@@ -269,13 +269,7 @@ class JobCreationMetadata:
 
 
 class OpenJDModel(BaseModel):
-    # See: https://docs.pydantic.dev/usage/model_config/
-    class Config:
-        # Forbid extra fields in the input
-        extra = Extra.forbid
-
-        # Make the model instances immutable
-        frozen = True
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # The specific schema revision that the model implements.
     revision: ClassVar[SpecificationRevision]
