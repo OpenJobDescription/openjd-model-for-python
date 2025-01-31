@@ -3,7 +3,7 @@
 from typing import Any, Literal, Union
 from enum import Enum
 from typing_extensions import Annotated
-from pydantic.v1 import Field
+from pydantic import Field
 
 import pytest
 

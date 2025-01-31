@@ -1,10 +1,11 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+from typing_extensions import Self
 
-from pydantic.v1 import BaseModel, root_validator, Field
+from pydantic import BaseModel, Field, model_validator
+from pydantic_core import ErrorDetails
 from typing import Literal, Union
 
 from openjd.model._convert_pydantic_error import (
-    ErrorDict,
     pydantic_validationerrors_to_str,
     _error_dict_to_str,
 )
@@ -20,9 +21,19 @@ class TestValidationErrorsToStr:
             f1: str
             f2: int
 
-        errors: list[ErrorDict] = [
-            {"loc": ("f1",), "msg": "error message1", "type": "error-type"},
-            {"loc": ("f2",), "msg": "error message2", "type": "error-type"},
+        errors: list[ErrorDetails] = [
+            {
+                "loc": ("f1",),
+                "msg": "error message1",
+                "type": "error-type",
+                "input": "input-value1",
+            },
+            {
+                "loc": ("f2",),
+                "msg": "error message2",
+                "type": "error-type",
+                "input": "input-value2",
+            },
         ]
         expected = "2 validation errors for Model\nf1:\n\terror message1\nf2:\n\terror message2"
 
@@ -47,7 +58,12 @@ class TestSimpleModels:
             f1: str
             f2: int
 
-        error: ErrorDict = {"loc": ("f2",), "msg": "error message", "type": "error-type"}
+        error: ErrorDetails = {
+            "loc": ("f2",),
+            "msg": "error message",
+            "type": "error-type",
+            "input": "input-value",
+        }
         expected = "f2:\n\terror message"
 
         # WHEN
@@ -67,13 +83,14 @@ class TestSimpleModels:
         class Model(BaseModel):
             inner: Inner
 
-        error: ErrorDict = {
+        error: ErrorDetails = {
             "loc": (
                 "inner",
                 "ff",
             ),
             "msg": "error message",
             "type": "error-type",
+            "input": "input-value",
         }
         expected = "inner -> ff:\n\terror message"
 
@@ -83,7 +100,7 @@ class TestSimpleModels:
         # THEN
         assert result == expected
 
-    def test_base_root_validator_error(self) -> None:
+    def test_base_model_validator_error(self) -> None:
         # Make sure that our path to error is correct for validation error
         # at the base level's root validator
         # This is a special case where we do not want the error message to be indented
@@ -94,11 +111,16 @@ class TestSimpleModels:
         class Model(BaseModel):
             ff: str
 
-            @root_validator
-            def _validate(cls, values):
+            @model_validator(mode="after")
+            def _validate(self) -> Self:
                 raise ValueError("error message")
 
-        error: ErrorDict = {"loc": ("__root__",), "msg": "error message", "type": "error-type"}
+        error: ErrorDetails = {
+            "loc": ("__root__",),
+            "msg": "error message",
+            "type": "error-type",
+            "input": "input-value",
+        }
         expected = "Model: error message"
 
         # WHEN
@@ -107,7 +129,7 @@ class TestSimpleModels:
         # THEN
         assert result == expected
 
-    def test_inner_root_validator_error(self) -> None:
+    def test_inner_model_validator_error(self) -> None:
         # Make sure that our path to error is correct for validation error
         # at a nested level's root validator.
         # In this case we drop the '__root__' field at the end and report the error
@@ -118,20 +140,21 @@ class TestSimpleModels:
         class Inner(BaseModel):
             ff: str
 
-            @root_validator
-            def _validate(cls, values):
+            @model_validator(mode="after")
+            def _validate(self) -> Self:
                 raise ValueError("error message")
 
         class Model(BaseModel):
             inner: Inner
 
-        error: ErrorDict = {
+        error: ErrorDetails = {
             "loc": (
                 "inner",
                 "__root__",
             ),
             "msg": "error message",
             "type": "error-type",
+            "input": "input-value",
         }
         expected = "inner:\n\terror message"
 
@@ -155,13 +178,14 @@ class TestArrayFields:
         class Model(BaseModel):
             field: list[int]
 
-        error: ErrorDict = {
+        error: ErrorDetails = {
             "loc": (
                 "field",
                 2,
             ),
             "msg": "error message",
             "type": "error-type",
+            "input": "input-value",
         }
         expected = "field[2]:\n\terror message"
 
@@ -182,7 +206,7 @@ class TestArrayFields:
         class Model(BaseModel):
             inner: list[Inner]
 
-        error: ErrorDict = {
+        error: ErrorDetails = {
             "loc": (
                 "inner",
                 2,
@@ -190,6 +214,7 @@ class TestArrayFields:
             ),
             "msg": "error message",
             "type": "error-type",
+            "input": "input-value",
         }
         expected = "inner[2] -> ff:\n\terror message"
 
@@ -224,7 +249,7 @@ class TestDiscriminatedUnion:
 
     def test(self) -> None:
         # GIVEN
-        error: ErrorDict = {
+        error: ErrorDetails = {
             "loc": (
                 "inner",
                 2,
@@ -233,6 +258,7 @@ class TestDiscriminatedUnion:
             ),
             "msg": "error message",
             "type": "error-type",
+            "input": "input-value",
         }
         expected = "inner[2] -> ff:\n\terror message"
 

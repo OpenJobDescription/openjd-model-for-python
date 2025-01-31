@@ -1,12 +1,16 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from collections import defaultdict
-from typing import Any, Optional, Type
+import typing
+from typing import cast, Any, Optional, Type, Literal, Union
 from inspect import isclass
 
-from pydantic.v1.error_wrappers import ErrorWrapper
-import pydantic.v1.fields
-from pydantic.v1.typing import is_literal_type
+from pydantic import Discriminator
+from pydantic_core import InitErrorDetails
+from pydantic.fields import FieldInfo, ModelPrivateAttr
+
+# Workaround for Python 3.9 where issubclass raises an error "TypeError: issubclass() arg 1 must be a class"
+from pydantic.v1.utils import lenient_issubclass
 
 from .._types import OpenJDModel, ResolutionScope
 from .._format_strings import FormatString, FormatStringError
@@ -102,32 +106,17 @@ __all__ = ["prevalidate_model_template_variable_references"]
 #    - Information on this is encoded in the model's `_template_variable_sources` field. See the comment for this field in the
 #      OpenJDModel base class for information on this property
 # 4. Since this validation is a pre-validator, we basically have to re-implement a fragment of Pydantic's model parser for this
-#    depth first traversal. Thus, you'll need to know the following about Pydantic v1.x's data model and parser to understand this
+#    depth first traversal. Thus, you'll need to know the following about Pydantic v2's data model and parser to understand this
 #    implementation:
-#    a) All models are derived from pydantic.v1.BaseModel
-#    b) pydantic.BaseModel.__fields__: dict[str, pydantic.ModelField] is injected into all BaseModels by pydantic's BaseModel metaclass.
+#    a) All models are derived from pydantic.BaseModel
+#    b) pydantic.BaseModel.model_fields: dict[str, FieldInfo] is injected into all BaseModels by pydantic's BaseModel metaclass.
 #       This member is what gives pydantic information about each of the fields defined in the model class. The key of the dict is the
 #       name of the field in the model.
-#    c) pydantic.ModelField describes the type information about a model's field:
-#        i) pydantic.ModelField.shape is an integer that defines the shape of the field
-#                SHAPE_SINGLETON means that it's a singleton type.
-#                SHAPE_LIST means that it's a list type.
-#                SHAPE_DICT means that it's a dict type.
-#                etc.
-#       ii) pydantic.ModelField.type_ gives you the type of the field; this is only useful for scalar singleton fields.
-#       iii) pydantic.ModelField.sub_fields: Optional[list[pydantic.ModelField]] exists for list, dictionary, and union-typed singleton
-#            fields:
-#            1. For SHAPE_LIST: sub_fields has length 1, and its element is the ModelField for the elements of the list.
-#            2. For SHAPE_DICT: sub_fields has length 1, and its element is the ModelField for the value-type of the dict.
-#            3. For SHAPE_SINGLETON:
-#                 a) For scalar-typed fields: sub_fields is None
-#                 b) For union-typed fields: sub_fields is a list of all of the types in the union
-#       iv) For discriminated unions:
-#            1. pydantic.ModelField.discriminator_key: Optional[str] exists and it gives the name of the submodel field used to
-#               determine which type of the union a given data value is.
-#            2. pydantic.sub_fields_mapping: Optional[dict[str,pydantic.ModelField]] exists and can be used to find the unioned type
-#               for a given discriminator value.
-#
+#    c) pydantic.FieldInfo describes the type information about a model's field:
+#       i) pydantic.FieldInfo.annotation gives you the type of the field; The structure of the field is contained
+#          in this type, including typing.Annotated values for discriminated unions. Both the definition collection and
+#          validation recursively unwraps these types along with the values. The pydantic.FieldInfo also includes a discriminator
+#          value, so the code handles both cases.
 
 
 class ScopedSymtabs(defaultdict):
@@ -189,13 +178,14 @@ def _internal_deepcopy(value: Any) -> Any:
 
 
 def _validate_model_template_variable_references(
-    cls: Type[OpenJDModel],
-    values: dict[str, Any],
+    model: Type,
+    value: Any,
     current_scope: ResolutionScope,
     symbol_prefix: str,
     symbols: ScopedSymtabs,
     loc: tuple,
-) -> list[ErrorWrapper]:
+    discriminator: Union[str, Discriminator, None] = None,
+) -> list[InitErrorDetails]:
     """Inner implementation of prevalidate_model_template_variable_references().
 
     Arguments:
@@ -206,17 +196,117 @@ def _validate_model_template_variable_references(
       symbols - The variable symbols that have been defined in each reference scope.
       loc - The path of fields taken from the root of the model to the current recursive level
     """
+
     # The errors that we're collecting for this node in the traversal, and will return from the function call.
-    errors: list[ErrorWrapper] = []
+    errors: list[InitErrorDetails] = []
+
+    model_origin = typing.get_origin(model)
+
+    # Unwrap the Optional types
+    if model_origin is typing.Optional:
+        return _validate_model_template_variable_references(
+            typing.get_args(model)[0],
+            value,
+            current_scope,
+            symbol_prefix,
+            symbols,
+            loc,
+            discriminator=discriminator,
+        )
+
+    # Unwrap the Annotated type, and get the discriminator while doing so
+    if model_origin is typing.Annotated:
+        model_args = typing.get_args(model)
+        for annotation in model_args[1:]:
+            if isinstance(annotation, FieldInfo):
+                discriminator = annotation.discriminator
+        return _validate_model_template_variable_references(
+            model_args[0],
+            value,
+            current_scope,
+            symbol_prefix,
+            symbols,
+            loc,
+            discriminator=discriminator,
+        )
+
+    # Validate all the items of a list
+    if model_origin is list:
+        # If the shape expects a list, but the value isn't one then we have a validation error.
+        # The error will get flagged by subsequent passes of the model validation.
+        if isinstance(value, list):
+            item_model = typing.get_args(model)[0]
+            for i, item in enumerate(value):
+                errors.extend(
+                    _validate_model_template_variable_references(
+                        item_model, item, current_scope, symbol_prefix, symbols, (*loc, i)
+                    )
+                )
+        return errors
+
+    if model_origin is dict:
+        # If the shape expects a dict, but the value isn't one then we have a validation error.
+        # The error will get flagged by subsequent passes of the model validation.
+        if isinstance(value, dict):
+            item_model = typing.get_args(model)[1]
+            for key, item in value.items():
+                if not isinstance(key, str):
+                    continue
+                errors.extend(
+                    _validate_model_template_variable_references(
+                        item_model,
+                        item,
+                        current_scope,
+                        symbol_prefix,
+                        symbols,
+                        (*loc, key),
+                    )
+                )
+        return errors
+
+    # Validate all the variables from a non-discriminated union
+    if model_origin is Union and discriminator is None:
+        for sub_type in typing.get_args(model):
+            errors.extend(
+                _validate_model_template_variable_references(
+                    sub_type, value, current_scope, symbol_prefix, symbols, loc
+                )
+            )
+        return errors
+
+    # Unwrap a discriminated union to the selected type
+    if model_origin is Union and discriminator is not None:
+        unioned_model = _get_model_for_singleton_value(model, value, discriminator)
+        if unioned_model is not None:
+            return _validate_model_template_variable_references(
+                unioned_model,
+                value,
+                current_scope,
+                symbol_prefix,
+                symbols,
+                loc,
+            )
+        else:
+            return []
+
+    if isclass(model) and lenient_issubclass(model, FormatString):
+        if isinstance(value, str):
+            return _check_format_string(value, current_scope, symbols, loc)
+        return []
+
+    # Return an empty error list if it's not an OpenJDModel, or if it's not a dict
+    if not (isclass(model) and lenient_issubclass(model, OpenJDModel) and isinstance(value, dict)):
+        return []
 
     # Does this cls change the variable reference scope for itself and its children? If so, then update
     # our scope.
-    if cls._template_variable_scope is not None:
-        current_scope = cls._template_variable_scope
+    model_override_scope = cast(ModelPrivateAttr, model._template_variable_scope).get_default()
+    if model_override_scope is not None:
+        current_scope = model_override_scope
 
     # Apply any changes that this node makes to the template variable prefix.
     #  e.g. It may change "Env." to "Env.File."
-    variable_defs = cls._template_variable_definitions
+    variable_defs = model._template_variable_definitions
     if variable_defs.symbol_prefix.startswith("|"):
         # The "|" character resets the nesting.
         symbol_prefix = variable_defs.symbol_prefix[1:]
@@ -225,15 +315,17 @@ def _validate_model_template_variable_references(
         symbol_prefix += variable_defs.symbol_prefix
 
     # Recursively collect all of the variable definitions at this node and its child nodes.
-    value_symbols = _collect_variable_definitions(cls, values, current_scope, symbol_prefix)
+    value_symbols = _collect_variable_definitions(
+        model, value, current_scope, symbol_prefix, recursive_pruning=False
+    )
 
     # Recursively validate the contents of FormatStrings within the model.
-    # Note: cls.__fields__: dict[str, pydantic.v1.fields.ModelField]
-    for field_name, field_model in cls.__fields__.items():
-        field_value = values.get(field_name, None)
-        if field_value is None:
+    for field_name, field_info in model.model_fields.items():
+        field_value = value.get(field_name)
+        field_model = field_info.annotation
+        if field_value is None or field_model is None:
             continue
-        if is_literal_type(field_model.type_):
+        if typing.get_origin(field_model) is Literal:
             # Literals aren't format strings and cannot be recursed in to; skip them.
             continue
 
@@ -242,161 +334,33 @@ def _validate_model_template_variable_references(
         # If field_name is in _template_variable_sources, then the value tells us which
         # source fields from the current model/cls we need to propagate down into the
         # recursion for validating field_name
-        for source in cls._template_variable_sources.get(field_name, set()):
+        for source in model._template_variable_sources.get(field_name, set()):
             validation_symbols.update_self(value_symbols.get(source, ScopedSymtabs()))
 
         # Add in all of the symbols passed down from the parent.
         validation_symbols.update_self(symbols)
 
-        if field_model.shape == pydantic.v1.fields.SHAPE_SINGLETON:
-            _validate_singleton(
-                errors,
+        errors.extend(
+            _validate_model_template_variable_references(
                 field_model,
                 field_value,
                 current_scope,
                 symbol_prefix,
                 validation_symbols,
                 (*loc, field_name),
+                field_info.discriminator,
             )
-        elif field_model.shape == pydantic.v1.fields.SHAPE_LIST:
-            if not isinstance(field_value, list):
-                continue
-            assert field_model.sub_fields is not None  # For the type checker
-            item_model = field_model.sub_fields[0]
-            for i, item in enumerate(field_value):
-                _validate_singleton(
-                    errors,
-                    item_model,
-                    item,
-                    current_scope,
-                    symbol_prefix,
-                    validation_symbols,
-                    (*loc, field_name, i),
-                )
-        elif field_model.shape == pydantic.v1.fields.SHAPE_DICT:
-            if not isinstance(field_value, dict):
-                continue
-            assert field_model.sub_fields is not None  # For the type checker
-            item_model = field_model.sub_fields[0]
-            for key, item in field_value.items():
-                if not isinstance(key, str):
-                    continue
-                _validate_singleton(
-                    errors,
-                    item_model,
-                    item,
-                    current_scope,
-                    symbol_prefix,
-                    validation_symbols,
-                    (*loc, field_name, key),
-                )
-        else:
-            raise NotImplementedError(
-                "You have hit an unimplemented code path. Please report this as a bug."
-            )
+        )
 
     return errors
 
 
-def _validate_singleton(
-    errors: list[ErrorWrapper],
-    field_model: pydantic.v1.fields.ModelField,
-    field_value: Any,
-    current_scope: ResolutionScope,
-    symbol_prefix: str,
-    symbols: ScopedSymtabs,
-    loc: tuple,
-) -> None:
-    # Note: ModelField.sub_fields is populated if (otherwise it's None):
-    #   a) field is a list type => sub_fields has 1 element, and its type is the element type of the list
-    #       - this is handled *before* calling this function.
-    #   b) field is a union => sub_fields' elements are the model types in the union
-    #   c) field is a discriminated union => sub_fields has 1 element, and it is a ModelField with info about the union.
-
-    if (
-        field_model.discriminator_key is None
-        and field_model.sub_fields
-        and len(field_model.sub_fields) > 1
-    ):
-        # The field is a union without a discriminator.
-        #  e.g. Union[ list[Union[int,FormatString]], FormatString ]
-        _validate_general_union(
-            errors, field_model, field_value, current_scope, symbol_prefix, symbols, loc
-        )
-        return
-
-    if field_model.discriminator_key:
-        #  Discriminated union case - figure out what the actual model type is.
-        if not isinstance(field_value, dict):
-            # Validation error -- discriminated unions are always discriminating models, and so
-            # must by a dict.
-            return
-        model = _get_model_for_singleton_value(field_model, field_value)
-        if model is None:
-            # Validation error - will be flagged by a subsequent validation stage.
-            return
-        field_model = model
-
-    if isclass(field_model.type_) and issubclass(field_model.type_, FormatString):
-        if isinstance(field_value, str):
-            errors.extend(_check_format_string(field_value, current_scope, symbols, loc))
-    elif isclass(field_model.type_) and issubclass(field_model.type_, OpenJDModel):
-        if isinstance(field_value, dict):
-            errors.extend(
-                _validate_model_template_variable_references(
-                    field_model.type_,
-                    field_value,
-                    current_scope,
-                    symbol_prefix,
-                    symbols,
-                    loc,
-                )
-            )
-
-
-def _validate_general_union(
-    errors: list[ErrorWrapper],
-    field_model: pydantic.v1.fields.ModelField,
-    field_value: Any,
-    current_scope: ResolutionScope,
-    symbol_prefix: str,
-    symbols: ScopedSymtabs,
-    loc: tuple,
-) -> None:
-    # Notes:
-    # - We narrowly only handle the kinds of unions that are present in the current model.
-    #   - We rely on additions to the model being well tested w.r.t. evaluation of format strings, and
-    #     such new tests being added signaling that this code needs to be enhanced.
-    # - Unions of model types are not currently present in the model so we do not handle/test that case.
-    # - The only union type that we have looks like: Union[ list[Union[int,FormatString]], FormatString ]
-    #    - It's in the range field of task parameter definitions
-
-    # We have to consider that the value may be any one of the types in the union, so we have to look at each possible type
-    # and attempt to process the value as that type.
-    assert field_model.sub_fields is not None  # For the type checker
-    for sub_field in field_model.sub_fields:
-        if sub_field.shape == pydantic.v1.fields.SHAPE_SINGLETON:
-            _validate_singleton(
-                errors, sub_field, field_value, current_scope, symbol_prefix, symbols, loc
-            )
-        elif sub_field.shape == pydantic.v1.fields.SHAPE_LIST:
-            if not isinstance(field_value, list):
-                # The given value must be a list in this case.
-                continue
-            assert sub_field.sub_fields is not None
-            item_model = sub_field.sub_fields[0]  # For the type checker
-            for item in field_value:
-                _validate_singleton(
-                    errors, item_model, item, current_scope, symbol_prefix, symbols, loc
-                )
-
-
 def _check_format_string(
     value: str, current_scope: ResolutionScope, symbols: ScopedSymtabs, loc: tuple
-) -> list[ErrorWrapper]:
+) -> list[InitErrorDetails]:
     # Collect the variable reference errors, if any, from the given FormatString value.
 
-    errors = list[ErrorWrapper]()
+    errors = list[InitErrorDetails]()
     scoped_symbols = symbols[current_scope]
     try:
         f_value = FormatString(value)
@@ -409,41 +373,61 @@ def _check_format_string(
             try:
                 expr.expression.validate_symbol_refs(symbols=scoped_symbols)
             except ValueError as exc:
-                errors.append(ErrorWrapper(exc, loc))
+                errors.append(
+                    InitErrorDetails(type="value_error", loc=loc, ctx={"error": exc}, input=value)
+                )
     return errors
 
 
 def _get_model_for_singleton_value(
-    field_model: pydantic.v1.fields.ModelField, value: Any
-) -> Optional[pydantic.v1.fields.ModelField]:
-    """Given a ModelField and the value that we're given for that field, determine
-    the actual ModelField for the value in the event that the ModelField may be for
+    model: Any, value: Any, discriminator: Union[str, Discriminator, None] = None
+) -> Optional[Type]:
+    """Given a FieldInfo and the value that we're given for that field, determine
+    the actual Model for the value in the event that the FieldInfo may be for
     a discriminated union."""
 
-    # Precondition: value is a dict
-    assert isinstance(value, dict)
+    # Unpack the annotated type, extracting the discriminator if provided
+    if typing.get_origin(model) is typing.Annotated:
+        for annotation in typing.get_args(model)[1:]:
+            if isinstance(annotation, FieldInfo):
+                discriminator = annotation.discriminator
+        model = typing.get_args(model)[0]
 
-    if field_model.discriminator_key is None:
-        # If it's not a discriminated union, then the type_ of the field is the expected type of the value.
-        return field_model
+    if discriminator is None or typing.get_origin(model) is not typing.Union:
+        # If it's not a discriminated union, then pass through the type
+        return model
+    elif not isinstance(discriminator, str):
+        # This code only supports a field name discriminator, not a callable
+        raise NotImplementedError(
+            "You have hit an unimplemented code path. Please report this as a bug."
+        )
+    elif not isinstance(value, dict):
+        # Validation error - will be flagged by a subsequent validation stage.
+        return None
 
     # The field is a discriminated union. Use the discriminator key to figure out which model
     # this specific value is.
-    key_value = value.get(field_model.discriminator_key, None)
-    if not key_value:
+    discr_value = value.get(discriminator)
+    if not discr_value:
         # key didn't have a value. This is a validation error that a later phase of validation
         # will flag.
         return None
-    if not isinstance(key_value, str):
+    if not isinstance(discr_value, str):
         # Keys must be strings.
         return None
 
-    assert field_model.sub_fields_mapping is not None  # For the type checker
-    sub_model = field_model.sub_fields_mapping.get(key_value)
-    if not sub_model:
-        # The key value that we were given is not valid.
-        return None
-    return sub_model
+    # Find the correct model for the discriminator value by unwrapping the Union and then the discriminator Literals
+    assert typing.get_origin(model) is typing.Union  # For the type checker
+    for sub_model in typing.get_args(model):
+        sub_model_discr_value = sub_model.model_fields[discriminator].annotation
+        if typing.get_origin(sub_model_discr_value) is not typing.Literal:
+            raise NotImplementedError(
+                "You have hit an unimplemented code path. Please report this as a bug."
+            )
+        if typing.get_args(sub_model_discr_value)[0] == discr_value:
+            return sub_model
+
+    return None
 
 
 ## =============================================
@@ -458,94 +442,151 @@ def _get_model_for_singleton_value(
 
 
 def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
-    cls: Type[OpenJDModel],
-    values: dict[str, Any],
+    model: Type,
+    value: Any,
     current_scope: ResolutionScope,
     symbol_prefix: str,
+    recursive_pruning: bool = True,
+    discriminator: Union[str, Discriminator, None] = None,
 ) -> dict[str, ScopedSymtabs]:
     """Collects the names of variables that each field of this model object provides.
 
     The return value is a dictionary with a set of symbols for each field,
-    "__self__" for the model itself, and "__exports__" for the symbols that it
+    "__self__" for the model itself, and "__export__" for the symbols that it
     exports to its parent in the data model.
+
+    When the model is not an OpenJDModel, it only populates the "__export__".
     """
 
     # NOTE: This is not written to be super generic and handle all possible OpenJD models going
     #  forward forever. It handles the subset of the general Pydantic data model that OpenJD is
     #  currently using, and will be extended as we use additional features of Pydantic's data model.
 
-    symbols: dict[str, ScopedSymtabs] = {"__self__": ScopedSymtabs()}
+    model_origin = typing.get_origin(model)
 
-    defs = cls._template_variable_definitions
+    # Unwrap the Optional types
+    if model_origin is typing.Optional:
+        return _collect_variable_definitions(
+            typing.get_args(model)[0],
+            value,
+            current_scope,
+            symbol_prefix,
+            discriminator=discriminator,
+        )
 
-    if defs.field:
-        # defs.field being defined means that the cls defines a template variable.
+    # Unwrap the Annotated type, and get the discriminator while doing so
+    if model_origin is typing.Annotated:
+        model_args = typing.get_args(model)
+        for annotation in model_args[1:]:
+            if isinstance(annotation, FieldInfo):
+                discriminator = annotation.discriminator
+        return _collect_variable_definitions(
+            model_args[0], value, current_scope, symbol_prefix, discriminator=discriminator
+        )
 
-        # Figure out the name of the variable.
-        name: str = ""
-        if (def_field_value := values.get(defs.field, None)) is not None:
-            # The name of the variable is in a field and the field has a value
-            # in the given data.
-            if isinstance(def_field_value, str):
-                # The field can only be a name if its value is a string; otherwise,
-                # this will get flagged as a validation error later.
-                name = def_field_value
+    # Aggregate all the collected variable definitions from a list
+    if model_origin is list:
+        # If the shape expects a list, but the value isn't one then we have a validation error.
+        # The error will get flagged by subsequent passes of the model validation.
+        symtab = ScopedSymtabs()
+        if isinstance(value, list):
+            item_model = typing.get_args(model)[0]
+            for item in value:
+                symtab.update_self(
+                    _collect_variable_definitions(item_model, item, current_scope, symbol_prefix)[
+                        "__export__"
+                    ]
+                )
+        return {"__export__": symtab}
 
-        # Define the symbols that are defined in the appropriate scopes if we have the name.
-        if name:
-            for vardef in defs.defines:
-                if vardef.prefix.startswith("|"):
-                    symbol_name = f"{vardef.prefix[1:]}{name}"
-                else:
-                    symbol_name = f"{symbol_prefix}{vardef.prefix}{name}"
-                _add_symbol(symbols["__self__"], vardef.resolves, symbol_name)
-
-    # If this object injects any template variables then those are injected at the
-    # current model's scope.
-    for symbol in defs.inject:
-        if symbol.startswith("|"):
-            symbol_name = symbol[1:]
-        else:
-            symbol_name = f"{symbol_prefix}{symbol}"
-        _add_symbol(symbols["__self__"], current_scope, symbol_name)
-
-    # Note: cls.__fields__: dict[str, pydantic.v1.fields.ModelField]
-    for field_name, field_model in cls.__fields__.items():
-        field_value = values.get(field_name, None)
-        if field_value is None:
-            continue
-
-        if is_literal_type(field_model.type_):
-            # Literals cannot define variables, so skip this field.
-            continue
-
-        if field_model.shape == pydantic.v1.fields.SHAPE_SINGLETON:
-            result = _collect_singleton(field_model, field_value, current_scope, symbol_prefix)
-            if result:
-                symbols[field_name] = result
-        elif field_model.shape == pydantic.v1.fields.SHAPE_LIST:
-            # If the shape expects a list, but the value isn't one then we have a validation error.
-            # The error will get flagged by subsequent passes of the model validation.
-            if not isinstance(field_value, list):
-                continue
-            assert field_model.sub_fields is not None
-            item_model = field_model.sub_fields[0]
-            symbols[field_name] = ScopedSymtabs()
-            for item in field_value:
-                result = _collect_singleton(item_model, item, current_scope, symbol_prefix)
-                if result:
-                    symbols[field_name].update_self(result)
-        elif field_model.shape == pydantic.v1.fields.SHAPE_DICT:
-            # dict[] fields can't define symbols.
-            continue
-        else:
-            raise NotImplementedError(
-                "You have hit an unimplemented code path. Please report this as a bug."
+    # Aggregate all the matching variables from a non-discriminated union
+    if model_origin is Union and discriminator is None:
+        symtab = ScopedSymtabs()
+        for sub_type in typing.get_args(model):
+            symtab.update_self(
+                _collect_variable_definitions(sub_type, value, current_scope, symbol_prefix)[
+                    "__export__"
+                ]
             )
+        return {"__export__": symtab}
+
+    # Unwrap a discriminated union to the selected type
+    if model_origin is Union and discriminator is not None:
+        unioned_model = _get_model_for_singleton_value(model, value, discriminator)
+        if unioned_model is not None:
+            return _collect_variable_definitions(
+                unioned_model,
+                value,
+                current_scope,
+                symbol_prefix,
+            )
+        else:
+            return {"__export__": ScopedSymtabs()}
+
+    # Anything except for an OpenJDModel returns an empty result
+    if not isclass(model) or not lenient_issubclass(model, OpenJDModel):
+        return {"__export__": ScopedSymtabs()}
+
+    # If the model has no exported variable definitions, prune it
+    if recursive_pruning and "__export__" not in model._template_variable_sources:
+        return {"__export__": ScopedSymtabs()}
+
+    # If the value is not a dict, then it's a validation error. We'll flag that error later.
+    if not isinstance(value, dict):
+        return {"__export__": ScopedSymtabs()}
+
+    symbols: dict[str, ScopedSymtabs] = {"__self__": ScopedSymtabs(), "__export__": ScopedSymtabs()}
+
+    # Process the variable definitions defined by this model
+    defs = getattr(model, "_template_variable_definitions", None)
+
+    if defs:
+        if defs.field:
+            # defs.field being defined means that the cls defines a template variable.
+
+            # Figure out the name of the variable.
+            name: str = ""
+            if (def_field_value := value.get(defs.field)) is not None:
+                # The name of the variable is in a field and the field has a value
+                # in the given data.
+                if isinstance(def_field_value, str):
+                    # The field can only be a name if its value is a string; otherwise,
+                    # this will get flagged as a validation error later.
+                    name = def_field_value
+
+            # Define the symbols that are defined in the appropriate scopes if we have the name.
+            if name:
+                for vardef in defs.defines:
+                    if vardef.prefix.startswith("|"):
+                        symbol_name = f"{vardef.prefix[1:]}{name}"
+                    else:
+                        symbol_name = f"{symbol_prefix}{vardef.prefix}{name}"
+                    _add_symbol(symbols["__self__"], vardef.resolves, symbol_name)
+
+        # If this object injects any template variables then those are injected at the
+        # current model's scope.
+        for symbol in defs.inject:
+            if symbol.startswith("|"):
+                symbol_name = symbol[1:]
+            else:
+                symbol_name = f"{symbol_prefix}{symbol}"
+            _add_symbol(symbols["__self__"], current_scope, symbol_name)
+
+    # Collect the variable definitions exported by the fields of the model
+    for field_name, field_info in model.model_fields.items():
+        field_value = value.get(field_name)
+        field_model = field_info.annotation
+        if field_value is None or field_model is None:
+            continue
+
+        discriminator = field_info.discriminator
+
+        symbols[field_name] = _collect_variable_definitions(
+            field_model, field_value, current_scope, symbol_prefix, discriminator=discriminator
+        )["__export__"]
 
     # Collect the exported symbols as specified by the metadata
-    symbols["__export__"] = ScopedSymtabs()
-    for source in cls._template_variable_sources.get("__export__", set()):
+    for source in model._template_variable_sources.get("__export__", set()):
         symbols["__export__"].update_self(symbols.get(source, ScopedSymtabs()))
 
     return symbols
@@ -563,53 +604,3 @@ def _add_symbol(into: ScopedSymtabs, scope: ResolutionScope, symbol_name: str) -
         into[ResolutionScope.TASK].add(symbol_name)
     else:
         into[ResolutionScope.TASK].add(symbol_name)
-
-
-def _collect_singleton(
-    model: pydantic.v1.fields.ModelField,
-    value: Any,
-    current_scope: ResolutionScope,
-    symbol_prefix: str,
-) -> Optional[ScopedSymtabs]:
-    # Singletons that we recurse in to must all be OpenJDModels, so that means that
-    # the value must be a dictionary. hen the provided field value must be a dictionary
-    # to have a chance of being valid. If it's not valid, then we just skip it and
-    # let subsequent validation passes in the model itself flag those.
-
-    # Note: ModelField.sub_fields is populated if (otherwise it's None):
-    #   a) field is a list type => sub_fields has 1 element, and its type is the element type of the list
-    #   b) field is a union => sub_fields' elements are the model types in the union
-    #   c) field is a discriminated union => sub_fields has 1 element, and it is a ModelField with info about the union.
-    if not isinstance(value, dict):
-        return None
-
-    if (
-        model.discriminator_key is None
-        and model.sub_fields is not None
-        and len(model.sub_fields) > 1
-    ):
-        # The only cases like this in our *current* model are the range field of IntTaskParameterDefinitions; they
-        # are non-discriminated unions of types that do not contain variable definitions, so we skip them.
-        return None
-
-    if isclass(model.type_) and not issubclass(model.type_, OpenJDModel):
-        # The field is something like str, int, etc. These can't define variables, so skip it.
-        return None
-
-    value_model = _get_model_for_singleton_value(model, value)
-    if value_model is None:
-        return None
-    if not isclass(value_model.type_) or (
-        isclass(value_model.type_) and not issubclass(value_model.type_, OpenJDModel)
-    ):
-        # We only recursively collect from OpenJDModel typed values.
-        return None
-    if "__export__" not in value_model.type_._template_variable_sources:
-        # If the model doesn't export symbols, then there's no point to recursing in to this value.
-        return None
-    return _collect_variable_definitions(
-        value_model.type_,
-        value,
-        current_scope,
-        symbol_prefix,
-    )["__export__"]

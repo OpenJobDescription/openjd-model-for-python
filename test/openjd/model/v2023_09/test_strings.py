@@ -4,7 +4,7 @@ from typing import Any
 import string
 
 import pytest
-from pydantic.v1 import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from openjd.model.v2023_09 import (
     AmountCapabilityName,
@@ -105,7 +105,7 @@ class TestJobTemplateName:
         data = {"name": value}
 
         # WHEN
-        JobTemplateNameModel.parse_obj(data)
+        JobTemplateNameModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -119,7 +119,7 @@ class TestJobTemplateName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            JobTemplateNameModel.parse_obj(data)
+            JobTemplateNameModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -139,7 +139,7 @@ class TestJobName:
         data = {"name": value}
 
         # WHEN
-        JobNameModel.parse_obj(data)
+        JobNameModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -163,7 +163,7 @@ class TestJobName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            JobNameModel.parse_obj(data)
+            JobNameModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -183,7 +183,7 @@ class TestStepName:
         data = {"name": value}
 
         # WHEN
-        StepNameModel.parse_obj(data)
+        StepNameModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -207,7 +207,7 @@ class TestStepName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            StepNameModel.parse_obj(data)
+            StepNameModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -227,7 +227,7 @@ class TestEnvironmentName:
         data = {"name": value}
 
         # WHEN
-        EnvironmentNameModel.parse_obj(data)
+        EnvironmentNameModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -251,7 +251,7 @@ class TestEnvironmentName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            EnvironmentNameModel.parse_obj(data)
+            EnvironmentNameModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -280,7 +280,7 @@ class TestEnvironmentVariableNameString:
         data = {"name": value}
 
         # WHEN
-        EnvironmentVariableNameStringModel.parse_obj(data)
+        EnvironmentVariableNameStringModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -315,7 +315,7 @@ class TestEnvironmentVariableNameString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            EnvironmentVariableNameStringModel.parse_obj(data)
+            EnvironmentVariableNameStringModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -335,7 +335,7 @@ class TestEnvironmentVariableValueString:
         data = {"value": value}
 
         # WHEN
-        EnvironmentVariableValueStringModel.parse_obj(data)
+        EnvironmentVariableValueStringModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -351,7 +351,7 @@ class TestEnvironmentVariableValueString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            EnvironmentVariableValueStringModel.parse_obj(data)
+            EnvironmentVariableValueStringModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -379,7 +379,7 @@ class TestIdentifier:
         data = {"id": value}
 
         # WHEN
-        IdentifierModel.parse_obj(data)
+        IdentifierModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -414,7 +414,7 @@ class TestIdentifier:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            IdentifierModel.parse_obj(data)
+            IdentifierModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -437,7 +437,7 @@ class TestDescription:
         data = {"desc": value}
 
         # WHEN
-        DescriptionModel.parse_obj(data)
+        DescriptionModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -460,7 +460,7 @@ class TestDescription:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            DescriptionModel.parse_obj(data)
+            DescriptionModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -479,7 +479,7 @@ class TestParameterStringValue:
         data = {"str": value}
 
         # WHEN
-        ParameterStringModel.parse_obj(data)
+        ParameterStringModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -496,7 +496,7 @@ class TestParameterStringValue:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            ParameterStringModel.parse_obj(data)
+            ParameterStringModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -519,7 +519,7 @@ class TestArgString:
         data = {"arg": value}
 
         # WHEN
-        ArgStringModel.parse_obj(data)
+        ArgStringModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -542,7 +542,7 @@ class TestArgString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            ArgStringModel.parse_obj(data)
+            ArgStringModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -565,7 +565,7 @@ class TestCommandString:
         data = {"cmd": value}
 
         # WHEN
-        CommandStringModel.parse_obj(data)
+        CommandStringModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -589,7 +589,7 @@ class TestCommandString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            CommandStringModel.parse_obj(data)
+            CommandStringModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -611,7 +611,7 @@ class TestCombinationExpr:
         data = {"expr": value}
 
         # WHEN
-        CombinationExprModel.parse_obj(data)
+        CombinationExprModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -639,7 +639,7 @@ class TestCombinationExpr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            CombinationExprModel.parse_obj(data)
+            CombinationExprModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -654,7 +654,7 @@ class TestTaskParameterStringValueAsJob:
         data = {"str": value}
 
         # WHEN
-        TaskParameterStringValueAsJobModel.parse_obj(data)
+        TaskParameterStringValueAsJobModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -668,7 +668,7 @@ class TestTaskParameterStringValueAsJob:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            TaskParameterStringValueAsJobModel.parse_obj(data)
+            TaskParameterStringValueAsJobModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -685,7 +685,7 @@ class TestAmountCapabilityName:
         data = {"str": value}
 
         # WHEN
-        AmountCapabilityNameModel.parse_obj(data)
+        AmountCapabilityNameModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -702,7 +702,7 @@ class TestAmountCapabilityName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            AmountCapabilityNameModel.parse_obj(data)
+            AmountCapabilityNameModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -719,7 +719,7 @@ class TestAttributeCapabilityName:
         data = {"str": value}
 
         # WHEN
-        AttributeCapabilityNameModel.parse_obj(data)
+        AttributeCapabilityNameModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -736,7 +736,7 @@ class TestAttributeCapabilityName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            AttributeCapabilityNameModel.parse_obj(data)
+            AttributeCapabilityNameModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -756,7 +756,7 @@ class TestUserInterfaceLabelStringValue:
         data = {"str": value}
 
         # WHEN
-        UserInterfaceLabelStringValueModel.parse_obj(data)
+        UserInterfaceLabelStringValueModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -780,7 +780,7 @@ class TestUserInterfaceLabelStringValue:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            UserInterfaceLabelStringValueModel.parse_obj(data)
+            UserInterfaceLabelStringValueModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -801,7 +801,7 @@ class TestFileDialogFilterPatternStringValue:
         data = {"str": value}
 
         # WHEN
-        FileDialogFilterPatternStringValueModel.parse_obj(data)
+        FileDialogFilterPatternStringValueModel.model_validate(data)
 
         # THEN
         # no exceptions raised
@@ -854,7 +854,7 @@ class TestFileDialogFilterPatternStringValue:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            FileDialogFilterPatternStringValueModel.parse_obj(data)
+            FileDialogFilterPatternStringValueModel.model_validate(data)
 
         # THEN
         assert len(excinfo.value.errors()) > 0

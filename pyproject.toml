@@ -30,7 +30,7 @@ classifiers = [
 ]
 dependencies = [
   "pyyaml == 6.0.*",
-  "pydantic >= 1.10.17",
+  "pydantic >= 2.10, < 3",
 ]
 
 [project.urls]
@@ -99,7 +99,7 @@ mypy_path = "src"
 
 # See: https://docs.pydantic.dev/mypy_plugin/
 #  - Helps mypy understand pydantic typing.
-plugins = "pydantic.v1.mypy"
+plugins = "pydantic.mypy"
 
 [tool.ruff]
 line-length = 100
@@ -109,15 +109,6 @@ ignore = [
   "E501",
   # Double Check if this should be fixed
   "E731",
-]
-
-[tool.ruff.lint.pep8-naming]
-classmethod-decorators = [
-  "classmethod",
-  # pydantic decorators are classmethod decorators
-  # suppress N805 errors on classes decorated with them
-  "pydantic.validator",
-  "pydantic.root_validator",
 ]
 
 [tool.ruff.lint.isort]

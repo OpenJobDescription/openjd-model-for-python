@@ -32,7 +32,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
     @pytest.mark.parametrize(
         "range_int_param",
         [
-            RangeListTaskParameterDefinition_2023_09(type=ParameterValueType.INT, range=[1, 2]),
+            RangeListTaskParameterDefinition_2023_09(type=ParameterValueType.INT, range=["1", "2"]),
             RangeExpressionTaskParameterDefinition_2023_09(
                 type=ParameterValueType.INT, range="1-2"
             ),
@@ -104,7 +104,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
     @pytest.mark.parametrize(
         "range_int_param",
         [
-            RangeListTaskParameterDefinition_2023_09(type=ParameterValueType.INT, range=[1, 2]),
+            RangeListTaskParameterDefinition_2023_09(type=ParameterValueType.INT, range=["1", "2"]),
             RangeExpressionTaskParameterDefinition_2023_09(
                 type=ParameterValueType.INT, range="1-2"
             ),
@@ -131,7 +131,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         with pytest.raises(StopIteration):
             next(it)
 
-    @pytest.mark.parametrize("param_range", [[10], [10, 11, 12, 13, 14, 15]])
+    @pytest.mark.parametrize("param_range", [["10"], ["10", "11", "12", "13", "14", "15"]])
     def test_single_param_getelem(self, param_range):
         # GIVEN
         space = StepParameterSpace_2023_09(
@@ -163,7 +163,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
     @pytest.mark.parametrize(
         "given, expected",
         [
-            ([1, 2, 3], 3),
+            (["1", "2", "3"], 3),
             ("1-5", 5),
             (["a", "b", "c", "d"], 4),
         ],
@@ -197,7 +197,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
     @pytest.mark.parametrize(
         "range_int_param",
         [
-            RangeListTaskParameterDefinition_2023_09(type=ParameterValueType.INT, range=[1, 2]),
+            RangeListTaskParameterDefinition_2023_09(type=ParameterValueType.INT, range=["1", "2"]),
             RangeExpressionTaskParameterDefinition_2023_09(
                 type=ParameterValueType.INT, range="1-2"
             ),
@@ -239,7 +239,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         space = StepParameterSpace_2023_09(
             taskParameterDefinitions={
                 "Param1": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[1, 2]
+                    type=ParameterValueType.INT, range=["1", "2"]
                 ),
                 "Param2": RangeListTaskParameterDefinition_2023_09(
                     type=ParameterValueType.STRING, range=["a", "b", "c"]
@@ -287,7 +287,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
                     type=ParameterValueType.STRING, range=["a", "b", "c"]
                 ),
                 "Param3": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[-1, -2]
+                    type=ParameterValueType.INT, range=["-1", "-2"]
                 ),
             },
             combination="Param1 * Param2 * Param3",
@@ -306,7 +306,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         space = StepParameterSpace_2023_09(
             taskParameterDefinitions={
                 "Param1": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[1, 2]
+                    type=ParameterValueType.INT, range=["1", "2"]
                 ),
                 "Param2": RangeListTaskParameterDefinition_2023_09(
                     type=ParameterValueType.STRING, range=["a", "b", "c"]
@@ -361,7 +361,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
                     type=ParameterValueType.STRING, range=["a", "b", "c", "d"]
                 ),
                 "Param3": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[-1, -2, -3, -4]
+                    type=ParameterValueType.INT, range=["-1", "-2", "-3", "-4"]
                 ),
             },
             combination="(Param1, Param2, Param3)",
@@ -389,7 +389,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         space = StepParameterSpace_2023_09(
             taskParameterDefinitions={
                 "Param1": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[1, 2, 3, 4]
+                    type=ParameterValueType.INT, range=["1", "2", "3", "4"]
                 ),
                 "Param2": RangeListTaskParameterDefinition_2023_09(
                     type=ParameterValueType.STRING, range=["a", "b", "c", "d"]
@@ -420,14 +420,14 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
                     type=ParameterValueType.STRING, range=["a", "b", "c", "d"]
                 ),
                 "Param3": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[-1, -2, -3, -4]
+                    type=ParameterValueType.INT, range=["-1", "-2", "-3", "-4"]
                 ),
             },
             combination="(Param1, Param2, Param3)",
         )
 
         # WHEN
-        result = StepParameterSpaceIterator(space=space)
+        space_iter = StepParameterSpaceIterator(space=space)
 
         # THEN
         element: Callable[[int, str, int], dict[str, ParameterValue]] = lambda p1, p2, p3: {
@@ -442,13 +442,13 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
             element(4, "d", -4),
         ]
         with pytest.raises(IndexError):
-            result[len(expected_values)]
+            space_iter[len(expected_values)]
         with pytest.raises(IndexError):
-            result[-len(expected_values) - 1]
-        assert expected_values == [result[i] for i in range(0, len(expected_values))]
+            space_iter[-len(expected_values) - 1]
+        assert expected_values == [space_iter[i] for i in range(0, len(expected_values))]
         expected_reversed = expected_values.copy()
         expected_reversed.reverse()
-        assert expected_reversed == [result[-i - 1] for i in range(0, len(expected_values))]
+        assert expected_reversed == [space_iter[-i - 1] for i in range(0, len(expected_values))]
 
     def test_nested_expr_iteration(self) -> None:
         # A more deeply nested test to hit all of the recursive edge cases.
@@ -458,7 +458,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         space = StepParameterSpace_2023_09(
             taskParameterDefinitions={
                 "Param1": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[1, 2]
+                    type=ParameterValueType.INT, range=["1", "2"]
                 ),
                 "Param2": RangeListTaskParameterDefinition_2023_09(
                     type=ParameterValueType.STRING, range=["a", "b", "c", "d"]
@@ -467,7 +467,7 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
                     type=ParameterValueType.INT, range="10-11"
                 ),
                 "Param4": RangeListTaskParameterDefinition_2023_09(
-                    type=ParameterValueType.INT, range=[20, 21]
+                    type=ParameterValueType.INT, range=["20", "21"]
                 ),
             },
             combination="Param1 * ( Param2, Param3 * Param4 )",

@@ -4,7 +4,7 @@ from os.path import normpath
 from pathlib import Path
 from typing import Optional, cast
 
-from pydantic.v1 import ValidationError
+from pydantic import ValidationError
 
 from ._errors import CompatibilityError, DecodeValidationError
 from ._symbol_table import SymbolTable
@@ -22,7 +22,7 @@ from ._types import (
     SpecificationRevision,
     TemplateSpecificationVersion,
 )
-from ._convert_pydantic_error import pydantic_validationerrors_to_str, ErrorDict
+from ._convert_pydantic_error import pydantic_validationerrors_to_str
 
 __all__ = ("preprocess_job_parameters",)
 
@@ -330,9 +330,7 @@ def create_job(
         job = instantiate_model(job_template, symtab)
     except ValidationError as exc:
         raise DecodeValidationError(
-            pydantic_validationerrors_to_str(
-                job_template.__class__, cast(list[ErrorDict], exc.errors())
-            )
+            pydantic_validationerrors_to_str(job_template.__class__, exc.errors())
         )
 
     return cast(Job, job)

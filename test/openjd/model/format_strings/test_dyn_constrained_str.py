@@ -3,7 +3,7 @@
 import re
 
 import pytest
-from pydantic.v1 import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError
 
 from openjd.model._format_strings._dyn_constrained_str import DynamicConstrainedStr
 
@@ -18,7 +18,7 @@ class TestDyanamicConstrainedStr:
             s: DynamicConstrainedStr
 
         # WHEN
-        Model.parse_obj({"s": "123"})
+        Model.model_validate({"s": "123"})
 
         # THEN
         # raised no error
@@ -34,7 +34,7 @@ class TestDyanamicConstrainedStr:
         model = Model(s="12")
 
         # WHEN
-        as_dict = model.dict()
+        as_dict = model.model_dump()
 
         # THEN
         assert as_dict == {"s": "12"}
@@ -48,7 +48,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.parse_obj({"s": 123})
+            Model.model_validate({"s": 123})
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -64,7 +64,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.parse_obj({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10})
 
         # THEN
         # raised no error
@@ -81,7 +81,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.parse_obj({"s": "0" * 9})
+            Model.model_validate({"s": "0" * 9})
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -97,7 +97,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.parse_obj({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10})
 
         # THEN
         # raised no error
@@ -114,7 +114,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.parse_obj({"s": "0" * 11})
+            Model.model_validate({"s": "0" * 11})
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -130,7 +130,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.parse_obj({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10})
 
         # THEN
         # no errors raised
@@ -147,7 +147,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.parse_obj({"s": "1" * 10})
+            Model.model_validate({"s": "1" * 10})
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -163,7 +163,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.parse_obj({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10})
 
         # THEN
         # no errors raised
@@ -180,7 +180,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.parse_obj({"s": "1" * 10})
+            Model.model_validate({"s": "1" * 10})
 
         # THEN
         assert len(excinfo.value.errors()) == 1

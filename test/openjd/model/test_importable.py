@@ -5,5 +5,5 @@ def test_openjd_importable():
     import openjd  # noqa: F401
 
 
-def test_importable():
+def test_openjd_model_importable():
     import openjd.model  # noqa: F401

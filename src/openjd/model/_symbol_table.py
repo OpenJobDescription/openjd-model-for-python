@@ -31,6 +31,9 @@ class SymbolTable:
             else:
                 raise TypeError(f"Cannot initialize with type {type(source)}")
 
+    def __repr__(self) -> str:
+        return f"SymbolTable({self._table})"
+
     def __contains__(self, symbol: str) -> bool:
         return symbol in self._table
 

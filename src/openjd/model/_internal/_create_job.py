@@ -1,9 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any, Union
+from typing import cast, Any, Union
 
-from pydantic.v1 import ValidationError
-from pydantic.v1.error_wrappers import ErrorWrapper
+from pydantic import ValidationError
+from pydantic_core import InitErrorDetails
 
 from .._symbol_table import SymbolTable
 from .._format_strings import FormatString, FormatStringError
@@ -37,11 +37,10 @@ def instantiate_model(  # noqa: C901
     Returns:
         OpenJDModel: The transformed model.
     """
-
-    errors = list[ErrorWrapper]()
+    errors = list[InitErrorDetails]()
     instantiated_fields = dict[str, Any]()
 
-    for field_name in model.__fields__.keys():
+    for field_name in model.model_fields.keys():
         target_field_name = field_name
         if field_name in model._job_creation_metadata.rename_fields:
             target_field_name = model._job_creation_metadata.rename_fields[field_name]
@@ -66,14 +65,30 @@ def instantiate_model(  # noqa: C901
             else:
                 # Raises: ValidationError, FormatStringError
                 instantiated = _instantiate_noncollection_value(
-                    model, field_name, field, symtab, loc + (field_name,)
+                    model, field_name, field, symtab, (*loc, field_name)
                 )
             instantiated_fields[target_field_name] = instantiated
-        except (ValidationError, FormatStringError) as exc:
-            errors.append(ErrorWrapper(exc, loc))
+        except ValidationError as exc:
+            # Convert the ErrorDetails to InitErrorDetails by excluding the 'msg'
+            for error_details in exc.errors():
+                init_error_details = {
+                    key: value for key, value in error_details.items() if key != "msg"
+                }
+                errors.append(cast(InitErrorDetails, init_error_details))
+        except FormatStringError as exc:
+            errors.append(
+                InitErrorDetails(
+                    type="value_error",
+                    loc=loc,
+                    ctx={"error": ValueError(str(exc))},
+                    input=exc.input,
+                )
+            )
 
     if errors:
-        raise ValidationError(errors, model.__class__)
+        raise ValidationError.from_exception_data(
+            title=model.__class__.__name__, line_errors=errors
+        )
 
     if model._job_creation_metadata.adds_fields is not None:
         new_fields = model._job_creation_metadata.adds_fields(within_field, model, symtab)
@@ -89,7 +104,18 @@ def instantiate_model(  # noqa: C901
                 return create_as_class(**instantiated_fields)
         return model.__class__(**instantiated_fields)
     except ValidationError as exc:
-        raise ValidationError([ErrorWrapper(exc, loc)], model.__class__)
+        # Convert the ErrorDetails to InitErrorDetails by concatenating the 'loc' values and excluding the 'msg'
+        for error_details in exc.errors():
+            init_error_details = {}
+            for key, value in error_details.items():
+                if key == "loc":
+                    init_error_details["loc"] = loc + cast(tuple, value)
+                elif key != "msg":
+                    init_error_details[key] = value
+            errors.append(cast(InitErrorDetails, init_error_details))
+        raise ValidationError.from_exception_data(
+            title=model.__class__.__name__, line_errors=errors
+        )
 
 
 def _instantiate_noncollection_value(
@@ -142,7 +168,7 @@ def _instantiate_list_field(  # noqa: C901
         symtab (SymbolTable): Symbol table for format string value lookups.
         loc (tuple[Union[str,int], ...]): Path to this value.
     """
-    errors = list[ErrorWrapper]()
+    errors = list[InitErrorDetails]()
     result: Union[list[Any], dict[str, Any]]
     if field_name in within_model._job_creation_metadata.reshape_field_to_dict:
         key_field = within_model._job_creation_metadata.reshape_field_to_dict[field_name]
@@ -156,14 +182,24 @@ def _instantiate_list_field(  # noqa: C901
                     field_name,
                     item,
                     symtab,
-                    loc
-                    + (
-                        field_name,
-                        idx,
-                    ),
+                    (*loc, field_name, idx),
                 )
-            except (ValidationError, FormatStringError) as exc:
-                errors.append(ErrorWrapper(exc, loc))
+            except ValidationError as exc:
+                # Convert the ErrorDetails to InitErrorDetails by excluding the 'msg'
+                for error_details in exc.errors():
+                    init_error_details = {
+                        key: value for key, value in error_details.items() if key != "msg"
+                    }
+                    errors.append(cast(InitErrorDetails, init_error_details))
+            except FormatStringError as exc:
+                errors.append(
+                    InitErrorDetails(
+                        type="value_error",
+                        loc=loc,
+                        ctx={"error": ValueError(str(exc))},
+                        input=exc.input,
+                    )
+                )
     else:
         result = list[Any]()
         for idx, item in enumerate(value):
@@ -175,18 +211,30 @@ def _instantiate_list_field(  # noqa: C901
                         field_name,
                         item,
                         symtab,
-                        loc
-                        + (
-                            field_name,
-                            idx,
-                        ),
+                        (*loc, field_name, idx),
                     )
                 )
-            except (ValidationError, FormatStringError) as exc:
-                errors.append(ErrorWrapper(exc, loc))
+            except ValidationError as exc:
+                # Convert the ErrorDetails to InitErrorDetails by excluding the 'msg'
+                for error_details in exc.errors():
+                    init_error_details = {
+                        key: value for key, value in error_details.items() if key != "msg"
+                    }
+                    errors.append(cast(InitErrorDetails, init_error_details))
+            except FormatStringError as exc:
+                errors.append(
+                    InitErrorDetails(
+                        type="value_error",
+                        loc=loc,
+                        ctx={"error": ValueError(str(exc))},
+                        input=exc.input,
+                    )
+                )
 
     if errors:
-        raise ValidationError(errors, within_model.__class__)
+        raise ValidationError.from_exception_data(
+            title=within_model.__class__.__name__, line_errors=errors
+        )
 
     return result
 
@@ -207,7 +255,7 @@ def _instantiate_dict_field(
         symtab (SymbolTable): Symbol table for format string value lookups.
         loc (tuple[Union[str,int], ...]): Path to this value.
     """
-    errors = list[ErrorWrapper]()
+    errors = list[InitErrorDetails]()
     result = dict[str, Any]()
     for key, item in value.items():
         try:
@@ -223,10 +271,26 @@ def _instantiate_dict_field(
                     key,
                 ),
             )
-        except (ValidationError, FormatStringError) as exc:
-            errors.append(ErrorWrapper(exc, loc))
+        except ValidationError as exc:
+            # Convert the ErrorDetails to InitErrorDetails by excluding the 'msg'
+            for error_details in exc.errors():
+                init_error_details = {
+                    key: value for key, value in error_details.items() if key != "msg"
+                }
+                errors.append(cast(InitErrorDetails, init_error_details))
+        except FormatStringError as exc:
+            errors.append(
+                InitErrorDetails(
+                    type="value_error",
+                    loc=loc,
+                    ctx={"error": ValueError(str(exc))},
+                    input=exc.input,
+                )
+            )
 
     if errors:
-        raise ValidationError(errors, within_model.__class__)
+        raise ValidationError.from_exception_data(
+            title=within_model.__class__.__name__, line_errors=errors
+        )
 
     return result
