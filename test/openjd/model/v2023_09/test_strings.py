@@ -153,9 +153,9 @@ class TestJobName:
             pytest.param({"name": "\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"name": "\u0000"}, id="NULL disallowed"),
-            pytest.param({"name": "\u001F"}, id="1f disallowed"),
-            pytest.param({"name": "\u007F"}, id="DEL disallowed"),
-            pytest.param({"name": "\u009F"}, id="9f disallowed"),
+            pytest.param({"name": "\u001f"}, id="1f disallowed"),
+            pytest.param({"name": "\u007f"}, id="DEL disallowed"),
+            pytest.param({"name": "\u009f"}, id="9f disallowed"),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any]) -> None:
@@ -197,9 +197,9 @@ class TestStepName:
             pytest.param({"name": "\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"name": "\u0000"}, id="NULL disallowed"),
-            pytest.param({"name": "\u001F"}, id="1f disallowed"),
-            pytest.param({"name": "\u007F"}, id="DEL disallowed"),
-            pytest.param({"name": "\u009F"}, id="9f disallowed"),
+            pytest.param({"name": "\u001f"}, id="1f disallowed"),
+            pytest.param({"name": "\u007f"}, id="DEL disallowed"),
+            pytest.param({"name": "\u009f"}, id="9f disallowed"),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any]) -> None:
@@ -241,9 +241,9 @@ class TestEnvironmentName:
             pytest.param({"name": "\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"name": "\u0000"}, id="NULL disallowed"),
-            pytest.param({"name": "\u001F"}, id="1f disallowed"),
-            pytest.param({"name": "\u007F"}, id="DEL disallowed"),
-            pytest.param({"name": "\u009F"}, id="9f disallowed"),
+            pytest.param({"name": "\u001f"}, id="1f disallowed"),
+            pytest.param({"name": "\u007f"}, id="DEL disallowed"),
+            pytest.param({"name": "\u009f"}, id="9f disallowed"),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any]) -> None:
@@ -428,8 +428,8 @@ class TestDescription:
             pytest.param("A" * 2048, id="max length"),
             # Control character exlusion cases
             pytest.param("\u0020", id="start of first printable range"),
-            pytest.param("\u007E", id="end of first printable range"),
-            pytest.param("\u00A0", id="start of second printable range"),
+            pytest.param("\u007e", id="end of first printable range"),
+            pytest.param("\u00a0", id="start of second printable range"),
         ),
     )
     def test_parse_success(self, value: str) -> None:
@@ -449,9 +449,9 @@ class TestDescription:
             pytest.param({"desc": ""}, id="too short"),
             pytest.param({"desc": "a" * 2049}, id="too long"),
             pytest.param({"desc": "\u0000"}, id="start of first control character range"),
-            pytest.param({"desc": "\u001F"}, id="end of first control character range"),
-            pytest.param({"desc": "\u007F"}, id="start of second control character range"),
-            pytest.param({"desc": "\u009F"}, id="end of second control character range"),
+            pytest.param({"desc": "\u001f"}, id="end of first control character range"),
+            pytest.param({"desc": "\u007f"}, id="start of second control character range"),
+            pytest.param({"desc": "\u009f"}, id="end of second control character range"),
             pytest.param({"desc": "a\n\u0000"}, id="disallowed after newline"),
         ),
     )
@@ -510,8 +510,8 @@ class TestArgString:
             pytest.param("A" * (32 * 1024), id="long length"),
             # Control character exlusion cases
             pytest.param("\u0020", id="start of first printable range"),
-            pytest.param("\u007E", id="end of first printable range"),
-            pytest.param("\u00A0", id="start of second printable range"),
+            pytest.param("\u007e", id="end of first printable range"),
+            pytest.param("\u00a0", id="start of second printable range"),
         ),
     )
     def test_parse_success(self, value: str) -> None:
@@ -532,9 +532,9 @@ class TestArgString:
             pytest.param({"cmd": "\r"}, id="carriage return"),
             pytest.param({"cmd": "\t"}, id="horizontal tab"),
             pytest.param({"arg": "\u0000"}, id="start of first control character range"),
-            pytest.param({"arg": "\u001F"}, id="end of first control character range"),
-            pytest.param({"arg": "\u007F"}, id="start of second control character range"),
-            pytest.param({"arg": "\u009F"}, id="end of second control character range"),
+            pytest.param({"arg": "\u001f"}, id="end of first control character range"),
+            pytest.param({"arg": "\u007f"}, id="start of second control character range"),
+            pytest.param({"arg": "\u009f"}, id="end of second control character range"),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any]) -> None:
@@ -556,8 +556,8 @@ class TestCommandString:
             pytest.param("A" * (32 * 1024), id="long length"),
             # Control character exlusion cases
             pytest.param("\u0020", id="start of first printable range"),
-            pytest.param("\u007E", id="end of first printable range"),
-            pytest.param("\u00A0", id="start of second printable range"),
+            pytest.param("\u007e", id="end of first printable range"),
+            pytest.param("\u00a0", id="start of second printable range"),
         ),
     )
     def test_parse_success(self, value: str) -> None:
@@ -579,9 +579,9 @@ class TestCommandString:
             pytest.param({"cmd": "\r"}, id="carriage return"),
             pytest.param({"cmd": "\t"}, id="horizontal tab"),
             pytest.param({"cmd": "\u0000"}, id="start of first control character range"),
-            pytest.param({"cmd": "\u001F"}, id="end of first control character range"),
-            pytest.param({"cmd": "\u007F"}, id="start of second control character range"),
-            pytest.param({"cmd": "\u009F"}, id="end of second control character range"),
+            pytest.param({"cmd": "\u001f"}, id="end of first control character range"),
+            pytest.param({"cmd": "\u007f"}, id="start of second control character range"),
+            pytest.param({"cmd": "\u009f"}, id="end of second control character range"),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any]) -> None:
@@ -770,9 +770,9 @@ class TestUserInterfaceLabelStringValue:
             pytest.param({"str": "\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"str": "\u0000"}, id="NULL disallowed"),
-            pytest.param({"str": "\u001F"}, id="1f disallowed"),
-            pytest.param({"str": "\u007F"}, id="DEL disallowed"),
-            pytest.param({"str": "\u009F"}, id="9f disallowed"),
+            pytest.param({"str": "\u001f"}, id="1f disallowed"),
+            pytest.param({"str": "\u007f"}, id="DEL disallowed"),
+            pytest.param({"str": "\u009f"}, id="9f disallowed"),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any]) -> None:
@@ -817,9 +817,9 @@ class TestFileDialogFilterPatternStringValue:
             pytest.param({"name": "*.\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"name": "*.\u0000"}, id="NULL disallowed"),
-            pytest.param({"name": "*.\u001F"}, id="1f disallowed"),
-            pytest.param({"name": "*.\u007F"}, id="DEL disallowed"),
-            pytest.param({"name": "*.\u009F"}, id="9f disallowed"),
+            pytest.param({"name": "*.\u001f"}, id="1f disallowed"),
+            pytest.param({"name": "*.\u007f"}, id="DEL disallowed"),
+            pytest.param({"name": "*.\u009f"}, id="9f disallowed"),
             # The list of characters explicitly disallowed
             #    b. Path separators "\" and "/".
             pytest.param({"name": "*.\\"}, id="no '\\'"),
