@@ -8,6 +8,7 @@ from enum import Enum
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, ClassVar, Literal, Optional, Type, Union, cast, Iterable
 from typing_extensions import Annotated, Self
+import annotated_types
 
 from pydantic import (
     field_validator,
@@ -16,12 +17,13 @@ from pydantic import (
     Field,
     PositiveInt,
     PositiveFloat,
+    Strict,
     StrictBool,
     StrictInt,
     ValidationError,
     ValidationInfo,
 )
-from pydantic_core import InitErrorDetails
+from pydantic_core import InitErrorDetails, PydanticKnownError
 from pydantic.fields import ModelPrivateAttr
 
 from .._format_strings import FormatString
@@ -33,6 +35,7 @@ from .._capabilities import (
 from .._internal import (
     CombinationExpressionParser,
     validate_step_parameter_space_dimensions,
+    validate_step_parameter_space_chunk_constraint,
     validate_unique_elements,
 )
 from .._internal._variable_reference_validation import (
@@ -92,7 +95,7 @@ class ExtensionName(str, Enum):
     """
 
     # # https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0001-task-chunking.md
-    # TASK_CHUNKING = "TASK_CHUNKING"
+    TASK_CHUNKING = "TASK_CHUNKING"
 
 
 ExtensionNameList = Annotated[list[str], Field(min_length=1)]
@@ -495,6 +498,7 @@ class TaskParameterType(str, Enum):
     FLOAT = "FLOAT"
     STRING = "STRING"
     PATH = "PATH"
+    CHUNK_INT = "CHUNK[INT]"
 
 
 class RangeString(FormatString):
@@ -522,6 +526,8 @@ class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
     type: TaskParameterType
     # NOTE: Pydantic V1 was allowing non-string values in this range, V2 is enforcing that type.
     range: TaskRangeList
+    # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
+    chunks: Optional[TaskChunksDefinition] = None
 
     @field_validator("range", mode="before")
     @classmethod
@@ -539,6 +545,8 @@ class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
     # element type of items in the range
     type: TaskParameterType
     range: TaskRangeExpression
+    # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
+    chunks: Optional[TaskChunksDefinition] = None
 
     @field_validator("range")
     @classmethod
@@ -550,6 +558,52 @@ class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
         except Exception as e:
             raise ValueError(str(e))
 
+        return value
+
+
+class TaskChunksRangeConstraint(str, Enum):
+    CONTIGUOUS = "CONTIGUOUS"
+    NONCONTIGUOUS = "NONCONTIGUOUS"
+
+
+class TaskChunksDefinition(OpenJDModel_v2023_09):
+    defaultTaskCount: Union[Annotated[int, annotated_types.Ge(1), Strict()], FormatString]
+    targetRuntimeSeconds: Optional[
+        Union[Annotated[int, annotated_types.Ge(0), Strict()], FormatString]
+    ] = None
+    rangeConstraint: TaskChunksRangeConstraint
+
+    _job_creation_metadata = JobCreationMetadata(
+        resolve_fields={"defaultTaskCount", "targetRuntimeSeconds"},
+    )
+
+    @field_validator("defaultTaskCount")
+    @classmethod
+    def _validate_default_task_count(cls, value: Any) -> Any:
+        if isinstance(value, FormatString):
+            # If the string value has no expressions, can validate the value now.
+            # Otherwise will validate when
+            if len(value.expressions) == 0:
+                try:
+                    int_value = int(value)
+                except ValueError:
+                    raise ValueError("String literal must contain an integer.")
+                if int_value < 1:
+                    raise PydanticKnownError("greater_than_equal", {"ge": 1})
+        return value
+
+    @field_validator("targetRuntimeSeconds")
+    @classmethod
+    def _validate_target_runtime_seconds(cls, value: Any) -> Any:
+        if isinstance(value, FormatString):
+            # If the string value has no expressions, can validate it now
+            if len(value.expressions) == 0:
+                try:
+                    int_value = int(value)
+                except ValueError:
+                    raise ValueError("String literal must contain an integer.")
+                if int_value < 0:
+                    raise PydanticKnownError("greater_than_equal", {"ge": 0})
         return value
 
 
@@ -577,8 +631,8 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
     )
     _template_variable_sources = {"__export__": {"__self__"}}
 
-    def _get_range_task_param_type(model: Any) -> Type[OpenJDModel]:
-        if isinstance(model.range, RangeString):
+    def _get_range_task_param_type(self: Any) -> Type[OpenJDModel]:
+        if isinstance(self.range, RangeString):
             return RangeExpressionTaskParameterDefinition
         return RangeListTaskParameterDefinition
 
@@ -591,9 +645,9 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("range", mode="before")
     @classmethod
     def _validate_range_element_type(cls, value: Any) -> Any:
-        # pydantic will automatically type coerse values into integers. We explicitly
+        # pydantic will automatically type coerce values into integers. We explicitly
         # want to reject non-integer values, so this *pre* validator validates the
-        # value *before* pydantic tries to type coerse it.
+        # value *before* pydantic tries to type coerce it.
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
@@ -613,7 +667,7 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
             if errors:
                 raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
         elif isinstance(value, RangeString):
-            # TODO: nothing to do - it's guaranteed to be a format string at this point
+            # Nothing to do - it's guaranteed to be a format string at this point
             pass
 
         return value
@@ -797,11 +851,134 @@ class PathTaskParameterDefinition(OpenJDModel_v2023_09):
     )
 
 
+class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
+    """Definition of an integer-typed Task Parameter, that is processed as
+     chunks of tasks insteas of as individual tasks when running.
+
+    Attributes:
+        name (Identifier):  A name by which the parameter is referenced.
+        type (TaskParameterType.CHUNK_INT): discriminator to identify the type of the parameter.
+        range (IntRangeList | RangeString): The list of values that the parameter takes on.
+        chunks (TaskChunkProperties): Properties that specify how to form chunks of tasks.
+    """
+
+    name: Identifier
+    type: Literal[TaskParameterType.CHUNK_INT]
+    # Note: Ordering here is important. Pydantic will try to match in
+    # the order given.
+    range: Union[IntRangeList, RangeString]
+    chunks: TaskChunksDefinition
+
+    _template_variable_definitions = DefinesTemplateVariables(
+        defines={
+            TemplateVariableDef(prefix="|Task.Param.", resolves=ResolutionScope.TASK),
+            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK),
+        },
+        field="name",
+    )
+    _template_variable_sources = {"__export__": {"__self__"}}
+
+    def _get_range_task_param_type(self: Any) -> Type[OpenJDModel]:
+        if isinstance(self.range, RangeString):
+            return RangeExpressionTaskParameterDefinition
+        return RangeListTaskParameterDefinition
+
+    _job_creation_metadata = JobCreationMetadata(
+        create_as=JobCreateAsMetadata(callable=_get_range_task_param_type),
+        resolve_fields={"range"},
+        exclude_fields={"name"},
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_task_chunking_extension(
+        cls, values: dict[str, Any], info: ValidationInfo
+    ) -> dict[str, Any]:
+        if info.context:
+            context = cast(ModelParsingContext, info.context)
+            if ExtensionName.TASK_CHUNKING not in context.extensions:
+                raise ValueError(
+                    "The CHUNK[INT] task parameter requires the TASK_CHUNKING extension."
+                )
+        return values
+
+    @field_validator("range", mode="before")
+    @classmethod
+    def _validate_range_element_type(cls, value: Any) -> Any:
+        # pydantic will automatically type coerce values into integers. We explicitly
+        # want to reject non-integer values, so this *pre* validator validates the
+        # value *before* pydantic tries to type coerce it.
+        # We do allow coersion from a string since we want to allow "1", and
+        # "1.2" or "a" will fail the type coersion
+        if isinstance(value, list):
+            errors = list[InitErrorDetails]()
+            for i, item in enumerate(value):
+                if isinstance(item, bool) or not isinstance(item, (int, str)):
+                    errors.append(
+                        InitErrorDetails(
+                            type="value_error",
+                            loc=(i,),
+                            ctx={
+                                "error": ValueError("Value must be an integer or integer string.")
+                            },
+                            input=item,
+                        )
+                    )
+            if errors:
+                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        elif isinstance(value, RangeString):
+            # Nothing to do - it's guaranteed to be a format string at this point
+            pass
+
+        return value
+
+    @field_validator("range")
+    @classmethod
+    def _validate_range_elements(cls, value: Any) -> Any:
+        if isinstance(value, list):
+            errors = list[InitErrorDetails]()
+            for i, item in enumerate(value):
+                if isinstance(item, TaskParameterStringValue):
+                    # A TaskParameterStringValue is a FormatString.
+                    # FormatString.expressions is the list of all expressions in the format string
+                    # ( e.g. "{{ Param.Foo }}").
+                    # Reject the string if it contains any expressions.
+                    if len(item.expressions) == 0:
+                        try:
+                            int(item)
+                        except ValueError:
+                            errors.append(
+                                InitErrorDetails(
+                                    type="value_error",
+                                    loc=(i,),
+                                    ctx={
+                                        "error": ValueError(
+                                            "String literal must contain an integer."
+                                        )
+                                    },
+                                    input=item,
+                                )
+                            )
+            if errors:
+                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+        else:
+            # If there are no format expressions, we can validate the range expression.
+            # otherwise we defer to the RangeExressionTaskParameter model when
+            # they've all been evaluated
+            if len(value.expressions) == 0:
+                try:
+                    IntRangeExpr.from_str(value)
+                except Exception as e:
+                    raise ValueError(str(e))
+        return value
+
+
 TaskParameterDefinition = Union[
     IntTaskParameterDefinition,
     FloatTaskParameterDefinition,
     StringTaskParameterDefinition,
     PathTaskParameterDefinition,
+    ChunkIntTaskParameterDefinition,
 ]
 
 TaskParameterList = Annotated[
@@ -890,6 +1067,7 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
         # Ensure that the 'combination' string:
         #   a) is a properly formed combination expression; and
         #   b) references all available task parameters exactly once each
+        #   c) does not include a CHUNK[INT] parameter in an associative expression
 
         try:
             parse_tree = CombinationExpressionParser().parse(combination)
@@ -945,6 +1123,25 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
                             f"Expression can only reference each parameter once: {','.join(duplicates)} "
                         )
                     },
+                    input=combination,
+                )
+            )
+
+        # If a parameter has type CHUNK[INT], get its name
+        chunk_parameter = None
+        for param in self.taskParameterDefinitions:
+            if param.type == TaskParameterType.CHUNK_INT:
+                chunk_parameter = param.name
+
+        try:
+            if chunk_parameter is not None:
+                validate_step_parameter_space_chunk_constraint(chunk_parameter, parse_tree)
+        except ExpressionError as e:
+            errors.append(
+                InitErrorDetails(
+                    type="value_error",
+                    loc=("combination",),
+                    ctx={"error": ValueError(str(e))},
                     input=combination,
                 )
             )
@@ -2454,25 +2651,28 @@ class JobTemplate(OpenJDModel_v2023_09):
     def _permitted_extension_names(
         cls, value: Optional[ExtensionNameList], info: ValidationInfo
     ) -> Optional[ExtensionNameList]:
-        context = cast(ModelParsingContext, info.context)
-        if value is not None:
-            # Before processing the extensions field, context.extensions is the list of supported extensions
-            # that were requested in the call of the parse_job_template function.
-            # Take the intersection of the input supported extensions with what is implemented
-            # in this list, as the implementation needs to support an extension for it to be supported.
-            supported_extensions = context.extensions.intersection(cls.supported_extension_names())
-
-            unsupported_extensions = set(value).difference(supported_extensions)
-            if unsupported_extensions:
-                raise ValueError(
-                    f"Unsupported extension names: {', '.join(sorted(unsupported_extensions))}"
+        if info.context:
+            context = cast(ModelParsingContext, info.context)
+            if value is not None:
+                # Before processing the extensions field, context.extensions is the list of supported extensions
+                # that were requested in the call of the parse_job_template function.
+                # Take the intersection of the input supported extensions with what is implemented
+                # in this list, as the implementation needs to support an extension for it to be supported.
+                supported_extensions = context.extensions.intersection(
+                    cls.supported_extension_names()
                 )
 
-            # After processing the extensions field, context.extensions is the list of
-            # extension names used by the template.
-            context.extensions = set(value)
-        else:
-            context.extensions = set()
+                unsupported_extensions = set(value).difference(supported_extensions)
+                if unsupported_extensions:
+                    raise ValueError(
+                        f"Unsupported extension names: {', '.join(sorted(unsupported_extensions))}"
+                    )
+
+                # After processing the extensions field, context.extensions is the list of
+                # extension names used by the template.
+                context.extensions = set(value)
+            else:
+                context.extensions = set()
         return value
 
     @field_validator("steps")

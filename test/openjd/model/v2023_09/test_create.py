@@ -12,6 +12,7 @@ from openjd.model.v2023_09 import (
     AttributeRequirementTemplate,
     CancelationMethodNotifyThenTerminate,
     CancelationMethodTerminate,
+    ChunkIntTaskParameterDefinition,
     EmbeddedFileText,
     Environment,
     EnvironmentActions,
@@ -35,13 +36,14 @@ from openjd.model.v2023_09 import (
     StepScript,
     StepTemplate,
     StringTaskParameterDefinition,
+    TaskChunksDefinition,
 )
 
 
 class TestCreateJob:
-    def test(self) -> None:
+    def test_v2023_09(self) -> None:
         # One big test that does everything relevant for the create-job annotations.
-        # Should be the only test that we need.
+        # Should be the only test that we need for the baseline specification.
         #
         # Key things:
         #  1) Every format string has a job parameter reference - only some should be
@@ -384,6 +386,122 @@ class TestCreateJob:
                                 name="attr.mycapability", allOf=["TheOtherJobName"]
                             ),
                         ],
+                    ),
+                )
+            ],
+        )
+
+        # Note: The dict compare generates an easier to read diff if there's a test failure.
+        #  It is not essential to the test.
+        assert result.model_dump() == expected.model_dump()
+        # This is the important assertion.
+        assert result == expected
+
+    def test_v2023_09_extension_task_chunking(self) -> None:
+        # An end-to-end test for the TASK_CHUNKING extension.
+        #
+        # Key things:
+        #  1) Every format string has a job parameter reference - only some should be
+        #     evaluated when creating jobs
+        #     Specifically, only job name & task parameter range values should be evaluated.
+        #  2) Every entity and every field that exists is defined at least once.
+        #  3) Testing of _internal.create_job covers corner cases & exceptions; we don't worry
+        #     about those here.
+
+        # GIVEN
+        extra_kwargs = {"$schema": "blah "}  # special snowflake due to field naming
+        template = JobTemplate(
+            **extra_kwargs,
+            specificationVersion="jobtemplate-2023-09",
+            extensions=["TASK_CHUNKING"],
+            name="Job {{ Param.IntParam }}",
+            parameterDefinitions=[
+                JobIntParameterDefinition(
+                    name="RangeExpressionParam",
+                    type="INT",
+                    description="desc",
+                    minValue=0,
+                    maxValue=100,
+                    allowedValues=[3, 75],
+                    default=75,
+                ),
+                JobIntParameterDefinition(
+                    name="IntParam",
+                    type="INT",
+                    description="desc",
+                    minValue=0,
+                    maxValue=100,
+                    allowedValues=[5, 10, 20],
+                    default=20,
+                ),
+            ],
+            steps=[
+                StepTemplate(
+                    name="StepName",
+                    parameterSpace=StepParameterSpaceDefinition(
+                        taskParameterDefinitions=[
+                            ChunkIntTaskParameterDefinition(
+                                name="ParamE",
+                                type="CHUNK[INT]",
+                                range="2 - {{ Param.RangeExpressionParam }}",
+                                chunks=TaskChunksDefinition(
+                                    defaultTaskCount="{{Param.RangeExpressionParam}}",
+                                    targetRuntimeSeconds="{{Param.IntParam}}",
+                                    rangeConstraint="CONTIGUOUS",
+                                ),
+                            ),
+                        ],
+                        combination="ParamE",
+                    ),
+                    script=StepScript(
+                        actions=StepActions(
+                            onRun=Action(
+                                command="{{ Param.IntParam }}",
+                            )
+                        ),
+                    ),
+                )
+            ],
+        )
+        job_parameter_values = {
+            "IntParam": ParameterValue(type=ParameterValueType.INT, value="10"),
+            "RangeExpressionParam": ParameterValue(type=ParameterValueType.STRING, value="3"),
+        }
+
+        # WHEN
+        result = create_job(job_template=template, job_parameter_values=job_parameter_values)
+
+        # THEN
+        expected = Job(
+            extensions=["TASK_CHUNKING"],
+            name="Job 10",
+            parameters={
+                "RangeExpressionParam": JobParameter(type="INT", description="desc", value="3"),
+                "IntParam": JobParameter(type="INT", description="desc", value="10"),
+            },
+            steps=[
+                Step(
+                    name="StepName",
+                    parameterSpace=StepParameterSpace(
+                        taskParameterDefinitions={
+                            "ParamE": RangeExpressionTaskParameterDefinition(
+                                type="CHUNK[INT]",
+                                range="2 - 3",
+                                chunks=TaskChunksDefinition(
+                                    defaultTaskCount="3",
+                                    targetRuntimeSeconds="10",
+                                    rangeConstraint="CONTIGUOUS",
+                                ),
+                            ),
+                        },
+                        combination="ParamE",
+                    ),
+                    script=StepScript(
+                        actions=StepActions(
+                            onRun=Action(
+                                command="{{ Param.IntParam }}",
+                            )
+                        ),
                     ),
                 )
             ],

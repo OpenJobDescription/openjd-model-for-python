@@ -23,10 +23,42 @@ def validate_step_parameter_space_dimensions(
        ExpressionError if the combination expression violates constraints.
     """
     parse_tree = Parser().parse(combination)
-    _validate_expr_tree(parse_tree, parameter_range_lengths)
+    _validate_expr_tree_dimensions(parse_tree, parameter_range_lengths)
 
 
-def _validate_expr_tree(root: Node, parameter_range_lengths: dict[str, int]) -> int:
+def validate_step_parameter_space_chunk_constraint(chunk_parameter: str, parse_tree: Node) -> bool:
+    """This validates that the task parameter of type CHUNK[INT] never appears
+    within scope of an associative expression. A single chunk consists of
+    individual values from the non-chunk parameters, and a set of values from the
+    chunk parameter. With this restriction, the session script code can interpret
+    these parameters easily, while without it the specification would need to define
+    how the associations are represented and provided to the script.
+
+    Raises:
+      ExpressionError if the combination expression violates the chunk constraint.
+    """
+    # Returns True if the subtree includes the chunk parameter, otherwise False
+    if isinstance(parse_tree, IdentifierNode):
+        return parse_tree.parameter == chunk_parameter
+    elif isinstance(parse_tree, AssociationNode):
+        for child in parse_tree.children:
+            if validate_step_parameter_space_chunk_constraint(chunk_parameter, child):
+                raise ExpressionError(
+                    (
+                        f"CHUNK[INT] parameter {chunk_parameter} must not be part of an associative expression. "
+                    )
+                )
+        return False
+    else:
+        # For type hinting
+        assert isinstance(parse_tree, ProductNode)
+        return any(
+            validate_step_parameter_space_chunk_constraint(chunk_parameter, child)
+            for child in parse_tree.children
+        )
+
+
+def _validate_expr_tree_dimensions(root: Node, parameter_range_lengths: dict[str, int]) -> int:
     # Returns the length of the subtree while recursively validating it.
     if isinstance(root, IdentifierNode):
         name = root.parameter
@@ -35,7 +67,8 @@ def _validate_expr_tree(root: Node, parameter_range_lengths: dict[str, int]) -> 
         # Association requires that all arguments are the exact same length.
         # Ensure that is the case
         arg_lengths = tuple(
-            _validate_expr_tree(child, parameter_range_lengths) for child in root.children
+            _validate_expr_tree_dimensions(child, parameter_range_lengths)
+            for child in root.children
         )
         if len(set(arg_lengths)) > 1:
             raise ExpressionError(
@@ -49,5 +82,10 @@ def _validate_expr_tree(root: Node, parameter_range_lengths: dict[str, int]) -> 
         # For type hinting
         assert isinstance(root, ProductNode)
         return reduce(
-            mul, (_validate_expr_tree(child, parameter_range_lengths) for child in root.children), 1
+            mul,
+            (
+                _validate_expr_tree_dimensions(child, parameter_range_lengths)
+                for child in root.children
+            ),
+            1,
         )
