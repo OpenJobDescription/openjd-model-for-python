@@ -196,6 +196,13 @@ class MockExtensionName(str, Enum):
     SUPPORTED_NAME = "SUPPORTED_NAME"
 
 
+class MockExtensionNameWithTwoNames(str, Enum):
+    """A mock enum with only SUPPORTED_NAME for testing."""
+
+    SUPPORTED_NAME = "SUPPORTED_NAME"
+    ANOTHER_SUPPORTED_NAME = "ANOTHER_SUPPORTED_NAME"
+
+
 @pytest.mark.parametrize(
     "template,template_type,decode_function",
     [
@@ -262,6 +269,12 @@ def test_template_extensions_list(template, template_type, decode_function) -> N
             in str(excinfo.value)
         )
 
+        # Extension names cannot be repeated
+        template["extensions"] = ["SUPPORTED_NAME", "SUPPORTED_NAME"]
+        with pytest.raises(DecodeValidationError) as excinfo:
+            decode_function(template=template)
+        assert "Duplicate values for extension name are not allowed." in str(excinfo.value)
+
         # When the request list includes an unsupported extension name
         template["extensions"] = ["SUPPORTED_NAME"]
         with pytest.raises(DecodeValidationError) as excinfo:
@@ -279,3 +292,10 @@ def test_template_extensions_list(template, template_type, decode_function) -> N
             f"1 validation errors for {template_type}\nextensions:\n\tUnsupported extension names: UNSUPPORTED_NAME"
             in str(excinfo.value)
         )
+
+    # For this test, there are two different extension names supported
+    with patch.object(openjd.model.v2023_09._model, "ExtensionName", MockExtensionNameWithTwoNames):
+        # When the requested extension name is in the supported list
+        template["extensions"] = ["ANOTHER_SUPPORTED_NAME"]
+        model = decode_function(template=template, supported_extensions=["ANOTHER_SUPPORTED_NAME"])
+        assert model.extensions == ["ANOTHER_SUPPORTED_NAME"]
