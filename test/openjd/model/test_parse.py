@@ -17,7 +17,7 @@ from openjd.model import (
     model_to_object,
 )
 from openjd.model._types import OpenJDModel
-import openjd.model.v2023_09
+import openjd
 from openjd.model.v2023_09 import JobTemplate as JobTemplate_2023_09
 from openjd.model.v2023_09 import EnvironmentTemplate as EnvironmentTemplate_2023_09
 
