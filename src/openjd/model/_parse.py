@@ -167,7 +167,7 @@ def decode_job_template(
 
     Args:
         template (dict[str, Any]): A Job Template as a dictionary object.
-        supported_extensions (list[str]): A list of extension names to support. This list is intersected
+        supported_extensions (Optional[Iterable[str]]): A list of extension names to support. This list is intersected
             with the extensions names supported by the implementation before processing.
 
     Returns:
@@ -241,7 +241,7 @@ def decode_environment_template(
 
     Args:
         template (dict[str, Any]): An Environment Template as a dictionary object.
-        supported_extensions (list[str]): A list of extension names to support. This list is intersected
+        supported_extensions (Optional[Iterable[str]]): A list of extension names to support. This list is intersected
             with the extensions names supported by the implementation before processing.
 
     Returns:

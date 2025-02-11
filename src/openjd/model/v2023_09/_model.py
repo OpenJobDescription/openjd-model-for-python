@@ -62,9 +62,15 @@ class ModelParsingContext:
     """
 
     extensions: set[str]
-    """Initially, is the set of supported extension names. When the 'extensions'
-    field of the template is processed, this becomes the set of extensions that
-    the the template requested."""
+    """When parsing a top-level model instance, this is the set of supported extension names.
+    The 'extensions' field is second in the list of model properties for both the job template
+    and environment template, and when that field is processed it becomes the set of extensions
+    that the template requested.
+
+    When fields of a model that depend on an extension are processed, its validators should
+    check whether the needed extension is included in the context and adjust its parsing
+    as written in the specification.
+    """
 
     def __init__(self, *, supported_extensions: Optional[Iterable[str]] = None) -> None:
         self.extensions = set(supported_extensions or [])
@@ -2450,7 +2456,8 @@ class JobTemplate(OpenJDModel_v2023_09):
     ) -> Optional[ExtensionNameList]:
         context = cast(ModelParsingContext, info.context)
         if value is not None:
-            # Before processing the extensions field, context.extensions is the list of supported extensions.
+            # Before processing the extensions field, context.extensions is the list of supported extensions
+            # that were requested in the call of the parse_job_template function.
             # Take the intersection of the input supported extensions with what is implemented
             # in this list, as the implementation needs to support an extension for it to be supported.
             supported_extensions = context.extensions.intersection(cls.supported_extension_names())
