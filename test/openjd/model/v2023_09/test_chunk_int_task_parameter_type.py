@@ -13,7 +13,7 @@ from openjd.model.v2023_09 import (
 )
 
 
-@pytest.mark.parametrize(
+PARAMETRIZE_CASES: tuple = (
     "data",
     (
         pytest.param(
@@ -65,10 +65,10 @@ from openjd.model.v2023_09 import (
             {
                 "name": "foo",
                 "type": "CHUNK[INT]",
-                "range": [1, "2", "{{Param.Value}}"],
+                "range": [-1, 0, 1, "2", "{{Param.Value}}"],
                 "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"},
             },
-            id="mix of item types",
+            id="mix of item types and values",
         ),
         pytest.param(
             {
@@ -159,6 +159,9 @@ from openjd.model.v2023_09 import (
         ),
     ),
 )
+
+
+@pytest.mark.parametrize(*PARAMETRIZE_CASES)
 def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
     # It parses successfully when the TASK_CHUNKING extension is requested
     _parse_model(
@@ -176,7 +179,7 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
     assert excinfo.value.error_count() == 1
 
 
-@pytest.mark.parametrize(
+PARAMETRIZE_CASES = (
     "data,error_message,error_count",
     (
         pytest.param({}, "Field required", 4, id="empty object"),
@@ -304,9 +307,39 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                     "rangeConstraint": "NONCONTIGUOUS",
                 },
             },
-            "Value must be an integer or integer string.",
+            "Value must be an integer or a string containing an integer.",
             1,
-            id="disallow floats",
+            id="disallow floats in range",
+        ),
+        pytest.param(
+            {
+                "name": "foo",
+                "type": "CHUNK[INT]",
+                "range": [1, 2],
+                "chunks": {
+                    "defaultTaskCount": 10.1,
+                    "targetRuntimeSeconds": 1000,
+                    "rangeConstraint": "NONCONTIGUOUS",
+                },
+            },
+            "Value must be an integer or a string containing an integer.",
+            1,
+            id="disallow floats in defaultTaskCount",
+        ),
+        pytest.param(
+            {
+                "name": "foo",
+                "type": "CHUNK[INT]",
+                "range": [1, 2],
+                "chunks": {
+                    "defaultTaskCount": 10,
+                    "targetRuntimeSeconds": 1000.01,
+                    "rangeConstraint": "NONCONTIGUOUS",
+                },
+            },
+            "Value must be an integer or a string containing an integer.",
+            1,
+            id="disallow floats in targetRuntimeSeconds",
         ),
         pytest.param(
             {
@@ -319,9 +352,39 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                     "rangeConstraint": "NONCONTIGUOUS",
                 },
             },
-            "Value must be an integer or integer string.",
+            "Value must be an integer or a string containing an integer.",
             1,
-            id="disallow bool",
+            id="disallow bool in range",
+        ),
+        pytest.param(
+            {
+                "name": "foo",
+                "type": "CHUNK[INT]",
+                "range": [1],
+                "chunks": {
+                    "defaultTaskCount": True,
+                    "targetRuntimeSeconds": 1000,
+                    "rangeConstraint": "NONCONTIGUOUS",
+                },
+            },
+            "Value must be an integer or a string containing an integer.",
+            1,
+            id="disallow bool in defaultTaskCount",
+        ),
+        pytest.param(
+            {
+                "name": "foo",
+                "type": "CHUNK[INT]",
+                "range": [1],
+                "chunks": {
+                    "defaultTaskCount": 10,
+                    "targetRuntimeSeconds": True,
+                    "rangeConstraint": "NONCONTIGUOUS",
+                },
+            },
+            "Value must be an integer or a string containing an integer.",
+            1,
+            id="disallow bool in targetRuntimeSeconds",
         ),
         pytest.param(
             {
@@ -334,9 +397,39 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                     "rangeConstraint": "NONCONTIGUOUS",
                 },
             },
-            "String literal must contain an integer.",
+            "Value must be an integer or a string containing an integer.",
             1,
-            id="disallow float strings",
+            id="disallow float strings in range",
+        ),
+        pytest.param(
+            {
+                "name": "foo",
+                "type": "CHUNK[INT]",
+                "range": ["1"],
+                "chunks": {
+                    "defaultTaskCount": "1.1",
+                    "targetRuntimeSeconds": 1000,
+                    "rangeConstraint": "NONCONTIGUOUS",
+                },
+            },
+            "Value must be an integer or a string containing an integer.",
+            1,
+            id="disallow float strings in defaultTaskCount",
+        ),
+        pytest.param(
+            {
+                "name": "foo",
+                "type": "CHUNK[INT]",
+                "range": ["1"],
+                "chunks": {
+                    "defaultTaskCount": 10,
+                    "targetRuntimeSeconds": "1000.1",
+                    "rangeConstraint": "NONCONTIGUOUS",
+                },
+            },
+            "Value must be an integer or a string containing an integer.",
+            1,
+            id="disallow float strings in targetRuntimeSeconds",
         ),
         pytest.param(
             {
@@ -350,8 +443,8 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                 },
             },
             "Failed to parse interpolation expression at [0, 20]. Reason: Braces mismatch.",
-            3,
-            id="malformed format string",
+            1,
+            id="malformed format string in range",
         ),
         pytest.param(
             {
@@ -364,9 +457,9 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                     "rangeConstraint": "NONCONTIGUOUS",
                 },
             },
-            "String literal must contain an integer.",
+            "Value must be an integer or a string containing an integer.",
             1,
-            id="literal string not an int",
+            id="literal string not an int in range",
         ),
         pytest.param(
             {
@@ -408,7 +501,7 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                 },
             },
             "Input should be greater than or equal to 1",
-            2,
+            1,
             id="defaultTaskCount 0 (too small)",
         ),
         pytest.param(
@@ -423,7 +516,7 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                 },
             },
             "Input should be greater than or equal to 0",
-            2,
+            1,
             id="targetRuntimeSeconds -1 (too small)",
         ),
         pytest.param(
@@ -467,7 +560,7 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                     "rangeConstraint": "CONTIGUOUS",
                 },
             },
-            "String literal must contain an integer.",
+            "Value must be an integer or a string containing an integer.",
             1,
             id="defaultTaskCount is str with non-integer value",
         ),
@@ -483,7 +576,7 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                 },
             },
             "Failed to parse interpolation expression at [0, 18]. Reason: Braces mismatch.",
-            2,
+            1,
             id="defaultTaskCount is str with incorrect expression",
         ),
         pytest.param(
@@ -497,7 +590,7 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                     "rangeConstraint": "CONTIGUOUS",
                 },
             },
-            "String literal must contain an integer.",
+            "Value must be an integer or a string containing an integer.",
             1,
             id="targetRuntimeSeconds is str with non-integer value",
         ),
@@ -528,11 +621,14 @@ def test_chunk_int_task_parameter_parse_success(data: dict[str, Any]) -> None:
                 },
             },
             "Failed to parse interpolation expression at [0, 27]. Reason: Braces mismatch.",
-            2,
+            1,
             id="targetRuntimeSeconds is str with incorrect expression",
         ),
     ),
 )
+
+
+@pytest.mark.parametrize(*PARAMETRIZE_CASES)
 def test_chunk_int_task_parameter_parse_fails(
     data: dict[str, Any], error_message: str, error_count: int
 ) -> None:

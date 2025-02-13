@@ -8,7 +8,6 @@ from enum import Enum
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, ClassVar, Literal, Optional, Type, Union, cast, Iterable
 from typing_extensions import Annotated, Self
-import annotated_types
 
 from pydantic import (
     field_validator,
@@ -17,13 +16,12 @@ from pydantic import (
     Field,
     PositiveInt,
     PositiveFloat,
-    Strict,
     StrictBool,
     StrictInt,
     ValidationError,
     ValidationInfo,
 )
-from pydantic_core import InitErrorDetails, PydanticKnownError
+from pydantic_core import InitErrorDetails
 from pydantic.fields import ModelPrivateAttr
 
 from .._format_strings import FormatString
@@ -37,6 +35,9 @@ from .._internal import (
     validate_step_parameter_space_dimensions,
     validate_step_parameter_space_chunk_constraint,
     validate_unique_elements,
+    validate_int_fmtstring_field,
+    validate_float_fmtstring_field,
+    validate_list_field,
 )
 from .._internal._variable_reference_validation import (
     prevalidate_model_template_variable_references,
@@ -567,44 +568,23 @@ class TaskChunksRangeConstraint(str, Enum):
 
 
 class TaskChunksDefinition(OpenJDModel_v2023_09):
-    defaultTaskCount: Union[Annotated[int, annotated_types.Ge(1), Strict()], FormatString]
-    targetRuntimeSeconds: Optional[
-        Union[Annotated[int, annotated_types.Ge(0), Strict()], FormatString]
-    ] = None
+    defaultTaskCount: Union[int, FormatString]
+    targetRuntimeSeconds: Optional[Union[int, FormatString]] = None
     rangeConstraint: TaskChunksRangeConstraint
 
     _job_creation_metadata = JobCreationMetadata(
         resolve_fields={"defaultTaskCount", "targetRuntimeSeconds"},
     )
 
-    @field_validator("defaultTaskCount")
+    @field_validator("defaultTaskCount", mode="before")
     @classmethod
     def _validate_default_task_count(cls, value: Any) -> Any:
-        if isinstance(value, FormatString):
-            # If the string value has no expressions, can validate the value now.
-            # Otherwise will validate when
-            if len(value.expressions) == 0:
-                try:
-                    int_value = int(value)
-                except ValueError:
-                    raise ValueError("String literal must contain an integer.")
-                if int_value < 1:
-                    raise PydanticKnownError("greater_than_equal", {"ge": 1})
-        return value
+        return validate_int_fmtstring_field(value, ge=1)
 
-    @field_validator("targetRuntimeSeconds")
+    @field_validator("targetRuntimeSeconds", mode="before")
     @classmethod
     def _validate_target_runtime_seconds(cls, value: Any) -> Any:
-        if isinstance(value, FormatString):
-            # If the string value has no expressions, can validate it now
-            if len(value.expressions) == 0:
-                try:
-                    int_value = int(value)
-                except ValueError:
-                    raise ValueError("String literal must contain an integer.")
-                if int_value < 0:
-                    raise PydanticKnownError("greater_than_equal", {"ge": 0})
-        return value
+        return validate_int_fmtstring_field(value, ge=0)
 
 
 class IntTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -651,21 +631,7 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
-            errors = list[InitErrorDetails]()
-            for i, item in enumerate(value):
-                if isinstance(item, bool) or not isinstance(item, (int, str)):
-                    errors.append(
-                        InitErrorDetails(
-                            type="value_error",
-                            loc=(i,),
-                            ctx={
-                                "error": ValueError("Value must be an integer or integer string.")
-                            },
-                            input=item,
-                        )
-                    )
-            if errors:
-                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+            return validate_list_field(value, validate_int_fmtstring_field)
         elif isinstance(value, RangeString):
             # Nothing to do - it's guaranteed to be a format string at this point
             pass
@@ -675,34 +641,7 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("range")
     @classmethod
     def _validate_range_elements(cls, value: Any) -> Any:
-        if isinstance(value, list):
-            errors = list[InitErrorDetails]()
-            for i, item in enumerate(value):
-                if isinstance(item, TaskParameterStringValue):
-                    # A TaskParameterStringValue is a FormatString.
-                    # FormatString.expressions is the list of all expressions in the format string
-                    # ( e.g. "{{ Param.Foo }}").
-                    # Validate the string if it does not contain any expressions, in order to catch
-                    # errors earlier when possible.
-                    if len(item.expressions) == 0:
-                        try:
-                            int(item)
-                        except ValueError:
-                            errors.append(
-                                InitErrorDetails(
-                                    type="value_error",
-                                    loc=(i,),
-                                    ctx={
-                                        "error": ValueError(
-                                            "String literal must contain an integer."
-                                        )
-                                    },
-                                    input=item,
-                                )
-                            )
-            if errors:
-                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
-        else:
+        if isinstance(value, FormatString):
             # If there are no format expressions, we can validate the range expression.
             # otherwise we defer to the RangeExressionTaskParameter model when
             # they've all been evaluated
@@ -747,51 +686,8 @@ class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
         # pydantic will automatically type coerce values into floats. We explicitly
         # want to reject non-integer values, so this *pre* validator validates the
         # value *before* pydantic tries to type coerce it.
-        # We do allow coersion from a string since we want to allow "1", and
-        # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
-            errors = list[InitErrorDetails]()
-            for i, item in enumerate(value):
-                if isinstance(item, bool) or not isinstance(item, (int, float, str)):
-                    errors.append(
-                        InitErrorDetails(
-                            type="value_error",
-                            loc=("range", i),
-                            ctx={"error": ValueError("Value must be a float or float string.")},
-                            input=item,
-                        )
-                    )
-            if errors:
-                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
-        return value
-
-    @field_validator("range")
-    @classmethod
-    def _validate_range_elements(
-        cls, value: list[Union[Decimal, TaskParameterStringValue]]
-    ) -> list[Union[Decimal, TaskParameterStringValue]]:
-        errors = list[InitErrorDetails]()
-        for i, item in enumerate(value):
-            if isinstance(item, TaskParameterStringValue):
-                # A TaskParameterStringValue is a FormatString.
-                # FormatString.expressions is the list of all expressions in the format string
-                # ( e.g. "{{ Param.Foo }}").
-                # Validate the string if it does not contain any expressions, in order to catch
-                # errors earlier when possible.
-                if len(item.expressions) == 0:
-                    try:
-                        float(item)
-                    except ValueError:
-                        errors.append(
-                            InitErrorDetails(
-                                type="value_error",
-                                loc=(i,),
-                                ctx={"error": ValueError("String literal must contain a float.")},
-                                input=item,
-                            )
-                        )
-        if errors:
-            raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+            return validate_list_field(value, validate_float_fmtstring_field)
         return value
 
 
@@ -911,21 +807,7 @@ class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
-            errors = list[InitErrorDetails]()
-            for i, item in enumerate(value):
-                if isinstance(item, bool) or not isinstance(item, (int, str)):
-                    errors.append(
-                        InitErrorDetails(
-                            type="value_error",
-                            loc=(i,),
-                            ctx={
-                                "error": ValueError("Value must be an integer or integer string.")
-                            },
-                            input=item,
-                        )
-                    )
-            if errors:
-                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
+            return validate_list_field(value, validate_int_fmtstring_field)
         elif isinstance(value, RangeString):
             # Nothing to do - it's guaranteed to be a format string at this point
             pass
@@ -935,33 +817,7 @@ class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("range")
     @classmethod
     def _validate_range_elements(cls, value: Any) -> Any:
-        if isinstance(value, list):
-            errors = list[InitErrorDetails]()
-            for i, item in enumerate(value):
-                if isinstance(item, TaskParameterStringValue):
-                    # A TaskParameterStringValue is a FormatString.
-                    # FormatString.expressions is the list of all expressions in the format string
-                    # ( e.g. "{{ Param.Foo }}").
-                    # Reject the string if it contains any expressions.
-                    if len(item.expressions) == 0:
-                        try:
-                            int(item)
-                        except ValueError:
-                            errors.append(
-                                InitErrorDetails(
-                                    type="value_error",
-                                    loc=(i,),
-                                    ctx={
-                                        "error": ValueError(
-                                            "String literal must contain an integer."
-                                        )
-                                    },
-                                    input=item,
-                                )
-                            )
-            if errors:
-                raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
-        else:
+        if isinstance(value, FormatString):
             # If there are no format expressions, we can validate the range expression.
             # otherwise we defer to the RangeExressionTaskParameter model when
             # they've all been evaluated
