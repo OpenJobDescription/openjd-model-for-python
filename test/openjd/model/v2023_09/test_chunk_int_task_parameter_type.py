@@ -752,3 +752,35 @@ def test_param_space_with_chunk_int_parse_fails(
         excinfo.value
     )
     assert excinfo.value.error_count() == 1
+
+
+def test_only_one_chunk_parameter():
+    data = {
+        "taskParameterDefinitions": [
+            {
+                "name": "oof",
+                "type": "CHUNK[INT]",
+                "range": "1-10",
+                "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"},
+            },
+            {"name": "foo", "type": "INT", "range": [1]},
+            {"name": "bar", "type": "INT", "range": [1]},
+            {
+                "name": "baz",
+                "type": "CHUNK[INT]",
+                "range": "1-10",
+                "chunks": {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"},
+            },
+        ],
+    }
+
+    with pytest.raises(ValidationError) as excinfo:
+        _parse_model(
+            model=StepParameterSpaceDefinition,
+            obj=data,
+            context=ModelParsingContext(supported_extensions=["TASK_CHUNKING"]),
+        )
+
+    # THEN
+    assert "Only one CHUNK[INT] task parameter is permitted" in str(excinfo.value)
+    assert len(excinfo.value.errors()) == 1, str(excinfo.value)

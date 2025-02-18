@@ -128,7 +128,8 @@ class TestRangeExpressionParser:
         "range_expr,start,end,total_range,range_str",
         [
             pytest.param("1-100,101-200", 1, 200, 200, "1-200"),
-            pytest.param("0-1,3-4,7-9,10", 0, 10, 8, "0-1,3-4,7-10"),
+            pytest.param("0-1,3-4,7-9,10", 0, 10, 8, "0,1,3,4,7-10"),
+            pytest.param("0-3:3,5-10:5,12,13,14,15", 0, 15, 8, "0,3,5,10,12-15"),
             pytest.param("20-29,0-9,10-19", 0, 29, 30, "0-29"),
         ],
     )
@@ -208,6 +209,7 @@ class TestIntRangeExpr:
         "range_list,range_str",
         [
             pytest.param([5], "5", id="one int"),
+            pytest.param([1, 2, 3, 4, 5, 7], "1-5,7", id="two ranges"),
             pytest.param(["7"], "7", id="one int as a str"),
             pytest.param([9, 0, 3, 2, 8, 10, 1, 4, 7, 6, 5], "0-10", id="values 0-10 out of order"),
             pytest.param(

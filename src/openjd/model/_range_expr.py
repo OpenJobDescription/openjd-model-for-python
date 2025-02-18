@@ -54,7 +54,7 @@ class IntRangeExpr(Sized):
         return Parser().parse(range_str)
 
     @staticmethod
-    def from_list(values: list[int | str]) -> IntRangeExpr:
+    def from_list(values: list[int] | list[str] | list[int | str]) -> IntRangeExpr:
         """Creates a range expression object from a list of integers/strings containing integers."""
         if len(values) == 0:
             return IntRangeExpr([])
@@ -66,7 +66,7 @@ class IntRangeExpr(Sized):
             values_as_int: list[int] = sorted({int(i) for i in values})
             # Find all the ranges, and concatenate them
             ranges = []
-            start = values_as_int[0]
+            start = end = values_as_int[0]
             step = None
 
             for value in values_as_int[1:]:
@@ -78,7 +78,7 @@ class IntRangeExpr(Sized):
                         end = value
                     else:
                         ranges.append(IntRange(start, end, step))
-                        start = value
+                        start = end = value
                         step = None
             ranges.append(IntRange(start, end, step or 1))
             return IntRangeExpr(ranges)
@@ -183,8 +183,11 @@ class IntRange(Sized):
         self._validate()
 
     def __str__(self) -> str:
-        if len(self) == 1:
+        len_self = len(self)
+        if len_self == 1:
             return str(self._start)
+        elif len_self == 2:
+            return f"{self._start},{self._end}"
         elif self.step == 1:
             return f"{self._start}-{self._end}"
         else:

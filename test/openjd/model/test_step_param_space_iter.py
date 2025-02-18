@@ -12,14 +12,10 @@ from openjd.model import (
     parse_model,
 )
 
-from openjd.model.v2023_09 import JobTemplate as JobTemplate_2023_09
 from openjd.model.v2023_09 import (
+    JobTemplate as JobTemplate_2023_09,
     RangeExpressionTaskParameterDefinition as RangeExpressionTaskParameterDefinition_2023_09,
-)
-from openjd.model.v2023_09 import (
     RangeListTaskParameterDefinition as RangeListTaskParameterDefinition_2023_09,
-)
-from openjd.model.v2023_09 import (
     StepParameterSpace as StepParameterSpace_2023_09,
 )
 
@@ -68,13 +64,14 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         job = create_job(job_template=job_template, job_parameter_values=dict())
 
         space = job.steps[0].parameterSpace
-        iterator = StepParameterSpaceIterator(space=space)
 
         # WHEN
-        result = list(iterator)
+        it = StepParameterSpaceIterator(space=space)
 
         # THEN
-        assert result == expected
+        assert list(it) == expected
+        it.reset_iter()
+        assert list(it) == expected
 
     def test_no_param_getelem(self):
         # GIVEN
@@ -90,16 +87,16 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
         space = job.steps[0].parameterSpace
 
         # WHEN
-        result = StepParameterSpaceIterator(space=space)
+        it = StepParameterSpaceIterator(space=space)
 
         # THEN
         with pytest.raises(IndexError):
-            result[1]
+            it[1]
         with pytest.raises(IndexError):
-            result[-2]
+            it[-2]
         expected = {}
-        assert result[0] == expected
-        assert result[-1] == expected
+        assert it[0] == expected
+        assert it[-1] == expected
 
     @pytest.mark.parametrize(
         "range_int_param",
@@ -130,6 +127,9 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
             } == next(it), f"i = {i}"
         with pytest.raises(StopIteration):
             next(it)
+        # The chunks parameter is only relevant when the parameter space is chunked
+        with pytest.raises(ValueError):
+            it.chunks_default_task_count = 1
 
     @pytest.mark.parametrize("param_range", [["10"], ["10", "11", "12", "13", "14", "15"]])
     def test_single_param_getelem(self, param_range):
