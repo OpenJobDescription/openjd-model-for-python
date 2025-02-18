@@ -75,6 +75,8 @@ class ParameterValueType(str, Enum):
     INT = "INT"
     FLOAT = "FLOAT"
     PATH = "PATH"
+    # This type is only used for task parameters, not job parameters
+    CHUNK_INT = "CHUNK[INT]"
 
 
 @dataclass(frozen=True, **dataclass_kwargs)

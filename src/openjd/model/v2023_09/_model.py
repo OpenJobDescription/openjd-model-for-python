@@ -584,6 +584,8 @@ class TaskChunksDefinition(OpenJDModel_v2023_09):
     @field_validator("targetRuntimeSeconds", mode="before")
     @classmethod
     def _validate_target_runtime_seconds(cls, value: Any) -> Any:
+        if value is None:
+            return value
         return validate_int_fmtstring_field(value, ge=0)
 
 
@@ -909,6 +911,9 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
     @field_validator("taskParameterDefinitions")
     @classmethod
     def _validate_parameters(cls, v: TaskParameterList) -> TaskParameterList:
+        # Only one CHUNK[INT] parameter is permitted
+        if len([param for param in v if param.type == TaskParameterType.CHUNK_INT]) > 1:
+            raise ValueError("Only one CHUNK[INT] task parameter is permitted")
         # Must have a unique name for each Task parameter
         return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
 
