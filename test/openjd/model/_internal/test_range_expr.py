@@ -19,17 +19,10 @@ class TestRangeExpressionParser:
         with pytest.raises(TokenError):
             parser.parse("!")
 
-    def test_fails_empty(self) -> None:
-        # GIVEN
-        parser = RangeExpressionParser()
-
-        # THEN
-        with pytest.raises(ExpressionError):
-            parser.parse("")
-
     @pytest.mark.parametrize(
         "range_expr",
         [
+            pytest.param("", id="empty str"),
             pytest.param("1-a", id="non-valid character at end"),
             pytest.param("b-1", id="non-valid character at start"),
             pytest.param("--12", id="missing start"),
@@ -194,6 +187,14 @@ class TestIntRangeExpr:
             pytest.param("  5 ", "5", id="one int"),
             pytest.param("9,0,3,2,8,10,1,4,7,6,5", "0-10", id="values 0-10 out of order"),
             pytest.param("3-5,0-2,8-12:2", "0-5,8-12:2", id="ranges out of order with steps"),
+            pytest.param(
+                "5-3:-1,12-8:-2,2-0:-1,6-7:2",
+                "0-5,6-12:2",
+                id="ranges out of order with pos + neg steps",
+            ),
+            pytest.param("1-5:3", "1,4", id="End value becomes actual last value (2 values)"),
+            pytest.param("1-7:3", "1-7:3", id="End value included"),
+            pytest.param("1-9:3", "1-7:3", id="End value becomes actual last value (3 values)"),
         ],
     )
     def test_range_expr_from_str(self, range_input_str: str, range_str: str):
@@ -228,35 +229,33 @@ class TestIntRangeExpr:
         # THEN
         assert str(full_range) == range_str
 
-    def test_sorting_with_descending_ranges(self):
+    def test_range_expr_from_empty_list(self):
+        with pytest.raises(ExpressionError):
+            IntRangeExpr.from_list([])
+
+    def test_sorting_merging_with_descending_ranges(self):
         # GIVEN
         first = IntRange(start=-10, end=-19, step=-1)
         second = IntRange(start=-1, end=-9, step=-1)
         third = IntRange(start=10, end=0, step=-1)
 
-        sorted_ranges = [first, second, third]
-
         # WHEN
         full_range = IntRangeExpr([second, third, first])
 
         # THEN
-        for actual, expected in zip_longest(full_range.ranges, sorted_ranges):
-            assert actual == expected
+        assert full_range.ranges == [IntRange(-19, 10, 1)]
 
-    def test_sorting_mixed_ascending_and_descending_ranges(self):
+    def test_sorting_merging_mixed_ascending_and_descending_ranges(self):
         # GIVEN
         first = IntRange(start=-9, end=-7, step=1)
         second = IntRange(start=1, end=-6, step=-1)
         third = IntRange(start=2, end=9, step=1)
 
-        sorted_ranges = [first, second, third]
-
         # WHEN
         full_range = IntRangeExpr([second, first, third])
 
         # THEN
-        for actual, expected in zip_longest(full_range.ranges, sorted_ranges):
-            assert actual == expected
+        assert full_range.ranges == [IntRange(-9, 9, 1)]
 
     @pytest.mark.parametrize(
         "index",
@@ -351,24 +350,20 @@ class TestIntRangeExpr:
         with pytest.raises(AttributeError):
             full_range.ranges = []  # type: ignore
 
+    def test_contains(self) -> None:
+        assert 0 in IntRangeExpr.from_str("0-10")
+        assert 10 in IntRangeExpr.from_str("0-10")
+        assert -1 not in IntRangeExpr.from_str("0-10")
+        assert 11 not in IntRangeExpr.from_str("0-10")
+        assert "X" not in IntRangeExpr.from_str("0-10")
+
+        assert -1 in IntRangeExpr.from_str("-1--2:-1")
+        assert -2 in IntRangeExpr.from_str("-1--2:-1")
+        assert -3 not in IntRangeExpr.from_str("-1--2:-1")
+        assert 0 not in IntRangeExpr.from_str("-1--2:-1")
+
 
 class TestIntRange:
-    def test_comparisons(self):
-        # GIVEN / WHEN / THEN
-        # start, end, and step are the same, therefore equal and not less/greater than
-        assert IntRange(start=0, end=0, step=1) == IntRange(start=0, end=0)
-        assert not IntRange(start=0, end=0) < IntRange(start=0, end=0)
-        assert not IntRange(start=0, end=0) > IntRange(start=0, end=0)
-
-        # start is different
-        assert IntRange(start=0, end=1) < IntRange(start=1, end=1)
-
-        # start is the same, other end is bigger
-        assert IntRange(start=0, end=0) < IntRange(start=0, end=1)
-
-        # start and end are same, other step is bigger
-        assert IntRange(start=0, end=0, step=1) < IntRange(start=0, end=0, step=2)
-
     def test_length(self):
         # GIVEN / WHEN / THEN
         # positive ascending

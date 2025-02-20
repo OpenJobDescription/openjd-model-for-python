@@ -43,7 +43,7 @@ def make_script(env_or_task: str, scriptname: str, scriptdata: str) -> dict:
     }
 
 
-class TestJobTemplate:
+class TestJobTemplateVars:
     @pytest.mark.parametrize(
         "data",
         (

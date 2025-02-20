@@ -10,21 +10,7 @@ __all__ = [
 ]
 
 
-class _BaseMessageError(Exception):
-    """A base class for exceptions that have an error message"""
-
-    msg: str
-    """The error message"""
-
-    def __init__(self, msg: str) -> None:
-        self.msg = msg
-        super(_BaseMessageError, self).__init__(msg)
-
-    def __str__(self) -> str:
-        return self.msg
-
-
-class UnsupportedSchema(_BaseMessageError):
+class UnsupportedSchema(ValueError):
     """Error raised when an attempt is made to decode a template with
     an unknown or otherwise nonvalid schema identification.
     """
@@ -36,28 +22,22 @@ class UnsupportedSchema(_BaseMessageError):
         super().__init__(f"Unsupported schema version: {self._version}")
 
 
-class DecodeValidationError(_BaseMessageError):
+class DecodeValidationError(ValueError):
     """Error raised when an decoding error is encountered while decoding
     a template.
     """
 
-    pass
 
-
-class ModelValidationError(_BaseMessageError):
+class ModelValidationError(ValueError):
     """Error raised when a validation error is encountered while validating
     a model.
     """
 
-    pass
 
-
-class ExpressionError(_BaseMessageError):
+class ExpressionError(ValueError):
     """Error raised when there is an error in the form of an expression that is being
     parsed.
     """
-
-    pass
 
 
 class TokenError(ExpressionError):
@@ -68,9 +48,7 @@ class TokenError(ExpressionError):
         super().__init__(msg)
 
 
-class CompatibilityError(_BaseMessageError):
+class CompatibilityError(ValueError):
     """Error raised when a check that two, or more, models are compatible determines that
     there are non-compatibilities between the models.
     """
-
-    pass

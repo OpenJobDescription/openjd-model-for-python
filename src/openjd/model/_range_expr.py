@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-from bisect import bisect
+from bisect import bisect, bisect_left
 from collections.abc import Iterator, Sized
-from functools import total_ordering
 from itertools import chain
-from typing import Tuple
+from typing import Any, Tuple
+
+from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import core_schema
 
 from ._errors import ExpressionError, TokenError
 from ._tokenstream import Token, TokenStream, TokenType
@@ -15,15 +18,17 @@ from ._tokenstream import Token, TokenStream, TokenType
 class IntRangeExpr(Sized):
     """An Int Range Expression is a set of integer values represented as a sorted list of IntRange objects."""
 
-    _start: int
-    _end: int
+    _starts: list[int]
+    _ends: list[int]
     _ranges: list[IntRange]
     _length: int
     _range_length_indicies: list[int]
 
     def __init__(self, ranges: list[IntRange]):
+        if len(ranges) <= 0:
+            raise ExpressionError("Range expression cannot be empty")
         # Sort the ranges, then combine them where possible
-        sorted_ranges = sorted(ranges)
+        sorted_ranges = sorted(ranges, key=lambda v: (v._start, v._end, v._step))
         self._ranges = [sorted_ranges[0]]
         for range in sorted_ranges[1:]:
             if (
@@ -33,8 +38,8 @@ class IntRangeExpr(Sized):
                 self._ranges[-1] = IntRange(self._ranges[-1].start, range.end, range.step)
             else:
                 self._ranges.append(range)
-        self._start = self.ranges[0].start
-        self._end = self.ranges[-1].end
+        self._starts = [v.start for v in self.ranges]
+        self._ends = [v.end for v in self.ranges]
 
         # used to binary search ranges for __getitem__
         # ie. [32, 100, 132]
@@ -95,7 +100,7 @@ class IntRangeExpr(Sized):
         return ",".join(str(range) for range in self.ranges)
 
     def __repr__(self) -> str:
-        return f"{type(self).__name__}({self.ranges})"
+        return f"{type(self).__name__}.from_str({str(self)})"
 
     def __iter__(self) -> Iterator[int]:
         return chain(*self.ranges)
@@ -120,15 +125,23 @@ class IntRangeExpr(Sized):
             actual_index = index - self._range_length_indicies[range_index - 1]
             return self.ranges[range_index][actual_index]
 
+    def __contains__(self, value: object) -> bool:
+        if not isinstance(value, int):
+            return False
+        range_index = bisect_left(self._ends, value)
+        if range_index >= len(self._ends):
+            return False
+        return value in self.ranges[range_index]._range
+
     @property
     def start(self) -> int:
         """The smallest value in the range expression."""
-        return self._start
+        return self._starts[0]
 
     @property
     def end(self) -> int:
         """The largest value in the range expression"""
-        return self._end
+        return self._ends[-1]
 
     @property
     def ranges(self) -> list[IntRange]:
@@ -137,10 +150,6 @@ class IntRangeExpr(Sized):
 
     def _validate(self) -> None:
         """raises: ValueError - if not valid"""
-
-        if len(self) <= 0:
-            raise ValueError("range expression cannot be empty")
-
         # Validate that the ranges are not overlapping
         prev_range: IntRange | None = None
         for range_ in self.ranges:
@@ -156,10 +165,34 @@ class IntRangeExpr(Sized):
                 )
             prev_range = range_
 
+    @classmethod
+    def _pydantic_validate(cls, value: Any) -> Any:
+        if isinstance(value, IntRangeExpr):
+            return value
+        elif isinstance(value, str):
+            return IntRangeExpr.from_str(value)
+        elif isinstance(value, list):
+            return IntRangeExpr.from_list(value)
+        else:
+            raise ValueError("Value must be an integer range expression or a list of integers.")
 
-@total_ordering
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: type[Any], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_plain_validator_function(cls._pydantic_validate)
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        return {"type": "string"}
+
+
 class IntRange(Sized):
-    """Inclusive on the start and end value"""
+    """A linear sequence of integers.
+
+    Both _start and _end are always included in the set of values, and _step is always positive."""
 
     _start: int
     _end: int
@@ -167,20 +200,23 @@ class IntRange(Sized):
     _range: range
 
     def __init__(self, start: int, end: int, step: int = 1):
-        self._start = start
-        self._end = end
-        self._step = step
-
-        # makes the range inclusive on end value
-        offset = 0
-        if self._step > 0:
-            offset = 1
-        elif self._step < 0:
-            offset = -1
-
-        self._range = range(self._start, self._end + offset, self._step)
-
-        self._validate()
+        if step > 0:
+            if start > end:
+                raise ValueError("Range: a descending range must have a negative step")
+            self._range = range(start, end + 1, step)
+            self._start = start
+            self._end = self._range[-1]
+            self._step = step
+        elif step < 0:
+            if start < end:
+                raise ValueError("Range: an ascending range must have a positive step")
+            # Reverse the range if the step is negative
+            self._range = range(start, end - 1, step)
+            self._start = self._range[-1]
+            self._end = start
+            self._step = -step
+        else:
+            raise ValueError("Range: step must not be zero")
 
     def __str__(self) -> str:
         len_self = len(self)
@@ -204,11 +240,6 @@ class IntRange(Sized):
             raise NotImplementedError
         return (self.start, self.end, self.step) == (other.start, other.end, other.step)
 
-    def __lt__(self, other: object) -> bool:
-        if not isinstance(other, IntRange):
-            raise NotImplementedError
-        return (self.start, self.end, self.step) < (other.start, other.end, other.step)
-
     def __iter__(self) -> Iterator[int]:
         return iter(self._range)
 
@@ -231,21 +262,6 @@ class IntRange(Sized):
     def step(self) -> int:
         """read-only property"""
         return self._step
-
-    def _validate(self) -> None:
-        """raises: ValueError - if not valid"""
-
-        if self._step == 0:
-            raise ValueError("Range: step must not be zero")
-
-        if self._start < self._end and self._step < 0:
-            raise ValueError("Range: an ascending range must have a positive step")
-
-        if self._start > self._end and self._step > 0:
-            raise ValueError("Range: a descending range must have a negative step")
-
-        if len(self) <= 0:
-            raise ValueError("Range: cannot be empty")
 
 
 class PosIntToken(Token):
