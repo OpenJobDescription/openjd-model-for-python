@@ -7,6 +7,7 @@ from collections.abc import Iterable, Iterator, Sized
 from dataclasses import dataclass, field
 from functools import reduce
 from operator import mul
+import re
 from typing import AbstractSet, Any, Optional, Union
 
 from ._internal import (
@@ -76,8 +77,21 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
     would be the order:
         (A=3,B=1,C=10), (A=3,B=2,C=11), (A=2,B=1,C=10), (A=2,B=2,C=11), (A=1,B=1,C=10), (A=1,B=2,C=11)
 
+    Args:
+        space (Optional[StepParameterSpace]): The parameter space to iterate over.
+        chunks_task_count_override (Optional[int]): If provided, turns off adaptive chunking
+            and overrides the default task count from the parameter space with the provided value.
+            For example, to iterate over all the individual tasks, set this value to 1.
+
     Attributes:
-        None
+        names (AbstractSet[str]): The set of all task parameter names.
+        chunks_adaptive (bool): If True, the iterator is configured for adaptive chunking. This means
+            the caller can modify the chunks_default_task_count property when it determines a different
+            chunk size is appropriate to better match the targetRuntimeSeconds of the CHUNK parameter.
+        chunks_default_task_count (Optional[int]): If chunking is disabled, is None. If chunking is
+            enabled, is the default chunk size to use for grouping tasks into chunks. If adaptive
+            chunking is enabled, the caller can modify this value and subsequent iteration will reflect
+            the new chunk size.
     """
 
     _parameters: dict[str, TaskParameter]
@@ -86,10 +100,17 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
     _parsedtree: CombinationExpressionNode
 
     _chunks_adaptive: bool
+    _chunks_parameter_name: Optional[str]
     _chunks_default_task_count: Optional[int]
 
-    def __init__(self, *, space: Optional[StepParameterSpace]):
+    def __init__(
+        self,
+        *,
+        space: Optional[StepParameterSpace],
+        chunks_task_count_override: Optional[int] = None,
+    ):
         self._chunks_adaptive = False
+        self._chunks_parameter_name = None
         self._chunks_default_task_count = None
 
         # Special case the zero-dimensional space with one element
@@ -117,8 +138,17 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
                         param.chunks.targetRuntimeSeconds is not None
                         and int(param.chunks.targetRuntimeSeconds) > 0
                     )
+                    self._chunks_parameter_name = name
                     self._chunks_default_task_count = int(param.chunks.defaultTaskCount)
                     break
+
+            # If the chunks task count is overridden, and the parameter space uses chunking
+            if (
+                chunks_task_count_override is not None
+                and self._chunks_default_task_count is not None
+            ):
+                self._chunks_adaptive = False
+                self._chunks_default_task_count = chunks_task_count_override
 
             # Raises: TokenError, ExpressionError
             self._parsetree = CombinationExpressionParser().parse(combination)
@@ -138,6 +168,11 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
     def chunks_adaptive(self) -> bool:
         """True if the parameter space includes a CHUNK[INT] parameter with a non-zero target runtime."""
         return self._chunks_adaptive
+
+    @property
+    def chunks_parameter_name(self) -> Optional[str]:
+        """The name of the CHUNK[INT] parameter, if any."""
+        return self._chunks_parameter_name
 
     @property
     def chunks_default_task_count(self) -> Optional[int]:
@@ -165,6 +200,7 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
         if not (isinstance(value, int) and value > 0):
             raise ValueError("chunks_default_task_count must be a positive integer.")
 
+        # The expr tree will raise if the parameter space does not use adaptive chunking
         self._expr_tree.set_chunks_default_task_count(value)
         self._chunks_default_task_count = value
 
@@ -202,6 +238,33 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
         """
         return self._expr_tree[index]
 
+    def __contains__(self, params: TaskParameterSet) -> bool:
+        """Check if a specific task parameter set is included in this parameter space.
+
+        In the case of chunking, the chunked dimension is treated via a subset operator
+        instead of whether it equals one of the values along the chunked dimension."""
+        try:
+            self.validate_containment(params)
+            return True
+        except ValueError:
+            return False
+
+    def validate_containment(self, params: TaskParameterSet):
+        """Check if a specific task parameter set is included in this parameter space,
+        raising a ValueError if it is not.
+
+        In the case of chunking, the chunked dimension is treated via a subset operator
+        instead of whether it equals one of the values along the chunked dimension."""
+        # The task parameter names must match
+        params_keys = sorted(params.keys())
+        space_keys = sorted(self._parameters.keys())
+        if params_keys != space_keys:
+            raise ValueError(
+                f"Task parameter names {params_keys} do not match the parameter space names {space_keys}."
+            )
+        # Check containment against the expr tree nodes
+        self._expr_tree.validate_containment(params)
+
     def _create_expr_tree(
         self,
         root: CombinationExpressionNode,
@@ -227,7 +290,7 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
                 if isinstance(parameter.range, list):
                     parameter_range: list[int] = [int(v) for v in parameter.range]
                 else:
-                    parameter_range = list[int](IntRangeExpr.from_str(parameter.range))
+                    parameter_range = list[int](parameter.range)
 
                 if chunks_adaptive:
                     if (
@@ -263,25 +326,28 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
 
                     # With the chunks determined, we can use the range list node for iteration
                     return RangeListIdentifierNode(
-                        name,
-                        ParameterValueType(parameter.type),
-                        chunk_list,
+                        name=name,
+                        type=ParameterValueType(parameter.type),
+                        range=chunk_list,
+                        range_set=set(parameter_range),
+                        range_constraint=parameter.chunks.rangeConstraint,
                     )
             elif isinstance(parameter.range, list):
                 return RangeListIdentifierNode(
-                    name,
-                    ParameterValueType(parameter.type),
-                    parameter.range,
+                    name=name,
+                    type=ParameterValueType(parameter.type),
+                    range=parameter.range,
+                    range_set=set(parameter.range),
                 )
             else:
                 return RangeExpressionIdentifierNode(
-                    name,
-                    ParameterValueType(parameter.type),
-                    parameter.range,
+                    name=name,
+                    type=ParameterValueType(parameter.type),
+                    range=parameter.range,
                 )
         elif isinstance(root, CombinationExpressionAssociationNode):
             return AssociationNode(
-                tuple(
+                children=tuple(
                     self._create_expr_tree(child, chunks_adaptive, chunks_default_task_count)
                     for child in root.children
                 ),
@@ -307,7 +373,7 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
                 children = root.children
 
             return ProductNode(
-                tuple(
+                children=tuple(
                     self._create_expr_tree(child, chunks_adaptive, chunks_default_task_count)
                     for child in children
                 ),
@@ -445,6 +511,10 @@ class Node(ABC, Sized):
             "The parameter space does not use adaptive chunking, so cannot modify chunks_default_task_count."
         )
 
+    def validate_containment(self, params: TaskParameterSet):
+        """Validates that the parameter space contains the provided parameters. Raises ValueError if not."""
+        raise NotImplementedError("Base class")  # pragma: no cover
+
 
 class ZeroDimSpaceIter(NodeIterator):
     """Iterator for a zero-dimensional space
@@ -486,6 +556,9 @@ class ZeroDimSpaceNode(Node):
 
     def iter(self) -> NodeIterator:
         return ZeroDimSpaceIter()
+
+    def validate_containment(self, params: TaskParameterSet):
+        pass
 
 
 class ProductNodeIter(NodeIterator):
@@ -541,7 +614,7 @@ class ProductNodeIter(NodeIterator):
             #    2  |  4  |  5
             #    2  |  4  |  6
             #
-            # To acheive, algorithmically, think about grade-school addition by
+            # To achieve, algorithmically, think about grade-school addition by
             # 1 with a carry.
             # We advance the right-most parameter by one. If that overflows (i.e.
             # hits the end of the iterator) then we reset its iterator and advance
@@ -616,6 +689,11 @@ class ProductNode(Node):
         # otherwise it will raise an exception.
         self.children[-1].set_chunks_default_task_count(value)
 
+    def validate_containment(self, params: TaskParameterSet):
+        """Checks if the params restricted to this node are part of the node's range."""
+        for child in self.children:
+            child.validate_containment(params)
+
 
 class AssociationNodeIter(NodeIterator):
     """Iterator for an AssociationNode
@@ -658,6 +736,33 @@ class AssociationNode(Node):
     def iter(self) -> AssociationNodeIter:
         return AssociationNodeIter(self.children)
 
+    def validate_containment(self, params: TaskParameterSet):
+        """Checks if the params restricted to this node are part of the node's range."""
+        # To keep this code simple, we perform a linear search over the full subspace.
+        # TODO: Make a more efficient implementation.
+        it = self.iter()
+        # Use the first iteration value to take a subset of the keys from params
+        first_value: TaskParameterSet = TaskParameterSet()
+        it.next(first_value)
+
+        # Restrict the params to the keys in this associative expression so that
+        # we can use equality checking in the linear search.
+        params = {key: value for key, value in params.items() if key in first_value}
+        if first_value == params:
+            return
+        # Perform the linear search
+        try:
+            while True:
+                value: TaskParameterSet = TaskParameterSet()
+                it.next(value)
+                if value == params:
+                    return
+        except StopIteration:
+            pass
+        raise ValueError(
+            f"The values { {name: param.value for name, param in params.items()} }, of an association expression in the combination expression, do not appear in the parameter space."
+        )
+
 
 class RangeListIdentifierNodeIterator(NodeIterator):
     """Iterator for a RangeListIdentifierNode
@@ -683,11 +788,16 @@ class RangeListIdentifierNodeIterator(NodeIterator):
         result[self._node.name] = ParameterValue(type=self._node.type, value=v)
 
 
+INTERVAL_RE = re.compile(r"\s*(-?[0-9]+)\s*-\s*(-?[0-9]+)\s*")
+
+
 @dataclass
 class RangeListIdentifierNode(Node):
     name: str
     type: ParameterValueType
     range: list[str]
+    range_set: set
+    range_constraint: Optional[TaskChunksRangeConstraint_2023_09] = None
     _len: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
@@ -698,6 +808,42 @@ class RangeListIdentifierNode(Node):
 
     def __getitem__(self, index: int) -> TaskParameterSet:
         return {self.name: ParameterValue(type=self.type, value=self.range[index])}
+
+    def validate_containment(self, params: TaskParameterSet):
+        """Checks if the params restricted to this node are part of the node's range."""
+        param = params[self.name]
+        if param.type != self.type:
+            raise ValueError(
+                f"Parameter {self.name} of type {param.type.value} does not match the parameter space type {self.type.name}."
+            )
+        if self.type == ParameterValueType.CHUNK_INT:
+            # The chunk must be an interval if the range constraint is CONTIGUOUS
+            if (
+                self.range_constraint == TaskChunksRangeConstraint_2023_09.CONTIGUOUS
+                and not INTERVAL_RE.match(param.value)
+            ):
+                raise ValueError(
+                    f"Parameter {self.name} of type {param.type.value} value {param.value} is not a contiguous interval like '1-5' as required by the chunk range constraint."
+                )
+            # The chunk must be a subset of the range
+            try:
+                range_expr = IntRangeExpr.from_str(param.value)
+            except ValueError:
+                # If the value is not a range expression
+                raise ValueError(
+                    f"Parameter {self.name} of type {param.type.value} value {param.value} is not a valid range expression like '1-5,10' as required by the chunk range constraint."
+                )
+            for v in range_expr:
+                if v not in self.range_set:
+                    raise ValueError(
+                        f"Parameter {self.name} of type {param.type.value} value {param.value} is not a subset of the range in the parameter space."
+                    )
+        else:
+            # The value must be an item in the range
+            if param.value not in self.range_set:
+                raise ValueError(
+                    f"Parameter {self.name} of type {param.type.value} value {param.value} is not in the parameter space range."
+                )
 
     def iter(self) -> RangeListIdentifierNodeIterator:
         return RangeListIdentifierNodeIterator(self)
@@ -719,7 +865,7 @@ class RangeExpressionIdentifierNodeIterator(NodeIterator):
         self.reset_iter()
 
     def reset_iter(self) -> None:
-        self._it = iter(self._node.range_expression)
+        self._it = iter(self._node.range)
 
     def next(self, result: TaskParameterSet) -> None:
         # Raises: StopIteration
@@ -731,22 +877,39 @@ class RangeExpressionIdentifierNodeIterator(NodeIterator):
 class RangeExpressionIdentifierNode(Node):
     name: str
     type: ParameterValueType
-    range: str
-    range_expression: IntRangeExpr = field(init=False, repr=False, compare=False)
+    range: IntRangeExpr
+    range_constraint: Optional[TaskChunksRangeConstraint_2023_09] = None
     _len: int = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        self.range_expression = IntRangeExpr.from_str(self.range)
-        self._len = len(self.range_expression)
+        self._len = len(self.range)
 
     def __len__(self) -> int:
         return self._len
 
     def __getitem__(self, index: int) -> TaskParameterSet:
-        return {self.name: ParameterValue(type=self.type, value=str(self.range_expression[index]))}
+        return {self.name: ParameterValue(type=self.type, value=str(self.range[index]))}
 
     def iter(self) -> RangeExpressionIdentifierNodeIterator:
         return RangeExpressionIdentifierNodeIterator(self)
+
+    def validate_containment(self, params: TaskParameterSet):
+        """Checks if the params restricted to this node are part of the node's range."""
+        param = params[self.name]
+        if param.type != self.type:
+            raise ValueError(
+                f"Parameter {self.name} of type {param.type.value} does not match the parameter space type {self.type.name}."
+            )
+        # The value must be an item in the range
+        try:
+            if int(param.value) not in self.range:
+                raise ValueError(
+                    f"Parameter {self.name} of type {param.type.value} value {param.value} is not in the parameter space range."
+                )
+        except ValueError:
+            raise ValueError(
+                f"Parameter {self.name} of type {param.type.value} value {param.value} is not in the parameter space range."
+            )
 
 
 class AdaptiveContiguousChunkIdentifierNodeIterator(NodeIterator):
@@ -796,8 +959,12 @@ class AdaptiveContiguousChunkIdentifierNode(Node):
     name: str
     type: ParameterValueType
     range: list[int]
+    _range_set: set[int] = field(init=False, repr=False, compare=False)
     chunks_default_task_count: int
     """This value can be modified by the caller to adapt the chunk size."""
+
+    def __post_init__(self):
+        self._range_set = set(self.range)
 
     def __len__(self) -> int:
         raise ValueError(
@@ -814,6 +981,25 @@ class AdaptiveContiguousChunkIdentifierNode(Node):
 
     def set_chunks_default_task_count(self, value: int) -> None:
         self.chunks_default_task_count = value
+
+    def validate_containment(self, params: TaskParameterSet):
+        """Checks if the params restricted to this node are part of the node's range."""
+        param = params[self.name]
+        if param.type != self.type:
+            raise ValueError(
+                f"Parameter {self.name} of type {param.type.value} does not match the parameter space type {self.type.name}."
+            )
+        # The chunk must be an interval if the range constraint is CONTIGUOUS
+        if not INTERVAL_RE.match(param.value):
+            raise ValueError(
+                f"Parameter {self.name} of type {param.type.value} value {param.value} is not a contiguous interval like '1-5' as required by the chunk range constraint."
+            )
+        # The chunk must be a subset of the range
+        for v in IntRangeExpr.from_str(param.value):
+            if v not in self._range_set:
+                raise ValueError(
+                    f"Parameter {self.name} of type {param.type.value} value {param.value} is not in the parameter space range."
+                )
 
 
 class AdaptiveNoncontiguousChunkIdentifierNodeIterator(NodeIterator):
@@ -854,8 +1040,13 @@ class AdaptiveNoncontiguousChunkIdentifierNode(Node):
     name: str
     type: ParameterValueType
     range: list[int]
+    _range_set: set[int] = field(init=False, repr=False, compare=False)
     chunks_default_task_count: int
     """This value can be modified by the caller to adapt the chunk size."""
+
+    def __post_init__(self):
+        self._range_set = set(self.range)
+        self._len = len(self.range)
 
     def __len__(self) -> int:
         raise ValueError(
@@ -872,3 +1063,23 @@ class AdaptiveNoncontiguousChunkIdentifierNode(Node):
 
     def set_chunks_default_task_count(self, value: int) -> None:
         self.chunks_default_task_count = value
+
+    def validate_containment(self, params: TaskParameterSet):
+        """Checks if the params restricted to this node are part of the node's range."""
+        param = params[self.name]
+        if param.type != self.type:
+            raise ValueError(
+                f"Parameter {self.name} of type {param.type.value} does not match the parameter space type {self.type.name}."
+            )
+        # The chunk must be a subset of the range
+        try:
+            for v in IntRangeExpr.from_str(param.value):
+                if v not in self._range_set:
+                    raise ValueError(
+                        f"Parameter {self.name} of type {param.type.value} value {param.value} is not in the parameter space range."
+                    )
+        except ValueError:
+            # If the value is not a range expression
+            raise ValueError(
+                f"Parameter {self.name} of type {param.type.value} value {param.value} is not a valid range expression like '1-5,10' as required by the chunk range constraint."
+            )

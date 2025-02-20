@@ -34,8 +34,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=1, rangeConstraint=TaskChunksRangeConstraint_2023_09.CONTIGUOUS
             ),
         ),
-        ["1-1", "2-2"],
+        ["1-1", "2-2"],  # [v for v in it]
         False,
+        ["1-2"],  # "v in it" returns True
+        ["1", "2", "0-1"],  # "v in it" returns False
         id="contig chunks, chunksize 1, range is short list",
     ),
     pytest.param(
@@ -46,8 +48,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=2, rangeConstraint=TaskChunksRangeConstraint_2023_09.CONTIGUOUS
             ),
         ),
-        ["1-2"],
+        ["1-2"],  # [v for v in it]
         False,
+        ["1-1", "2-2"],  # "v in it" returns True
+        ["1", "2", "0-1"],  # "v in it" returns False
         id="contig chunks, chunksize 2, range is short list",
     ),
     pytest.param(
@@ -58,8 +62,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=1, rangeConstraint=TaskChunksRangeConstraint_2023_09.CONTIGUOUS
             ),
         ),
-        ["1-1", "2-2"],
+        ["1-1", "2-2"],  # [v for v in it]
         False,
+        ["1-2"],  # "v in it" returns True
+        ["1", "2", "0-1", "3-"],  # "v in it" returns False
         id="contig chunks, chunksize 1, range is short range expr",
     ),
     pytest.param(
@@ -70,8 +76,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=2, rangeConstraint=TaskChunksRangeConstraint_2023_09.CONTIGUOUS
             ),
         ),
-        ["1-2"],
+        ["1-2"],  # [v for v in it]
         False,
+        ["1-1", "2-2"],  # "v in it" returns True
+        ["1", "2", "0-1"],  # "v in it" returns False
         id="contig chunks, chunksize 2, range is short range expr",
     ),
     pytest.param(
@@ -82,8 +90,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=1, rangeConstraint=TaskChunksRangeConstraint_2023_09.NONCONTIGUOUS
             ),
         ),
-        ["1", "2"],
+        ["1", "2"],  # [v for v in it]
         False,
+        ["1-1", "2-2", "1-2", "1-2:1"],  # "v in it" returns True
+        ["0", "0-1"],  # "v in it" returns False
         id="noncontig chunks, chunksize 1, range is short list",
     ),
     pytest.param(
@@ -94,8 +104,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=2, rangeConstraint=TaskChunksRangeConstraint_2023_09.NONCONTIGUOUS
             ),
         ),
-        ["1,2"],
+        ["1,2"],  # [v for v in it]
         False,
+        ["1-1", "2-2", "1-2", "1-2:1"],  # "v in it" returns True
+        ["0", "0-1"],  # "v in it" returns False
         id="noncontig chunks, chunksize 2, range is short list",
     ),
     pytest.param(
@@ -106,8 +118,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=1, rangeConstraint=TaskChunksRangeConstraint_2023_09.NONCONTIGUOUS
             ),
         ),
-        ["1", "2"],
+        ["1", "2"],  # [v for v in it]
         False,
+        ["1-1", "2-2", "1-2", "1-2:1"],  # "v in it" returns True
+        ["0", "0-1"],  # "v in it" returns False
         id="noncontig chunks, chunksize 1, range is short range expr",
     ),
     pytest.param(
@@ -118,8 +132,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=2, rangeConstraint=TaskChunksRangeConstraint_2023_09.NONCONTIGUOUS
             ),
         ),
-        ["1,2"],
+        ["1,2"],  # [v for v in it]
         False,
+        ["1-1", "2-2", "1-2", "1-2:1"],  # "v in it" returns True
+        ["0", "0-1"],  # "v in it" returns False
         id="noncontig chunks, chunksize 2, range is short range expr",
     ),
     pytest.param(
@@ -130,8 +146,10 @@ PARAMETRIZE_CASES: tuple = (
                 defaultTaskCount=100, rangeConstraint=TaskChunksRangeConstraint_2023_09.CONTIGUOUS
             ),
         ),
-        ["1-1", "3-3", "5-5"],
+        ["1-1", "3-3", "5-5"],  # [v for v in it]
         False,
+        [],  # "v in it" returns True
+        ["0", "0-1", "2-2", "1-2", "1-2:1"],  # "v in it" returns False
         id="contig chunks, chunksize 100, range is noncontig",
     ),
     pytest.param(
@@ -143,8 +161,10 @@ PARAMETRIZE_CASES: tuple = (
                 rangeConstraint=TaskChunksRangeConstraint_2023_09.NONCONTIGUOUS,
             ),
         ),
-        ["1-5:2"],
+        ["1-5:2"],  # [v for v in it]
         False,
+        ["1", "3", "5", "1-1", "3-3", "5-5", "1,3", "1-3:2", "1,3,5"],  # "v in it" returns True
+        ["1-3", "1-5", "0", "2", "4", "6", "X", "--3"],  # "v in it" returns False
         id="noncontig chunks, chunksize 100, range is noncontig",
     ),
     pytest.param(
@@ -156,8 +176,10 @@ PARAMETRIZE_CASES: tuple = (
             ),
         ),
         # Non-adaptive spreads out the chunks evenly
-        ["1-9", "10-18", "19-27", "28-35"],
+        ["1-9", "10-18", "19-27", "28-35"],  # [v for v in it]
         False,
+        ["1-35", "1-1", "35-35"],  # "v in it" returns True
+        ["0-0", "1", "35", "36-36", "0-35", "1-36"],  # "v in it" returns False
         id="contig chunks, chunksize 10, range 1-35, non-adaptive",
     ),
     pytest.param(
@@ -171,8 +193,10 @@ PARAMETRIZE_CASES: tuple = (
             ),
         ),
         # Adaptive makes chunks as big as possible, so the last chunk ends up smaller
-        ["1-10", "11-20", "21-30", "31-35"],
+        ["1-10", "11-20", "21-30", "31-35"],  # [v for v in it]
         True,
+        ["1-35", "1", "1-1", "35", "35-35"],  # "v in it" returns True
+        ["0", "0-0", "36", "36-36", "0-35", "1-36", "12-"],  # "v in it" returns False
         id="noncontig chunks, chunksize 10, range 1-35, adaptive",
     ),
     pytest.param(
@@ -184,8 +208,19 @@ PARAMETRIZE_CASES: tuple = (
             ),
         ),
         # Non-adaptive spreads out the chunks evenly
-        ["-20--17", "-16--13", "-12--9", "-8--5"],
+        ["-20--17", "-16--13", "-12--9", "-8--5"],  # [v for v in it]
         False,
+        ["-20--5", "-20--10"],  # "v in it" returns True
+        [
+            "-21",
+            "-20--4",
+            "-",
+            "",
+            "-19",
+            "-5",
+            "-20,-19,-18,-15",
+            "-20--25:-3",
+        ],  # "v in it" returns False
         id="contig chunks, chunksize 5, negative frames, non-adaptive",
     ),
     pytest.param(
@@ -199,8 +234,20 @@ PARAMETRIZE_CASES: tuple = (
             ),
         ),
         # Adaptive makes chunks as big as possible, so the last chunk ends up smaller
-        ["-20--16", "-15--11", "-10--6", "-5--5"],
+        ["-20--16", "-15--11", "-10--6", "-5--5"],  # [v for v in it]
         True,
+        ["-20--5", "-20--10"],  # "v in it" returns True
+        [
+            "-21",
+            "-20--4",
+            "-",
+            "",
+            "-19",
+            "-5",
+            "-20,-19,-18,-15",
+            "-20--25:-3",
+            "--13",
+        ],  # "v in it" returns False
         id="contig chunks, chunksize 5, negative frames, adaptive",
     ),
     pytest.param(
@@ -214,15 +261,22 @@ PARAMETRIZE_CASES: tuple = (
             ),
         ),
         # Adaptive makes chunks as big as possible, so the last chunk ends up smaller
-        ["-20--16", "-15--11", "-10--6", "-5"],
+        ["-20--16", "-15--11", "-10--6", "-5"],  # [v for v in it]
         True,
+        ["-20--5", "-20", "-19", "-5", "-20,-19,-18,-15", "-6--18:-3"],  # "v in it" returns True
+        ["-21", "-20--4", "-", "", "-20--25:-3"],  # "v in it" returns False
         id="noncontig chunks, chunksize 5, negative frames, adaptive",
     ),
 )
 
 
-@pytest.mark.parametrize("range_int_param,expected,chunks_adaptive", PARAMETRIZE_CASES)
-def test_single_param_chunked_iteration(range_int_param, expected, chunks_adaptive):
+@pytest.mark.parametrize(
+    "range_int_param,expected,chunks_adaptive,expected_contains,expected_not_contains",
+    PARAMETRIZE_CASES,
+)
+def test_single_param_chunked_iteration(
+    range_int_param, expected, chunks_adaptive, expected_contains, expected_not_contains
+):
     # GIVEN
     space = StepParameterSpace_2023_09(
         taskParameterDefinitions={
@@ -245,6 +299,13 @@ def test_single_param_chunked_iteration(range_int_param, expected, chunks_adapti
     assert [v for v in it] == [
         {"Param1": ParameterValue(type=ParameterValueType.CHUNK_INT, value=v)} for v in expected
     ]
+    # Check that __contains__ is True/False for all provided cases
+    for v in expected:
+        assert {"Param1": ParameterValue(type=ParameterValueType.CHUNK_INT, value=v)} in it
+    for v in expected_contains:
+        assert {"Param1": ParameterValue(type=ParameterValueType.CHUNK_INT, value=v)} in it
+    for v in expected_not_contains:
+        assert {"Param1": ParameterValue(type=ParameterValueType.CHUNK_INT, value=v)} not in it
     # Check that the length and indexing work as expected
     it.reset_iter()
     if chunks_adaptive:
@@ -264,6 +325,8 @@ def test_single_param_chunked_iteration(range_int_param, expected, chunks_adapti
         with pytest.raises(ValueError):
             it.chunks_default_task_count = 1
 
+    assert it.chunks_parameter_name == "Param1"
+
 
 PARAMETRIZE_CASES = (
     pytest.param(
@@ -280,9 +343,33 @@ PARAMETRIZE_CASES = (
                 range=["A", "B"],
             ),
         },
-        [("1-1", "A"), ("1-1", "B"), ("2-2", "A"), ("2-2", "B")],
-        False,
+        [("1-1", "A"), ("1-1", "B"), ("2-2", "A"), ("2-2", "B")],  # [v for v in it]
+        False,  # chunks_adaptive
+        None,  # override_chunk_size
+        [("1-2", "A"), ("1-2", "B")],  # "v in it" returns True
+        [("1", "A"), ("2", "A"), ("1", "B"), ("2", "B"), ("1-1", "C")],  # "v in it" returns False
         id="2 dim, chunked outer, chunksize 1, non-adaptive",
+    ),
+    pytest.param(
+        {
+            "Param1": RangeListTaskParameterDefinition_2023_09(
+                type=ParameterValueType.CHUNK_INT,
+                range=["1", "2"],
+                chunks=TaskChunksDefinition_2023_09(
+                    defaultTaskCount=1, rangeConstraint=TaskChunksRangeConstraint_2023_09.CONTIGUOUS
+                ),
+            ),
+            "Param2": RangeListTaskParameterDefinition_2023_09(
+                type=ParameterValueType.STRING,
+                range=["A", "B"],
+            ),
+        },
+        [("1-2", "A"), ("1-2", "B")],  # [v for v in it]
+        False,  # chunks_adaptive
+        5,  # override_chunk_size
+        [("1-1", "A"), ("2-2", "A"), ("1-1", "B"), ("2-2", "B")],  # "v in it" returns True
+        [("1", "A"), ("2", "A"), ("1", "B"), ("2", "B"), ("1-1", "AB")],  # "v in it" returns False
+        id="2 dim, chunked outer, chunksize 1, non-adaptive, override chunksize 5",
     ),
     pytest.param(
         {
@@ -298,9 +385,33 @@ PARAMETRIZE_CASES = (
                 range=["A", "B"],
             ),
         },
-        [("1-2", "A"), ("1-2", "B")],
-        False,
+        [("1-2", "A"), ("1-2", "B")],  # [v for v in it]
+        False,  # chunks_adaptive
+        None,  # override_chunk_size
+        [("1-1", "A"), ("2-2", "A"), ("1-1", "B"), ("2-2", "B")],  # "v in it" returns True
+        [("1", "A"), ("2", "A"), ("1", "B"), ("2", "B"), ("1-1", "AB")],  # "v in it" returns False
         id="2 dim, chunked outer, chunksize 2, non-adaptive",
+    ),
+    pytest.param(
+        {
+            "Param1": RangeListTaskParameterDefinition_2023_09(
+                type=ParameterValueType.CHUNK_INT,
+                range=["1", "2"],
+                chunks=TaskChunksDefinition_2023_09(
+                    defaultTaskCount=2, rangeConstraint=TaskChunksRangeConstraint_2023_09.CONTIGUOUS
+                ),
+            ),
+            "Param2": RangeListTaskParameterDefinition_2023_09(
+                type=ParameterValueType.STRING,
+                range=["A", "B"],
+            ),
+        },
+        [("1-1", "A"), ("1-1", "B"), ("2-2", "A"), ("2-2", "B")],  # [v for v in it]
+        False,  # chunks_adaptive
+        1,  # override_chunk_size
+        [("1-2", "A"), ("1-2", "B")],  # "v in it" returns True
+        [("1", "A"), ("2", "A"), ("1", "B"), ("2", "B"), ("1-1", "C")],  # "v in it" returns False
+        id="2 dim, chunked outer, chunksize 2, non-adaptive, override chunksize 1",
     ),
     pytest.param(
         {
@@ -320,8 +431,11 @@ PARAMETRIZE_CASES = (
         },
         # The order is different from the equivalent non-adaptive, because the chunked dimension
         # is moved to the inside
-        [("1-1", "A"), ("2-2", "A"), ("1-1", "B"), ("2-2", "B")],
-        True,
+        [("1-1", "A"), ("2-2", "A"), ("1-1", "B"), ("2-2", "B")],  # [v for v in it]
+        True,  # chunks_adaptive
+        None,  # override_chunk_size
+        [("1-2", "A"), ("1-2", "B")],  # "v in it" returns True
+        [("1", "A"), ("2", "A"), ("1", "B"), ("2", "B"), ("0-0", "A")],  # "v in it" returns False
         id="2 dim, chunked outer, chunksize 1, adaptive",
     ),
     pytest.param(
@@ -340,40 +454,79 @@ PARAMETRIZE_CASES = (
                 range=["A", "B"],
             ),
         },
-        [("1-2", "A"), ("1-2", "B")],
-        True,
+        [("1-2", "A"), ("1-2", "B")],  # [v for v in it]
+        True,  # chunks_adaptive
+        None,  # override_chunk_size
+        [("1-1", "A"), ("2-2", "A"), ("1-1", "B"), ("2-2", "B")],  # "v in it" returns True
+        [("1", "A"), ("2", "A"), ("1", "B"), ("2", "B"), ("3-3", "B")],  # "v in it" returns False
         id="2 dim, chunked outer, chunksize 2, adaptive",
+    ),
+    pytest.param(
+        {
+            "Param1": RangeListTaskParameterDefinition_2023_09(
+                type=ParameterValueType.CHUNK_INT,
+                range=["1", "2"],
+                chunks=TaskChunksDefinition_2023_09(
+                    defaultTaskCount=2,
+                    targetRuntimeSeconds=20,
+                    rangeConstraint=TaskChunksRangeConstraint_2023_09.NONCONTIGUOUS,
+                ),
+            ),
+            "Param2": RangeListTaskParameterDefinition_2023_09(
+                type=ParameterValueType.STRING,
+                range=["A", "B"],
+            ),
+        },
+        [("1", "A"), ("1", "B"), ("2", "A"), ("2", "B")],  # [v for v in it]
+        False,  # chunks_adaptive
+        1,  # override_chunk_size
+        [("1-1", "A"), ("2-2", "A"), ("1-1", "B"), ("2-2", "B")],  # "v in it" returns True
+        [("1", "C"), ("3-3", "B")],  # "v in it" returns False
+        id="2 dim, chunked outer, chunksize 2, adaptive, noncontig, override chunksize 1 (turns off adaptive)",
     ),
 )
 
 
-@pytest.mark.parametrize("param_defs,expected,chunks_adaptive", PARAMETRIZE_CASES)
-def test_multi_param_chunked_iteration(param_defs: dict[str, Any], expected, chunks_adaptive):
+@pytest.mark.parametrize(
+    "param_defs,expected,chunks_adaptive,override_chunk_size,expected_contains,expected_not_contains",
+    PARAMETRIZE_CASES,
+)
+def test_multi_param_chunked_iteration(
+    param_defs: dict[str, Any],
+    expected,
+    chunks_adaptive,
+    override_chunk_size,
+    expected_contains,
+    expected_not_contains,
+):
     # GIVEN
     space = StepParameterSpace_2023_09(taskParameterDefinitions=param_defs)
 
     # WHEN
-    it = StepParameterSpaceIterator(space=space)
+    it = StepParameterSpaceIterator(space=space, chunks_task_count_override=override_chunk_size)
 
     # THEN
+    def element(tup):
+        return {
+            n: ParameterValue(type=ParameterValueType(param.type), value=v)
+            for (n, param), v in zip(param_defs.items(), tup)
+        }
+
+    expected_values = [element(tup) for tup in expected]
     assert it.chunks_adaptive == chunks_adaptive
     # Check that full iteration over the range gives the expected result
-    assert [v for v in it] == [
-        {
-            n: ParameterValue(type=ParameterValueType(param.type), value=v)
-            for (n, param), v in zip(param_defs.items(), item)
-        }
-        for item in expected
-    ]
+    assert [v for v in it] == expected_values
     # Check that resetting the iterator and re-iterating produces the same again
     it.reset_iter()
-    assert [v for v in it] == [
-        {
-            n: ParameterValue(type=ParameterValueType(param.type), value=v)
-            for (n, param), v in zip(param_defs.items(), item)
-        }
-        for item in expected
-    ]
+    assert [v for v in it] == expected_values
+    # Check that __contains__ is True/False for all provided cases
+    for value in expected_values:
+        assert value in it
+    for tup in expected_contains:
+        assert element(tup) in it
+    for tup in expected_not_contains:
+        assert element(tup) not in it
+    assert it.chunks_parameter_name == "Param1"
 
 
 def test_adaptive_contiguous_chunked_iteration():
@@ -422,6 +575,8 @@ def test_adaptive_contiguous_chunked_iteration():
     with pytest.raises(StopIteration):
         next(it)
 
+    assert it.chunks_parameter_name == "P1"
+
 
 def test_adaptive_noncontiguous_chunked_iteration():
     # GIVEN
@@ -465,6 +620,8 @@ def test_adaptive_noncontiguous_chunked_iteration():
 
     with pytest.raises(StopIteration):
         next(it)
+
+    assert it.chunks_parameter_name == "P1"
 
 
 def test_divide_chunk_sizes():

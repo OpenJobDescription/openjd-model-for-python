@@ -518,7 +518,6 @@ StringRangeList = Annotated[list[TaskParameterStringValue], Field(min_length=1, 
 TaskParameterStringValueAsJob = Annotated[str, StringConstraints(min_length=0, max_length=1024)]
 
 TaskRangeList = list[TaskParameterStringValueAsJob]
-TaskRangeExpression = RangeString
 
 
 # Target model for task parameters when instantiating a job.
@@ -545,21 +544,9 @@ class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
 class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
     # element type of items in the range
     type: TaskParameterType
-    range: TaskRangeExpression
+    range: IntRangeExpr
     # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
     chunks: Optional[TaskChunksDefinition] = None
-
-    @field_validator("range")
-    @classmethod
-    def _validate_range_expression(cls, value: Any) -> Any:
-        """At this point, the format expressions have been resolved
-        and we can determine if it's a valid RangeExpression"""
-        try:
-            IntRangeExpr.from_str(value)
-        except Exception as e:
-            raise ValueError(str(e))
-
-        return value
 
 
 class TaskChunksRangeConstraint(str, Enum):
@@ -874,14 +861,7 @@ class StepParameterSpace(OpenJDModel_v2023_09):
         param_defs = cast(
             dict[Identifier, TaskRangeParameter], info.data["taskParameterDefinitions"]
         )
-        parameter_range_lengths = {
-            id: (
-                len(param.range)
-                if isinstance(param.range, list)
-                else len(IntRangeExpr.from_str(param.range))
-            )
-            for id, param in param_defs.items()
-        }
+        parameter_range_lengths = {id: len(param.range) for id, param in param_defs.items()}
         try:
             validate_step_parameter_space_dimensions(parameter_range_lengths, v)
         except ExpressionError as e:
