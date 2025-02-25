@@ -1,3 +1,15 @@
+## 0.6.0 (2025-02-25)
+
+### BREAKING CHANGES
+
+* This release includes a few small changes to the public contract of `IntRangeExpr` and the `StepParameterSpaceIterator`. Review the changes to see if this affects your usage ([`9253018`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/925301888ea997a7f4a0d4aae6638ed49b12a800)).
+* Model classes migrated from Pydantic V1 to Pydantic V2, which is not backwards compatible. If you depend on Pydantic V1 APIs, consult this [guide](https://docs.pydantic.dev/latest/migration/) to migrate usage to Pydantic V2.([`0753a1b`](https://github.com/OpenJobDescription/openjd-model-for-python/pull/164/commits/0753a1bfe2ee2306f12af8b914a61116c81c5d4d)). 
+ 
+### Features
+* Implement step parameter space iteration for chunks ([`9253018`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/925301888ea997a7f4a0d4aae6638ed49b12a800))
+* Implement the task chunking RFC 0001 ([`c51683e`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/c51683e5196af68e691a5847c4c55f10490282ad))
+* Implement the extensions RFC 0002 ([`cd0e289`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/cd0e2892174b0fbff46e0c7a220f6a3815a973e6))
+
 ## 0.5.1 (2024-11-08)
 
 
