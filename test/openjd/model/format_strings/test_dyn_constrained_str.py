@@ -6,6 +6,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from openjd.model._format_strings._dyn_constrained_str import DynamicConstrainedStr
+from openjd.model.v2023_09 import ModelParsingContext as ModelParsingContext_v2023_09
 
 
 class TestDyanamicConstrainedStr:
@@ -18,7 +19,7 @@ class TestDyanamicConstrainedStr:
             s: DynamicConstrainedStr
 
         # WHEN
-        Model.model_validate({"s": "123"})
+        Model.model_validate({"s": "123"}, context=ModelParsingContext_v2023_09())
 
         # THEN
         # raised no error
@@ -31,7 +32,7 @@ class TestDyanamicConstrainedStr:
         class Model(BaseModel):
             s: DynamicConstrainedStr
 
-        model = Model(s="12")
+        model = Model.model_validate({"s": "12"}, context=ModelParsingContext_v2023_09())
 
         # WHEN
         as_dict = model.model_dump()
@@ -48,7 +49,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.model_validate({"s": 123})
+            Model.model_validate({"s": 123}, context=ModelParsingContext_v2023_09())
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -64,7 +65,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.model_validate({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10}, context=ModelParsingContext_v2023_09())
 
         # THEN
         # raised no error
@@ -81,7 +82,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.model_validate({"s": "0" * 9})
+            Model.model_validate({"s": "0" * 9}, context=ModelParsingContext_v2023_09())
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -97,7 +98,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.model_validate({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10}, context=ModelParsingContext_v2023_09())
 
         # THEN
         # raised no error
@@ -114,7 +115,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.model_validate({"s": "0" * 11})
+            Model.model_validate({"s": "0" * 11}, context=ModelParsingContext_v2023_09())
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -130,7 +131,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.model_validate({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10}, context=ModelParsingContext_v2023_09())
 
         # THEN
         # no errors raised
@@ -147,7 +148,7 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.model_validate({"s": "1" * 10})
+            Model.model_validate({"s": "1" * 10}, context=ModelParsingContext_v2023_09())
 
         # THEN
         assert len(excinfo.value.errors()) == 1
@@ -163,7 +164,7 @@ class TestDyanamicConstrainedStr:
             s: StrType
 
         # WHEN
-        Model.model_validate({"s": "0" * 10})
+        Model.model_validate({"s": "0" * 10}, context=ModelParsingContext_v2023_09())
 
         # THEN
         # no errors raised
@@ -180,7 +181,39 @@ class TestDyanamicConstrainedStr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            Model.model_validate({"s": "1" * 10})
+            Model.model_validate({"s": "1" * 10}, context=ModelParsingContext_v2023_09())
 
         # THEN
         assert len(excinfo.value.errors()) == 1
+
+    def test_get_json_schema(self) -> None:
+        # GIVEN
+        class StrType(DynamicConstrainedStr):
+            _min_length = 10
+            _regex = re.compile(r"0+")
+
+            @classmethod
+            def _max_length(cls):
+                return 20
+
+        class Model(BaseModel):
+            s: StrType
+
+        # WHEN
+        schema = Model.model_json_schema()
+
+        # THEN
+        assert schema == {
+            "title": "Model",
+            "type": "object",
+            "properties": {
+                "s": {
+                    "title": "S",
+                    "type": "string",
+                    "minLength": 10,
+                    "maxLength": 20,
+                    "pattern": "0+",
+                }
+            },
+            "required": ["s"],
+        }

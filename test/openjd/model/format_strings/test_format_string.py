@@ -4,6 +4,7 @@ import pytest
 from typing import Union
 
 from openjd.model import SymbolTable
+from openjd.model.v2023_09 import ModelParsingContext as ModelParsingContext_v2023_09
 from openjd.model._format_strings import FormatString, FormatStringError
 
 
@@ -12,7 +13,7 @@ def test_original_value():
     input = "input"
 
     # WHEN
-    format_string = FormatString(input)
+    format_string = FormatString(input, context=ModelParsingContext_v2023_09())
 
     # THEN
     assert format_string.original_value == input
@@ -23,7 +24,7 @@ def test_expression_property():
     input = "a{{ Test.val }}"
 
     # WHEN
-    format_string = FormatString(input)
+    format_string = FormatString(input, context=ModelParsingContext_v2023_09())
 
     # THEN
     assert len(format_string.expressions) == 1
@@ -49,7 +50,7 @@ def test_expression_property():
 def test_nonvalid_strings(input):
     # THEN
     with pytest.raises(FormatStringError, match="Failed to parse interpolation expression"):
-        FormatString(input)
+        FormatString(input, context=ModelParsingContext_v2023_09())
 
 
 class TestFormatStringResolve:
@@ -59,7 +60,7 @@ class TestFormatStringResolve:
         symtab = SymbolTable()
 
         # WHEN
-        format_string = FormatString(input)
+        format_string = FormatString(input, context=ModelParsingContext_v2023_09())
 
         # THEN
         assert format_string.resolve(symtab=symtab) == input
@@ -77,7 +78,7 @@ class TestFormatStringResolve:
         symtab = SymbolTable()
 
         # WHEN
-        format_string = FormatString(input)
+        format_string = FormatString(input, context=ModelParsingContext_v2023_09())
         symtab["Test.val"] = 4
 
         # THEN
@@ -100,7 +101,7 @@ class TestFormatStringResolve:
         symtab = SymbolTable()
 
         # WHEN
-        format_string = FormatString(input)
+        format_string = FormatString(input, context=ModelParsingContext_v2023_09())
         symtab["Test.val"] = val
         symtab["Test.end"] = end
 
@@ -113,7 +114,7 @@ class TestFormatStringResolve:
         symtab = SymbolTable()
 
         # WHEN
-        format_string = FormatString(input)
+        format_string = FormatString(input, context=ModelParsingContext_v2023_09())
         symtab["Test.val"] = 4.098
 
         # THEN

@@ -6,18 +6,28 @@ from decimal import Decimal, InvalidOperation
 from pydantic_core import PydanticKnownError, ValidationError, InitErrorDetails
 
 from .._format_strings import FormatString
+from .._types import ModelParsingContextInterface
 
 
 def validate_int_fmtstring_field(
-    value: Union[int, float, Decimal, str, FormatString], ge: Optional[int] = None
-) -> Union[int, float, Decimal, str, FormatString]:
+    value: Union[int, float, Decimal, str, FormatString],
+    ge: Optional[int] = None,
+    *,
+    context: Optional[ModelParsingContextInterface],
+) -> Union[int, float, Decimal, FormatString]:
     """Validates a field that is allowed to be either an integer, a string containing an integer,
     or a string containing expressions that resolve to an integer."""
     value_type_wrong_msg = "Value must be an integer or a string containing an integer."
+    if type(value) is str:
+        # If processing is being done without a context, the value must already be a FormatString
+        if context is None:
+            raise ValueError(
+                "Internal parsing error: No parsing context was provided during model validation for the FormatString."
+            )
+        value = FormatString(value, context=context)
+
     # Validate the type
-    if isinstance(value, str):
-        if not isinstance(value, FormatString):
-            value = FormatString(value)
+    if isinstance(value, FormatString):
         # If the string value has no expressions, we can validate the value now.
         if len(value.expressions) == 0:
             try:
@@ -43,15 +53,25 @@ def validate_int_fmtstring_field(
 
 
 def validate_float_fmtstring_field(
-    value: Union[int, float, Decimal, str, FormatString], ge: Optional[Decimal] = None
-) -> Union[int, float, Decimal, str, FormatString]:
+    value: Union[int, float, Decimal, str, FormatString],
+    ge: Optional[Decimal] = None,
+    *,
+    context: Optional[ModelParsingContextInterface],
+) -> Union[int, float, Decimal, FormatString]:
     """Validates a field that is allowed to be either an float, a string containing an float,
     or a string containing expressions that resolve to a float."""
     value_type_wrong_msg = "Value must be a float or a string containing a float."
+
+    if type(value) is str:
+        # If processing is being done without a context, the value must already be a FormatString
+        if context is None:
+            raise ValueError(
+                "Internal parsing error: No parsing context was provided during model validation for the FormatString"
+            )
+        value = FormatString(value, context=context)
+
     # Validate the type
-    if isinstance(value, str):
-        if not isinstance(value, FormatString):
-            value = FormatString(value)
+    if isinstance(value, FormatString):
         # If the string value has no expressions, we can validate the value now.
         if len(value.expressions) == 0:
             try:
@@ -77,12 +97,14 @@ def validate_float_fmtstring_field(
     return float_value
 
 
-def validate_list_field(value: list, validator: Callable) -> list:
+def validate_list_field(
+    value: list, validator: Callable, *, context: Optional[ModelParsingContextInterface]
+) -> list:
     """Validates a list of values using the provided validator function."""
     errors = list[InitErrorDetails]()
     for i, item in enumerate(value):
         try:
-            validator(item)
+            validator(item, context=context)
         except PydanticKnownError as exc:
             # Copy known errors verbatim with added location data
             errors.append(

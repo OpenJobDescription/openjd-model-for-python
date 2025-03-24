@@ -48,6 +48,7 @@ from .._types import (
     JobCreateAsMetadata,
     JobCreationMetadata,
     JobParameterInterface,
+    ModelParsingContextInterface,
     OpenJDModel,
     ResolutionScope,
     SpecificationRevision,
@@ -56,7 +57,7 @@ from .._types import (
 )
 
 
-class ModelParsingContext:
+class ModelParsingContext(ModelParsingContextInterface):
     """Context required while parsing an OpenJDModel. An instance of this class
     must be provided when calling model_validate.
 
@@ -65,19 +66,10 @@ class ModelParsingContext:
     Individual validators receive this value as ValidationInfo.context.
     """
 
-    extensions: set[str]
-    """When parsing a top-level model instance, this is the set of supported extension names.
-    The 'extensions' field is second in the list of model properties for both the job template
-    and environment template, and when that field is processed it becomes the set of extensions
-    that the template requested.
-
-    When fields of a model that depend on an extension are processed, its validators should
-    check whether the needed extension is included in the context and adjust its parsing
-    as written in the specification.
-    """
-
     def __init__(self, *, supported_extensions: Optional[Iterable[str]] = None) -> None:
-        self.extensions = set(supported_extensions or [])
+        super().__init__(
+            spec_rev=SpecificationRevision.v2023_09, supported_extensions=supported_extensions
+        )
 
 
 class OpenJDModel_v2023_09(OpenJDModel):  # noqa: N801
@@ -91,7 +83,7 @@ class OpenJDModel_v2023_09(OpenJDModel):  # noqa: N801
 
 
 class ExtensionName(str, Enum):
-    """Enumerant of all extensions supported for the 2023-09 specification revision.
+    """Enumeration of all extensions supported for the 2023-09 specification revision.
     This appears in the 'extensions' list property of all model instances.
     """
 
@@ -517,7 +509,7 @@ FloatRangeList = Annotated[
 StringRangeList = Annotated[list[TaskParameterStringValue], Field(min_length=1, max_length=1024)]
 TaskParameterStringValueAsJob = Annotated[str, StringConstraints(min_length=0, max_length=1024)]
 
-TaskRangeList = list[TaskParameterStringValueAsJob]
+TaskRangeList = list[Union[TaskParameterStringValueAsJob, int, float, Decimal]]
 
 
 # Target model for task parameters when instantiating a job.
@@ -528,17 +520,6 @@ class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
     range: TaskRangeList
     # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
     chunks: Optional[TaskChunksDefinition] = None
-
-    @field_validator("range", mode="before")
-    @classmethod
-    def _coerce_to_string(cls, value: Any) -> Any:
-        # Coerce any int, float, or Decimal values into str
-        def coerce(v: Any) -> Any:
-            if isinstance(v, (int, float, Decimal)):
-                return str(v)
-            return v
-
-        return [coerce(item) for item in value]
 
 
 class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -565,15 +546,17 @@ class TaskChunksDefinition(OpenJDModel_v2023_09):
 
     @field_validator("defaultTaskCount", mode="before")
     @classmethod
-    def _validate_default_task_count(cls, value: Any) -> Any:
-        return validate_int_fmtstring_field(value, ge=1)
+    def _validate_default_task_count(cls, value: Any, info: ValidationInfo) -> Any:
+        context = cast(Optional[ModelParsingContextInterface], info.context)
+        return validate_int_fmtstring_field(value, ge=1, context=context)
 
     @field_validator("targetRuntimeSeconds", mode="before")
     @classmethod
-    def _validate_target_runtime_seconds(cls, value: Any) -> Any:
+    def _validate_target_runtime_seconds(cls, value: Any, info: ValidationInfo) -> Any:
         if value is None:
             return value
-        return validate_int_fmtstring_field(value, ge=0)
+        context = cast(Optional[ModelParsingContextInterface], info.context)
+        return validate_int_fmtstring_field(value, ge=0, context=context)
 
 
 class IntTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -613,14 +596,15 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
 
     @field_validator("range", mode="before")
     @classmethod
-    def _validate_range_element_type(cls, value: Any) -> Any:
+    def _validate_range_element_type(cls, value: Any, info: ValidationInfo) -> Any:
         # pydantic will automatically type coerce values into integers. We explicitly
         # want to reject non-integer values, so this *pre* validator validates the
         # value *before* pydantic tries to type coerce it.
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
-            return validate_list_field(value, validate_int_fmtstring_field)
+            context = cast(Optional[ModelParsingContextInterface], info.context)
+            return validate_list_field(value, validate_int_fmtstring_field, context=context)
         elif isinstance(value, RangeString):
             # Nothing to do - it's guaranteed to be a format string at this point
             pass
@@ -671,12 +655,13 @@ class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
 
     @field_validator("range", mode="before")
     @classmethod
-    def _validate_range_element_type(cls, value: Any) -> Any:
+    def _validate_range_element_type(cls, value: Any, info: ValidationInfo) -> Any:
         # pydantic will automatically type coerce values into floats. We explicitly
         # want to reject non-integer values, so this *pre* validator validates the
         # value *before* pydantic tries to type coerce it.
         if isinstance(value, list):
-            return validate_list_field(value, validate_float_fmtstring_field)
+            context = cast(Optional[ModelParsingContextInterface], info.context)
+            return validate_list_field(value, validate_float_fmtstring_field, context=context)
         return value
 
 
@@ -789,14 +774,15 @@ class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
 
     @field_validator("range", mode="before")
     @classmethod
-    def _validate_range_element_type(cls, value: Any) -> Any:
+    def _validate_range_element_type(cls, value: Any, info: ValidationInfo) -> Any:
         # pydantic will automatically type coerce values into integers. We explicitly
         # want to reject non-integer values, so this *pre* validator validates the
         # value *before* pydantic tries to type coerce it.
         # We do allow coersion from a string since we want to allow "1", and
         # "1.2" or "a" will fail the type coersion
         if isinstance(value, list):
-            return validate_list_field(value, validate_int_fmtstring_field)
+            context = cast(Optional[ModelParsingContextInterface], info.context)
+            return validate_list_field(value, validate_int_fmtstring_field, context=context)
         elif isinstance(value, RangeString):
             # Nothing to do - it's guaranteed to be a format string at this point
             pass
@@ -1168,7 +1154,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
             "allowedValues",
             "default",
         },
-        adds_fields=lambda key, this, symtab: {
+        adds_fields=lambda this, symtab: {
             "value": symtab[f"RawParam.{cast(JobStringParameterDefinition,this).name}"]
         },
     )
@@ -1410,7 +1396,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
             "allowedValues",
             "default",
         },
-        adds_fields=lambda key, this, symtab: {
+        adds_fields=lambda this, symtab: {
             "value": symtab[f"RawParam.{cast(JobStringParameterDefinition,this).name}"]
         },
     )
@@ -1631,7 +1617,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
             "allowedValues",
             "default",
         },
-        adds_fields=lambda key, this, symtab: {
+        adds_fields=lambda this, symtab: {
             "value": symtab[f"RawParam.{cast(JobIntParameterDefinition,this).name}"]
         },
     )
@@ -1877,7 +1863,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
             "allowedValues",
             "default",
         },
-        adds_fields=lambda key, this, symtab: {
+        adds_fields=lambda this, symtab: {
             "value": symtab[f"RawParam.{cast(JobFloatParameterDefinition,this).name}"]
         },
     )
@@ -2060,14 +2046,34 @@ class AmountRequirement(OpenJDModel_v2023_09):
     min: Optional[Decimal] = None
     max: Optional[Decimal] = None
 
-    @model_validator(mode="before")
+    @field_validator("name")
     @classmethod
-    def validate_concrete_model(cls, values: dict[str, Any]) -> dict[str, Any]:
-        # Reuse the AmountRequirementTemplate validation. Because all the template
-        # variables have been substituted, it will now run validation it couldn't
-        # before.
-        AmountRequirementTemplate.model_validate(values)
-        return values
+    def _validate_name(cls, v: str, info: ValidationInfo) -> str:
+        validate_amount_capability_name(
+            capability_name=v, standard_capabilities=_STANDARD_AMOUNT_CAPABILITIES_NAMES
+        )
+        return v
+
+    @field_validator("min")
+    @classmethod
+    def _validate_min(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is None:
+            return v
+        if v < 0:
+            raise ValueError(f"Value {v} must be zero or greater")
+        return v
+
+    @field_validator("max")
+    @classmethod
+    def _validate_max(cls, v: Optional[Decimal], info: ValidationInfo) -> Optional[Decimal]:
+        if v is None:
+            return v
+        if v <= 0:
+            raise ValueError("Value must be greater than 0")
+        v_min = info.data.get("min")
+        if v_min is not None and v_min > v:
+            raise ValueError("Value for 'max' must be greater or equal to 'min'")
+        return v
 
 
 class AmountRequirementTemplate(OpenJDModel_v2023_09):
@@ -2090,14 +2096,12 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
 
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=AmountRequirement),
-        resolve_fields={
-            "name",
-        },
+        resolve_fields={"name"},
     )
 
     @field_validator("name")
     @classmethod
-    def _validate_name(cls, v: str) -> str:
+    def _validate_name(cls, v: AmountCapabilityName, info: ValidationInfo) -> AmountCapabilityName:
         validate_amount_capability_name(
             capability_name=v, standard_capabilities=_STANDARD_AMOUNT_CAPABILITIES_NAMES
         )
@@ -2147,14 +2151,33 @@ class AttributeRequirement(OpenJDModel_v2023_09):
     anyOf: Optional[list[str]] = None
     allOf: Optional[list[str]] = None
 
-    @model_validator(mode="before")
+    @field_validator("name")
     @classmethod
-    def validate_concrete_model(cls, values: dict[str, Any]) -> dict[str, Any]:
-        # Reuse the AttributeRequirementTemplate validation. Because all the template
-        # variables have been substituted, it will now run validation it couldn't
-        # before.
-        AttributeRequirementTemplate.model_validate(values)
-        return values
+    def _validate_name(cls, v: str) -> str:
+        validate_attribute_capability_name(
+            capability_name=v, standard_capabilities=_STANDARD_ATTRIBUTE_CAPABILITIES_NAMES
+        )
+        return v
+
+    @field_validator("allOf")
+    @classmethod
+    def _validate_allof(
+        cls, v: Optional[AttributeCapabilityList], info: ValidationInfo
+    ) -> Optional[AttributeCapabilityList]:
+        if v is None:
+            return v
+        AttributeRequirementTemplate._validate_attribute_list(v, info, True)
+        return v
+
+    @field_validator("anyOf")
+    @classmethod
+    def _validate_anyof(
+        cls, v: Optional[AttributeCapabilityList], info: ValidationInfo
+    ) -> Optional[AttributeCapabilityList]:
+        if v is None:
+            return v
+        AttributeRequirementTemplate._validate_attribute_list(v, info, False)
+        return v
 
 
 class AttributeRequirementTemplate(OpenJDModel_v2023_09):
@@ -2190,8 +2213,12 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
 
     @classmethod
     def _validate_attribute_list(
-        cls, v: AttributeCapabilityList, info: ValidationInfo, is_allof: bool
+        cls,
+        v: Union[list[Union[AttributeCapabilityValue, str]], AttributeCapabilityList],
+        info: ValidationInfo,
+        is_allof: bool,
     ) -> None:
+        # This function is also called from AttributeRequirement
         try:
             capability_name = info.data["name"].lower()
         except KeyError:
@@ -2207,7 +2234,7 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
             for item in v:
                 # If it has expressions like "{{ Param.SomeValue }}", will
                 # validate when those values are substituted.
-                if len(item.expressions) > 0:
+                if isinstance(item, FormatString) and len(item.expressions) > 0:
                     continue
                 if item not in standard_capability["values"]:
                     raise ValueError(
@@ -2217,7 +2244,7 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
             for item in v:
                 # If it has expressions like "{{ Param.SomeValue }}", will
                 # validate when those values are substituted.
-                if len(item.expressions) > 0:
+                if isinstance(item, FormatString) and len(item.expressions) > 0:
                     continue
                 if not cls._attribute_capability_value_regex.match(item):
                     raise ValueError(f"Value {item} is not a valid attribute capability value.")
@@ -2540,12 +2567,14 @@ class JobTemplate(OpenJDModel_v2023_09):
         return v
 
     @classmethod
-    def _root_template_prevalidator(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _root_template_prevalidator(
+        cls, values: dict[str, Any], context: Optional[ModelParsingContextInterface]
+    ) -> dict[str, Any]:
         # The name of this validator is very important. It is specifically looked for
         # in the _parse_model function to run this validation as a pre-root-validator
         # without the usual short-circuit of pre-root-validators that pydantic does.
         errors = prevalidate_model_template_variable_references(
-            cast(Type[OpenJDModel], cls), values
+            cast(Type[OpenJDModel], cls), values, context=context
         )
         if errors:
             raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)
@@ -2709,12 +2738,14 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
         return v
 
     @classmethod
-    def _root_template_prevalidator(cls, values: dict[str, Any]) -> dict[str, Any]:
+    def _root_template_prevalidator(
+        cls, values: dict[str, Any], context: Optional[ModelParsingContextInterface]
+    ) -> dict[str, Any]:
         # The name of this validator is very important. It is specifically looked for
         # in the _parse_model function to run this validation as a pre-root-validator
         # without the usual short-circuit of pre-root-validators that pydantic does.
         errors = prevalidate_model_template_variable_references(
-            cast(Type[OpenJDModel], cls), values
+            cast(Type[OpenJDModel], cls), values, context=context
         )
         if errors:
             raise ValidationError.from_exception_data(cls.__name__, line_errors=errors)

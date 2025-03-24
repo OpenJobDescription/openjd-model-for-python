@@ -57,11 +57,11 @@ def _parse_model(*, model: Type[T], obj: Any, context: Any = None) -> T:
         prevalidator_error: Optional[PydanticValidationError] = None
         if hasattr(model, "_root_template_prevalidator"):
             try:
-                getattr(model, "_root_template_prevalidator")(obj)
+                getattr(model, "_root_template_prevalidator")(obj, context=context)
             except PydanticValidationError as exc:
                 prevalidator_error = exc
         try:
-            result = cast(T, cast(BaseModel, model).model_validate(obj, context=context))
+            result = model.model_validate(obj, context=context)  # type: ignore
         except PydanticValidationError as exc:
             if prevalidator_error is not None:
                 errors = list[InitErrorDetails]()

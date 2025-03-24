@@ -16,6 +16,7 @@ from openjd.model._types import (
     JobCreationMetadata,
     OpenJDModel,
 )
+from openjd.model.v2023_09 import ModelParsingContext as ModelParsingContext_v2023_09
 
 
 class BaseModelForTesting(OpenJDModel):
@@ -203,18 +204,24 @@ class TestInternalCreateJobResolvesFormatStrings:
         # Test that we resolve the desired format strings when they are the value of a field.
 
         # GIVEN
-        f1 = FormatString("{{ Param.V }}")
-        f2 = FormatString("{{ Param.V2 }}")
+        f1 = FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09())
+        f2 = FormatString("{{ Param.V2 }}", context=ModelParsingContext_v2023_09())
+
+        class ResolvedModel(BaseModelForTesting):
+            f1: str
+            f2: str
 
         class Model(BaseModelForTesting):
             f1: FormatString
             f2: FormatString
 
-            _job_creation_metadata = JobCreationMetadata(resolve_fields={"f1"})
+            _job_creation_metadata = JobCreationMetadata(
+                create_as=JobCreateAsMetadata(model=ResolvedModel), resolve_fields={"f1"}
+            )
 
         model = Model(f1=f1, f2=f2)
         symtab = SymbolTable(source={"Param.V": "ValueOfV"})
-        expected = Model(f1="ValueOfV", f2=f2)
+        expected = ResolvedModel(f1="ValueOfV", f2=f2)
 
         # WHEN
         result = instantiate_model(model, symtab)
@@ -226,18 +233,24 @@ class TestInternalCreateJobResolvesFormatStrings:
         # Test that we resolve the desired format strings when they are located within a list field.
 
         # GIVEN
-        f1 = FormatString("{{ Param.V }}")
-        f2 = FormatString("{{ Param.V2 }}")
+        f1 = FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09())
+        f2 = FormatString("{{ Param.V2 }}", context=ModelParsingContext_v2023_09())
+
+        class TargetModel(BaseModelForTesting):
+            f1: list[str]
+            f2: FormatString
 
         class Model(BaseModelForTesting):
             f1: list[FormatString]
             f2: FormatString
 
-            _job_creation_metadata = JobCreationMetadata(resolve_fields={"f1"})
+            _job_creation_metadata = JobCreationMetadata(
+                resolve_fields={"f1"}, create_as=JobCreateAsMetadata(model=TargetModel)
+            )
 
         model = Model(f1=[f1, f1, f1], f2=f2)
         symtab = SymbolTable(source={"Param.V": "ValueOfV"})
-        expected = Model(f1=["ValueOfV", "ValueOfV", "ValueOfV"], f2=f2)
+        expected = TargetModel(f1=["ValueOfV", "ValueOfV", "ValueOfV"], f2=f2)
 
         # WHEN
         result = instantiate_model(model, symtab)
@@ -250,18 +263,24 @@ class TestInternalCreateJobResolvesFormatStrings:
         # amongst other values that are not format strings.
 
         # GIVEN
-        f1 = FormatString("{{ Param.V }}")
-        f2 = FormatString("{{ Param.V2 }}")
+        f1 = FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09())
+        f2 = FormatString("{{ Param.V2 }}", context=ModelParsingContext_v2023_09())
+
+        class TargetModel(BaseModelForTesting):
+            f1: list[Union[int, str]]
+            f2: FormatString
 
         class Model(BaseModelForTesting):
             f1: list[Union[int, FormatString]]
             f2: FormatString
 
-            _job_creation_metadata = JobCreationMetadata(resolve_fields={"f1"})
+            _job_creation_metadata = JobCreationMetadata(
+                resolve_fields={"f1"}, create_as=JobCreateAsMetadata(model=TargetModel)
+            )
 
         model = Model(f1=[f1, 12], f2=f2)
         symtab = SymbolTable(source={"Param.V": "ValueOfV"})
-        expected = Model(f1=["ValueOfV", 12], f2=f2)
+        expected = TargetModel(f1=["ValueOfV", 12], f2=f2)
 
         # WHEN
         result = instantiate_model(model, symtab)
@@ -355,22 +374,20 @@ class TestInternalCreateJobAddsFields:
             name: str
             type: str
             n1: str
-            n2: str
 
         class Model(BaseModelForTesting):
             name: str
             type: str
             _job_creation_metadata = JobCreationMetadata(
                 create_as=JobCreateAsMetadata(model=TargetModel),
-                adds_fields=lambda key, model, symtab: {
-                    "n1": key,
-                    "n2": symtab[f"Param.{cast(Model, model).name}"],
+                adds_fields=lambda model, symtab: {
+                    "n1": symtab[f"Param.{cast(Model, model).name}"],
                 },
             )
 
         model = Model(name="Foo", type="INT")
         symtab = SymbolTable(source={"Param.Foo": "FooValue"})
-        expected = TargetModel(name="Foo", type="INT", n1="", n2="FooValue")
+        expected = TargetModel(name="Foo", type="INT", n1="FooValue")
 
         # WHEN
         result = instantiate_model(model, symtab)
@@ -466,7 +483,9 @@ class TestInternalCreateJobExceptions:
                 create_as=JobCreateAsMetadata(model=TargetModel), resolve_fields={"ff"}
             )
 
-        model = Model(vv=-10, ff="{{ Param.V }}")
+        model = Model(
+            vv=-10, ff=FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09())
+        )
         symtab = SymbolTable(
             source={"Param.V": "{{ Foo.Bar"}  # a bad format string to fire an exception
         )
@@ -507,7 +526,12 @@ class TestInternalCreateJobExceptions:
                 create_as=JobCreateAsMetadata(model=TargetModel)
             )
 
-        model = Model(ii={"vv": -10, "ff": "{{ Param.V }}"})
+        model = Model(
+            ii={
+                "vv": -10,
+                "ff": FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09()),
+            }
+        )
         symtab = SymbolTable(
             source={"Param.V": "{{ Foo.Bar"}  # a bad format string to fire an exception
         )
@@ -542,7 +566,18 @@ class TestInternalCreateJobExceptions:
         class Model(BaseModelForTesting):
             ii: list[InnerModel]
 
-        model = Model(ii=[{"vv": -10, "ff": "{{ Param.V }}"}, {"vv": -5, "ff": "{{ Param.V }}"}])
+        model = Model(
+            ii=[
+                {
+                    "vv": -10,
+                    "ff": FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09()),
+                },
+                {
+                    "vv": -5,
+                    "ff": FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09()),
+                },
+            ]
+        )
         symtab = SymbolTable(
             source={"Param.V": "{{ Foo.Bar"}  # a bad format string to fire an exception
         )
@@ -568,7 +603,7 @@ class TestInternalCreateJobExceptions:
         # GIVEN
         class TargetInner(BaseModelForTesting):
             vv: PositiveInt
-            ff: FormatString
+            ff: int
 
         class TargetModel(BaseModelForTesting):
             ii: dict[str, TargetInner]
@@ -592,12 +627,20 @@ class TestInternalCreateJobExceptions:
 
         model = Model(
             ii=[
-                {"name": "foo", "vv": -10, "ff": "{{ Param.V }}"},
-                {"name": "bar", "vv": -5, "ff": "{{ Param.V }}"},
+                {
+                    "name": "foo",
+                    "vv": -10,
+                    "ff": FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09()),
+                },
+                {
+                    "name": "bar",
+                    "vv": -5,
+                    "ff": FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09()),
+                },
             ]
         )
         symtab = SymbolTable(
-            source={"Param.V": "{{ Foo.Bar"}  # a bad format string to fire an exception
+            source={"Param.V": "not an integer"}  # a bad format string to fire an exception
         )
 
         # WHEN
@@ -620,7 +663,7 @@ class TestInternalCreateJobExceptions:
         # GIVEN
         class TargetInner(BaseModelForTesting):
             vv: PositiveInt
-            ff: FormatString
+            ff: int
 
         class InnerModel(BaseModelForTesting):
             vv: int
@@ -634,10 +677,19 @@ class TestInternalCreateJobExceptions:
             dd: dict[str, InnerModel]
 
         model = Model(
-            dd={"foo": {"vv": -10, "ff": "{{ Param.V }}"}, "bar": {"vv": -5, "ff": "{{ Param.V }}"}}
+            dd={
+                "foo": {
+                    "vv": -10,
+                    "ff": FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09()),
+                },
+                "bar": {
+                    "vv": -5,
+                    "ff": FormatString("{{ Param.V }}", context=ModelParsingContext_v2023_09()),
+                },
+            }
         )
         symtab = SymbolTable(
-            source={"Param.V": "{{ Foo.Bar"}  # a bad format string to fire an exception
+            source={"Param.V": "not an integer"}  # a non-integer to fire an exception
         )
 
         # WHEN
@@ -647,7 +699,7 @@ class TestInternalCreateJobExceptions:
         errors = exc.errors()
 
         # THEN
-        assert len(errors) == 4
+        assert len(errors) == 4, str(exc)
         locs = [err["loc"] for err in errors]
         assert ("dd", "foo", "vv") in locs
         assert ("dd", "foo", "ff") in locs

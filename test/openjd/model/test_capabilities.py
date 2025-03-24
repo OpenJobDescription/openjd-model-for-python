@@ -5,7 +5,7 @@ import string
 from typing import Union
 
 from openjd.model import validate_amount_capability_name, validate_attribute_capability_name
-from openjd.model.v2023_09 import FormatString
+from openjd.model.v2023_09 import FormatString, ModelParsingContext as ModelParsingContext_v2023_09
 
 TEST_BUILTIN_AMOUNTS: list[str] = [
     "amount.worker.foo",
@@ -32,13 +32,25 @@ def _success_test_values(prefix: str) -> list:
             pytest.param(f"vendor:{prefix}.custom", id="vendor-defined"),
             pytest.param(f"{prefix.upper()}.WORKER.FOO", id="caps"),
             pytest.param(f"VENDOR:{prefix.upper()}.CUSTOM", id="caps vendor"),
-            pytest.param(FormatString(f"{prefix}.worker.foo"), id="format string no expression"),
             pytest.param(
-                FormatString(f"{prefix.upper()}.WORKER.FOO"), id="caps format string no expression"
+                FormatString(f"{prefix}.worker.foo", context=ModelParsingContext_v2023_09()),
+                id="format string no expression",
             ),
-            pytest.param(FormatString("{{ Param.Foo }}"), id="format string with expression"),
             pytest.param(
-                FormatString(f"{prefix}.{{{{ Param.Foo }}}}"), id="format string partial expression"
+                FormatString(
+                    f"{prefix.upper()}.WORKER.FOO", context=ModelParsingContext_v2023_09()
+                ),
+                id="caps format string no expression",
+            ),
+            pytest.param(
+                FormatString("{{ Param.Foo }}", context=ModelParsingContext_v2023_09()),
+                id="format string with expression",
+            ),
+            pytest.param(
+                FormatString(
+                    f"{prefix}.{{{{ Param.Foo }}}}", context=ModelParsingContext_v2023_09()
+                ),
+                id="format string partial expression",
             ),
         ]
         + [  # Test the vendor regex

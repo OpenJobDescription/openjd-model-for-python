@@ -19,6 +19,7 @@ from openjd.model.v2023_09 import (
     Identifier,
     JobName,
     JobTemplateName,
+    ModelParsingContext,
     ParameterStringValue,
     StepName,
     TaskParameterStringValueAsJob,
@@ -105,7 +106,7 @@ class TestJobTemplateName:
         data = {"name": value}
 
         # WHEN
-        JobTemplateNameModel.model_validate(data)
+        JobTemplateNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -119,7 +120,7 @@ class TestJobTemplateName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            JobTemplateNameModel.model_validate(data)
+            JobTemplateNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -139,7 +140,7 @@ class TestJobName:
         data = {"name": value}
 
         # WHEN
-        JobNameModel.model_validate(data)
+        JobNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -163,7 +164,7 @@ class TestJobName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            JobNameModel.model_validate(data)
+            JobNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -183,7 +184,7 @@ class TestStepName:
         data = {"name": value}
 
         # WHEN
-        StepNameModel.model_validate(data)
+        StepNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -207,7 +208,7 @@ class TestStepName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            StepNameModel.model_validate(data)
+            StepNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -227,7 +228,7 @@ class TestEnvironmentName:
         data = {"name": value}
 
         # WHEN
-        EnvironmentNameModel.model_validate(data)
+        EnvironmentNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -251,7 +252,7 @@ class TestEnvironmentName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            EnvironmentNameModel.model_validate(data)
+            EnvironmentNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -280,7 +281,7 @@ class TestEnvironmentVariableNameString:
         data = {"name": value}
 
         # WHEN
-        EnvironmentVariableNameStringModel.model_validate(data)
+        EnvironmentVariableNameStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -315,7 +316,7 @@ class TestEnvironmentVariableNameString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            EnvironmentVariableNameStringModel.model_validate(data)
+            EnvironmentVariableNameStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -335,7 +336,7 @@ class TestEnvironmentVariableValueString:
         data = {"value": value}
 
         # WHEN
-        EnvironmentVariableValueStringModel.model_validate(data)
+        EnvironmentVariableValueStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -351,7 +352,7 @@ class TestEnvironmentVariableValueString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            EnvironmentVariableValueStringModel.model_validate(data)
+            EnvironmentVariableValueStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -379,7 +380,7 @@ class TestIdentifier:
         data = {"id": value}
 
         # WHEN
-        IdentifierModel.model_validate(data)
+        IdentifierModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -414,7 +415,7 @@ class TestIdentifier:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            IdentifierModel.model_validate(data)
+            IdentifierModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -437,7 +438,7 @@ class TestDescription:
         data = {"desc": value}
 
         # WHEN
-        DescriptionModel.model_validate(data)
+        DescriptionModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -460,7 +461,7 @@ class TestDescription:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            DescriptionModel.model_validate(data)
+            DescriptionModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -479,7 +480,7 @@ class TestParameterStringValue:
         data = {"str": value}
 
         # WHEN
-        ParameterStringModel.model_validate(data)
+        ParameterStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -496,7 +497,7 @@ class TestParameterStringValue:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            ParameterStringModel.model_validate(data)
+            ParameterStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -519,7 +520,7 @@ class TestArgString:
         data = {"arg": value}
 
         # WHEN
-        ArgStringModel.model_validate(data)
+        ArgStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -542,7 +543,7 @@ class TestArgString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            ArgStringModel.model_validate(data)
+            ArgStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -565,7 +566,7 @@ class TestCommandString:
         data = {"cmd": value}
 
         # WHEN
-        CommandStringModel.model_validate(data)
+        CommandStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -589,7 +590,7 @@ class TestCommandString:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            CommandStringModel.model_validate(data)
+            CommandStringModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -611,7 +612,7 @@ class TestCombinationExpr:
         data = {"expr": value}
 
         # WHEN
-        CombinationExprModel.model_validate(data)
+        CombinationExprModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -639,7 +640,7 @@ class TestCombinationExpr:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            CombinationExprModel.model_validate(data)
+            CombinationExprModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -654,7 +655,7 @@ class TestTaskParameterStringValueAsJob:
         data = {"str": value}
 
         # WHEN
-        TaskParameterStringValueAsJobModel.model_validate(data)
+        TaskParameterStringValueAsJobModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -668,7 +669,7 @@ class TestTaskParameterStringValueAsJob:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            TaskParameterStringValueAsJobModel.model_validate(data)
+            TaskParameterStringValueAsJobModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -685,7 +686,7 @@ class TestAmountCapabilityName:
         data = {"str": value}
 
         # WHEN
-        AmountCapabilityNameModel.model_validate(data)
+        AmountCapabilityNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -702,7 +703,7 @@ class TestAmountCapabilityName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            AmountCapabilityNameModel.model_validate(data)
+            AmountCapabilityNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -719,7 +720,7 @@ class TestAttributeCapabilityName:
         data = {"str": value}
 
         # WHEN
-        AttributeCapabilityNameModel.model_validate(data)
+        AttributeCapabilityNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -736,7 +737,7 @@ class TestAttributeCapabilityName:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            AttributeCapabilityNameModel.model_validate(data)
+            AttributeCapabilityNameModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -756,7 +757,7 @@ class TestUserInterfaceLabelStringValue:
         data = {"str": value}
 
         # WHEN
-        UserInterfaceLabelStringValueModel.model_validate(data)
+        UserInterfaceLabelStringValueModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -780,7 +781,7 @@ class TestUserInterfaceLabelStringValue:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            UserInterfaceLabelStringValueModel.model_validate(data)
+            UserInterfaceLabelStringValueModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         assert len(excinfo.value.errors()) > 0
@@ -801,7 +802,7 @@ class TestFileDialogFilterPatternStringValue:
         data = {"str": value}
 
         # WHEN
-        FileDialogFilterPatternStringValueModel.model_validate(data)
+        FileDialogFilterPatternStringValueModel.model_validate(data, context=ModelParsingContext())
 
         # THEN
         # no exceptions raised
@@ -854,7 +855,9 @@ class TestFileDialogFilterPatternStringValue:
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            FileDialogFilterPatternStringValueModel.model_validate(data)
+            FileDialogFilterPatternStringValueModel.model_validate(
+                data, context=ModelParsingContext()
+            )
 
         # THEN
         assert len(excinfo.value.errors()) > 0

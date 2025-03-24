@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Iterator, Sized
 from dataclasses import dataclass, field
+from decimal import Decimal
 from functools import reduce
 from operator import mul
 import re
@@ -328,7 +329,7 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
                     return RangeListIdentifierNode(
                         name=name,
                         type=ParameterValueType(parameter.type),
-                        range=chunk_list,
+                        range=chunk_list,  # type: ignore
                         range_set=set(parameter_range),
                         range_constraint=parameter.chunks.rangeConstraint,
                     )
@@ -772,7 +773,7 @@ class RangeListIdentifierNodeIterator(NodeIterator):
         _node: The RangeListIdentifierNode this is iterating over.
     """
 
-    _it: Iterator[str]
+    _it: Iterator[Union[str, int, float, Decimal]]
     _node: RangeListIdentifierNode
 
     def __init__(self, node: RangeListIdentifierNode):
@@ -785,7 +786,7 @@ class RangeListIdentifierNodeIterator(NodeIterator):
     def next(self, result: TaskParameterSet) -> None:
         # Raises: StopIteration
         v = next(self._it)
-        result[self._node.name] = ParameterValue(type=self._node.type, value=v)
+        result[self._node.name] = ParameterValue(type=self._node.type, value=str(v))
 
 
 INTERVAL_RE = re.compile(r"\s*(-?[0-9]+)\s*-\s*(-?[0-9]+)\s*")
@@ -795,7 +796,7 @@ INTERVAL_RE = re.compile(r"\s*(-?[0-9]+)\s*-\s*(-?[0-9]+)\s*")
 class RangeListIdentifierNode(Node):
     name: str
     type: ParameterValueType
-    range: list[str]
+    range: list[Union[str, int, float, Decimal]]
     range_set: set
     range_constraint: Optional[TaskChunksRangeConstraint_2023_09] = None
     _len: int = field(init=False, repr=False, compare=False)
@@ -807,7 +808,7 @@ class RangeListIdentifierNode(Node):
         return self._len
 
     def __getitem__(self, index: int) -> TaskParameterSet:
-        return {self.name: ParameterValue(type=self.type, value=self.range[index])}
+        return {self.name: ParameterValue(type=self.type, value=str(self.range[index]))}
 
     def validate_containment(self, params: TaskParameterSet):
         """Checks if the params restricted to this node are part of the node's range."""

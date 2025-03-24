@@ -15,6 +15,7 @@ from openjd.model._types import (
     ResolutionScope,
     TemplateVariableDef,
 )
+from openjd.model.v2023_09 import ModelParsingContext as ModelParsingContext_v2023_09
 
 # arg2 = Whether a var defined in the arg0 scope is available in the arg1 scope.
 #    TEMPLATE scope -> referenced in only TEMPLATE, SESSION, and TASK scope
@@ -66,7 +67,9 @@ class TestVariableScope:
         data = {"name": "Foo", "ref": "{{ Param.Foo }}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -91,7 +94,9 @@ class TestVariableScope:
         data = {"name": "Foo", "ref": {"a": "{{ Param.Foo }}"}}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -125,7 +130,9 @@ class TestVariableScope:
         }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -160,7 +167,9 @@ class TestVariableScope:
         }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -186,7 +195,9 @@ class TestVariableScope:
         data = {"defn": {"name": "Foo"}, "ref": "{{ Param.Foo }}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 1
@@ -208,7 +219,9 @@ class TestVariableScope:
         data = dict[str, Any]()
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -230,7 +243,9 @@ class TestVariableScope:
         data = {"name": 12, "ref": "this is okay"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -253,7 +268,9 @@ class TestVariableScope:
         data = {"name": "Foo", "ref": "{{Param.Foo"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -276,7 +293,9 @@ class TestVariableScope:
         data = {"name": "Foo", "ref": "No variable reference"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -299,7 +318,9 @@ class TestVariableScope:
         data = {"name": "Foo", "ref": "{{}}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -323,7 +344,9 @@ class TestVariableScope:
         data = {"lit": "Bob", "name": "Foo", "ref": "{{ Param.Foo }}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -355,7 +378,9 @@ class TestVariableScope:
         data = {"ref": "{{ Param.Foo }}", "sub": "this is not a dict"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 1  # Bad reference to Param.Foo
@@ -387,7 +412,9 @@ class TestVariableScope:
         data = {"ref": ["{{Param.Foo}}"], "sub": {"name": "Foo"}}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -409,7 +436,9 @@ class TestVariableScope:
         data = {"name": "Foo", "ref": "{{ Param.Bar }}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -431,7 +460,9 @@ class TestVariableScope:
         data = {"name": "Foo", "ref": {12: "{{ Param.Bar }}"}}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -461,7 +492,9 @@ class TestSymbolPrefixNesting:
         data = {"sub": {"name": "Foo", "ref": "{{ Root.Param.Foo }}"}}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -487,7 +520,9 @@ class TestSymbolPrefixNesting:
         data = {"sub": {"name": "Foo", "ref": "{{ Sub.Foo }}"}}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -514,7 +549,9 @@ class TestSymbolPrefixNesting:
         data = {"sub": {"name": "Foo", "ref": "{{ Sub.Inner.Foo }}"}}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -544,7 +581,9 @@ class TestInjectSymbol:
         data = {"sub": {"ref": "{{ Root.Foo }} {{ New.Bar }}"}}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 2)
@@ -587,7 +626,9 @@ class TestListField:
         }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 3)
@@ -613,7 +654,9 @@ class TestListField:
         data = {"name": "Foo", "ref": ["{{ Param.Foo }}", "{{ Param.Foo }}", "{{ Param.Foo }}"]}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 3)
@@ -636,7 +679,9 @@ class TestListField:
         data = {"name": "Foo", "ref": "{{ Param.Foo }}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -654,12 +699,15 @@ class TestListField:
             _template_variable_definitions = DefinesTemplateVariables(
                 defines={TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE)},
                 field="name",
+                inject={"|Param.Bar"},
             )
 
         data = {"name": "Foo", "ref": ["{{ Param.Foo }}", 12, {"item": "{{Param.Bar}}"}]}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -695,7 +743,9 @@ class TestListField:
         }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -757,7 +807,9 @@ class TestDiscriminatedUnion:
             }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -820,7 +872,9 @@ class TestDiscriminatedUnion:
             }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -877,7 +931,9 @@ class TestDiscriminatedUnion:
             }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -945,7 +1001,9 @@ class TestDiscriminatedUnion:
             }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 2)
@@ -1016,7 +1074,9 @@ class TestDiscriminatedUnion:
             }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (
@@ -1078,7 +1138,9 @@ class TestDiscriminatedUnion:
             }
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -1114,7 +1176,9 @@ class TestNonDiscriminatedUnion:
         data = {"name": "Foo", "ref": "{{Param.Foo}}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -1142,7 +1206,9 @@ class TestNonDiscriminatedUnion:
             )
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0
@@ -1183,7 +1249,9 @@ class TestNonDiscriminatedUnion:
         data = {"name": "Foo", "ref": "{{Param.Foo}}"}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -1223,7 +1291,9 @@ class TestNonDiscriminatedUnion:
         data = {"name": "Foo", "ref": ["{{Param.Foo}}"]}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == (0 if available else 1)
@@ -1254,7 +1324,9 @@ class TestNonDiscriminatedUnion:
         data = {"name": "Foo", "ref": ["{{Param.Foo}}"]}
 
         # WHEN
-        errors = prevalidate_model_template_variable_references(BaseModel, data)
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
 
         # THEN
         assert len(errors) == 0

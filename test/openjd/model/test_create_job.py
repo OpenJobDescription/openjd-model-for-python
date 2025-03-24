@@ -13,28 +13,22 @@ from openjd.model import (
     ParameterValueType,
     create_job,
     preprocess_job_parameters,
+    decode_job_template,
+    decode_environment_template,
 )
 from openjd.model._parse import _parse_model
 from openjd.model.v2023_09 import (
-    Environment as Environment_2023_09,
-    EnvironmentTemplate as EnvironmentTemplate_2023_09,
     Job as Job_2023_09,
-    JobTemplate as JobTemplate_2023_09,
     JobParameterType as JobParameterType_2023_09,
 )
 
-minimal_job_template_2023_09 = _parse_model(
-    model=JobTemplate_2023_09,
-    obj={
-        "specificationVersion": "jobtemplate-2023-09",
-        "name": "name",
-        "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}],
-    },
-)
-minimal_environment_2023_09 = _parse_model(
-    model=Environment_2023_09,
-    obj={"name": "env", "script": {"actions": {"onEnter": {"command": "do a thing"}}}},
-)
+minimal_steps_v2023_09 = [
+    {"name": "step", "script": {"actions": {"onRun": {"command": "do thing"}}}}
+]
+minimal_environment_2023_09 = {
+    "name": "env",
+    "script": {"actions": {"onEnter": {"command": "do a thing"}}},
+}
 
 
 class TestPreprocessJobParameters_2023_09:  # noqa: N801
@@ -63,16 +57,18 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
             for param_type in JobParameterType_2023_09
         ],
     )
-    def test_handles_parameter_type(self, param_type: str) -> None:
+    def test_preprocess_job_parameters_handles_parameter_type(self, param_type: str) -> None:
         # Test that we can process all known kinds of parameters
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {"Foo": "12"}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
-            parameterDefinitions=[{"name": "Foo", "type": param_type}],
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "Foo", "type": param_type}],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -105,11 +101,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {"Foo": "12"}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
-            parameterDefinitions=[{"name": "Foo", "type": param_type}],
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "Foo", "type": param_type}],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -165,11 +163,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
-            parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": escaping_dir}],
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                steps=minimal_steps_v2023_09,
+                parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": escaping_dir}],
+            )
         )
 
         # WHEN
@@ -189,11 +189,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
-            parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": "defaultValue"}],
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                steps=minimal_steps_v2023_09,
+                parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": "defaultValue"}],
+            )
         )
 
         # WHEN
@@ -224,11 +226,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
-            parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": escaping_dir}],
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                steps=minimal_steps_v2023_09,
+                parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": escaping_dir}],
+            )
         )
 
         # WHEN
@@ -264,11 +268,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
-            parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": escaping_dir}],
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                steps=minimal_steps_v2023_09,
+                parameterDefinitions=[{"name": "Foo", "type": "PATH", "default": escaping_dir}],
+            )
         )
 
         # WHEN
@@ -289,10 +295,12 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {"ThisIsUnknown": "value"}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -318,15 +326,19 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
             "ThisIsUnknown": "value",
             "ThisIsKnown": "value",
         }
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                steps=minimal_steps_v2023_09,
+            )
         )
-        env_template = EnvironmentTemplate_2023_09(
-            specificationVersion="environment-2023-09",
-            environment=minimal_environment_2023_09,
-            parameterDefinitions=[{"name": "ThisIsKnown", "type": "STRING"}],
+        env_template = decode_environment_template(
+            template=dict(
+                specificationVersion="environment-2023-09",
+                environment=minimal_environment_2023_09,
+                parameterDefinitions=[{"name": "ThisIsKnown", "type": "STRING"}],
+            )
         )
 
         # WHEN
@@ -350,11 +362,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = dict()
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[{"name": "ThisIsNotDefined", "type": "STRING"}],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "ThisIsNotDefined", "type": "STRING"}],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -374,16 +388,20 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = dict()
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[{"name": "ThisIsNotDefined", "type": "STRING"}],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "ThisIsNotDefined", "type": "STRING"}],
+                steps=minimal_steps_v2023_09,
+            )
         )
-        env_template = EnvironmentTemplate_2023_09(
-            specificationVersion="environment-2023-09",
-            environment=minimal_environment_2023_09,
-            parameterDefinitions=[{"name": "ThisIsAlsoMissing", "type": "STRING"}],
+        env_template = decode_environment_template(
+            template=dict(
+                specificationVersion="environment-2023-09",
+                environment=minimal_environment_2023_09,
+                parameterDefinitions=[{"name": "ThisIsAlsoMissing", "type": "STRING"}],
+            )
         )
 
         # WHEN
@@ -408,14 +426,16 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[
-                {"name": "Foo", "type": "STRING", "default": "defaultValue"},
-                {"name": "Bar", "type": "PATH", "default": "defaultPathValue"},
-            ],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[
+                    {"name": "Foo", "type": "STRING", "default": "defaultValue"},
+                    {"name": "Bar", "type": "PATH", "default": "defaultPathValue"},
+                ],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -440,14 +460,16 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {"Bar": ""}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[
-                {"name": "Foo", "type": "PATH", "default": ""},
-                {"name": "Bar", "type": "PATH", "default": "defaultPathValue"},
-            ],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[
+                    {"name": "Foo", "type": "PATH", "default": ""},
+                    {"name": "Bar", "type": "PATH", "default": "defaultPathValue"},
+                ],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -470,16 +492,22 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[{"name": "Foo", "type": "STRING", "default": "defaultValue"}],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "Foo", "type": "STRING", "default": "defaultValue"}],
+                steps=minimal_steps_v2023_09,
+            )
         )
-        env_template = EnvironmentTemplate_2023_09(
-            specificationVersion="environment-2023-09",
-            environment=minimal_environment_2023_09,
-            parameterDefinitions=[{"name": "Bar", "type": "STRING", "default": "alsoDefaultValue"}],
+        env_template = decode_environment_template(
+            template=dict(
+                specificationVersion="environment-2023-09",
+                environment=minimal_environment_2023_09,
+                parameterDefinitions=[
+                    {"name": "Bar", "type": "STRING", "default": "alsoDefaultValue"}
+                ],
+            )
         )
 
         # WHEN
@@ -505,11 +533,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {"Foo": "FooValue"}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[{"name": "Foo", "type": "STRING", "default": "defaultValue"}],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "Foo", "type": "STRING", "default": "defaultValue"}],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -529,11 +559,13 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {"Foo": "two"}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[{"name": "Foo", "type": "STRING", "maxLength": 1}],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "Foo", "type": "STRING", "maxLength": 1}],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -554,16 +586,20 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 
         # GIVEN
         job_parameter_values: JobParameterInputValues = {"Foo": "two", "Bar": "one"}
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[{"name": "Foo", "type": "STRING", "maxLength": 1}],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[{"name": "Foo", "type": "STRING", "maxLength": 1}],
+                steps=minimal_steps_v2023_09,
+            )
         )
-        env_template = EnvironmentTemplate_2023_09(
-            specificationVersion="environment-2023-09",
-            environment=minimal_environment_2023_09,
-            parameterDefinitions=[{"name": "Bar", "type": "STRING", "minLength": 5}],
+        env_template = decode_environment_template(
+            template=dict(
+                specificationVersion="environment-2023-09",
+                environment=minimal_environment_2023_09,
+                parameterDefinitions=[{"name": "Bar", "type": "STRING", "minLength": 5}],
+            )
         )
 
         # WHEN
@@ -590,14 +626,16 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
             "Bar": "three",  # An extra parameter
             # missing buz
         }
-        job_template = JobTemplate_2023_09(
-            specificationVersion="jobtemplate-2023-09",
-            name="test",
-            parameterDefinitions=[
-                {"name": "Foo", "type": "STRING", "maxLength": 1},
-                {"name": "Buz", "type": "STRING"},
-            ],
-            steps=minimal_job_template_2023_09.steps,
+        job_template = decode_job_template(
+            template=dict(
+                specificationVersion="jobtemplate-2023-09",
+                name="test",
+                parameterDefinitions=[
+                    {"name": "Foo", "type": "STRING", "maxLength": 1},
+                    {"name": "Buz", "type": "STRING"},
+                ],
+                steps=minimal_steps_v2023_09,
+            )
         )
 
         # WHEN
@@ -622,9 +660,8 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
 class TestCreateJob_2023_09:
     def test_success(self) -> None:
         # GIVEN
-        job_template = _parse_model(
-            model=JobTemplate_2023_09,
-            obj={
+        job_template = decode_job_template(
+            template={
                 "specificationVersion": "jobtemplate-2023-09",
                 "name": "Job",
                 "parameterDefinitions": [{"name": "Foo", "type": "INT", "minValue": 10}],
@@ -653,9 +690,8 @@ class TestCreateJob_2023_09:
 
     def test_with_preprocess_error_from_job_template(self) -> None:
         # GIVEN
-        job_template = _parse_model(
-            model=JobTemplate_2023_09,
-            obj={
+        job_template = decode_job_template(
+            template={
                 "specificationVersion": "jobtemplate-2023-09",
                 "name": "Job",
                 "parameterDefinitions": [{"name": "Foo", "type": "INT", "minValue": 10}],
@@ -675,9 +711,8 @@ class TestCreateJob_2023_09:
 
     def test_with_preprocess_error_from_environment_template(self) -> None:
         # GIVEN
-        job_template = _parse_model(
-            model=JobTemplate_2023_09,
-            obj={
+        job_template = decode_job_template(
+            template={
                 "specificationVersion": "jobtemplate-2023-09",
                 "name": "Job",
                 "parameterDefinitions": [{"name": "Foo", "type": "INT"}],
@@ -686,9 +721,8 @@ class TestCreateJob_2023_09:
                 ],
             },
         )
-        env_template = _parse_model(
-            model=EnvironmentTemplate_2023_09,
-            obj={
+        env_template = decode_environment_template(
+            template={
                 "specificationVersion": "environment-2023-09",
                 "parameterDefinitions": [{"name": "Foo", "type": "INT", "minValue": 10}],
                 "environment": {
@@ -712,9 +746,8 @@ class TestCreateJob_2023_09:
 
     def test_fails_to_instantiate(self) -> None:
         # GIVEN
-        job_template = _parse_model(
-            model=JobTemplate_2023_09,
-            obj={
+        job_template = decode_job_template(
+            template={
                 "specificationVersion": "jobtemplate-2023-09",
                 "name": "{{Param.Foo}}",
                 "parameterDefinitions": [{"name": "Foo", "type": "STRING"}],
@@ -749,9 +782,8 @@ class TestCreateJob_2023_09:
         # definitions to know how large each parameter range is.
 
         # GIVEN
-        job_template = _parse_model(
-            model=JobTemplate_2023_09,
-            obj={
+        job_template = decode_job_template(
+            template={
                 "specificationVersion": "jobtemplate-2023-09",
                 "name": "Job",
                 "steps": [
