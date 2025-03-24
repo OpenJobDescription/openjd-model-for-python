@@ -12,7 +12,7 @@ from pydantic.fields import FieldInfo, ModelPrivateAttr
 # Workaround for Python 3.9 where issubclass raises an error "TypeError: issubclass() arg 1 must be a class"
 from pydantic.v1.utils import lenient_issubclass
 
-from .._types import OpenJDModel, ResolutionScope
+from .._types import OpenJDModel, ResolutionScope, ModelParsingContextInterface
 from .._format_strings import FormatString, FormatStringError
 
 __all__ = ["prevalidate_model_template_variable_references"]
@@ -130,7 +130,12 @@ class ScopedSymtabs(defaultdict):
         return self
 
 
-def prevalidate_model_template_variable_references(cls: Type[OpenJDModel], values: dict[str, Any]):
+def prevalidate_model_template_variable_references(
+    cls: Type[OpenJDModel],
+    values: dict[str, Any],
+    *,
+    context: Optional[ModelParsingContextInterface],
+):
     """Validates the template variable references in a given model.
 
     Notes:
@@ -151,6 +156,7 @@ def prevalidate_model_template_variable_references(cls: Type[OpenJDModel], value
         symbols=ScopedSymtabs(),
         loc=(),
         symbol_prefix="",
+        context=context,
     )
 
 
@@ -185,6 +191,8 @@ def _validate_model_template_variable_references(
     symbols: ScopedSymtabs,
     loc: tuple,
     discriminator: Union[str, Discriminator, None] = None,
+    *,
+    context: Optional[ModelParsingContextInterface],
 ) -> list[InitErrorDetails]:
     """Inner implementation of prevalidate_model_template_variable_references().
 
@@ -212,6 +220,7 @@ def _validate_model_template_variable_references(
             symbols,
             loc,
             discriminator=discriminator,
+            context=context,
         )
 
     # Unwrap the Annotated type, and get the discriminator while doing so
@@ -228,6 +237,7 @@ def _validate_model_template_variable_references(
             symbols,
             loc,
             discriminator=discriminator,
+            context=context,
         )
 
     # Validate all the items of a list
@@ -239,7 +249,13 @@ def _validate_model_template_variable_references(
             for i, item in enumerate(value):
                 errors.extend(
                     _validate_model_template_variable_references(
-                        item_model, item, current_scope, symbol_prefix, symbols, (*loc, i)
+                        item_model,
+                        item,
+                        current_scope,
+                        symbol_prefix,
+                        symbols,
+                        (*loc, i),
+                        context=context,
                     )
                 )
         return errors
@@ -260,6 +276,7 @@ def _validate_model_template_variable_references(
                         symbol_prefix,
                         symbols,
                         (*loc, key),
+                        context=context,
                     )
                 )
         return errors
@@ -269,7 +286,7 @@ def _validate_model_template_variable_references(
         for sub_type in typing.get_args(model):
             errors.extend(
                 _validate_model_template_variable_references(
-                    sub_type, value, current_scope, symbol_prefix, symbols, loc
+                    sub_type, value, current_scope, symbol_prefix, symbols, loc, context=context
                 )
             )
         return errors
@@ -285,14 +302,23 @@ def _validate_model_template_variable_references(
                 symbol_prefix,
                 symbols,
                 loc,
+                context=context,
             )
         else:
-            return []
+            return errors
 
     if isclass(model) and lenient_issubclass(model, FormatString):
-        if isinstance(value, str):
-            return _check_format_string(value, current_scope, symbols, loc)
-        return []
+        if not isinstance(value, FormatString):
+            if context is None:
+                raise ValueError(
+                    "Internal parsing error: No parsing context was provided during model validation for the FormatString"
+                )
+            try:
+                value = FormatString(value, context=context)
+            except FormatStringError:
+                # Do not add an error for this during prevalidation, this will be caught later.
+                return errors
+        return _check_format_string(value, current_scope, symbols, loc, context=context)
 
     # Return an empty error list if it's not an OpenJDModel, or if it's not a dict
     if not (isclass(model) and lenient_issubclass(model, OpenJDModel) and isinstance(value, dict)):
@@ -349,6 +375,7 @@ def _validate_model_template_variable_references(
                 validation_symbols,
                 (*loc, field_name),
                 field_info.discriminator,
+                context=context,
             )
         )
 
@@ -356,14 +383,21 @@ def _validate_model_template_variable_references(
 
 
 def _check_format_string(
-    value: str, current_scope: ResolutionScope, symbols: ScopedSymtabs, loc: tuple
+    value: FormatString,
+    current_scope: ResolutionScope,
+    symbols: ScopedSymtabs,
+    loc: tuple,
+    context: Optional[ModelParsingContextInterface],
 ) -> list[InitErrorDetails]:
     # Collect the variable reference errors, if any, from the given FormatString value.
 
     errors = list[InitErrorDetails]()
     scoped_symbols = symbols[current_scope]
     try:
-        f_value = FormatString(value)
+        if isinstance(value, FormatString):
+            f_value = value
+        else:
+            f_value = FormatString(value, context=context)
     except FormatStringError:
         # Improperly formed string. Later validation passes will catch and flag this.
         return errors
@@ -457,7 +491,6 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
 
     When the model is not an OpenJDModel, it only populates the "__export__".
     """
-
     # NOTE: This is not written to be super generic and handle all possible OpenJD models going
     #  forward forever. It handles the subset of the general Pydantic data model that OpenJD is
     #  currently using, and will be extended as we use additional features of Pydantic's data model.

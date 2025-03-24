@@ -6,13 +6,30 @@ from .._errors import ExpressionError, TokenError
 from .._tokenstream import Token, TokenStream, TokenType
 from ._nodes import FullNameNode, Node
 from ._tokens import DotToken, NameToken
+from .._types import ModelParsingContextInterface
 
 _tokens: dict[TokenType, Type[Token]] = {TokenType.NAME: NameToken, TokenType.DOT: DotToken}
 
 
-class Parser:
+def parse_format_string_expr(expr: str, *, context: ModelParsingContextInterface) -> Node:
+    """Generate an expression tree for the given string interpolation expression.
+
+    Args:
+        expr (str): A string interpolation expression
+
+    Raises:
+        ExpressionError: If the given expression does not adhere to the grammar.
+        TokenError: If the given expression contains nonvalid or unexpected tokens.
+
+    Returns:
+        Node: Root of the expression tree.
     """
-    Parser used to build an AST of the currently supported operations.
+    return FormatStringExprParser_v2023_09().parse(expr)
+
+
+class FormatStringExprParser_v2023_09:
+    """
+    Parser used to build an AST of format strings for the 2023-09 specification.
     """
 
     def parse(self, expr: str) -> Node:

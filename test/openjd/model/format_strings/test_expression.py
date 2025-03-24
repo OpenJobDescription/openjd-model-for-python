@@ -6,14 +6,15 @@ import pytest
 
 from openjd.model import ExpressionError, SymbolTable, TokenError
 from openjd.model._format_strings._expression import InterpolationExpression
-from openjd.model._format_strings._parser import Parser
+from openjd.model._format_strings._parser import FormatStringExprParser_v2023_09
+from openjd.model.v2023_09 import ModelParsingContext as ModelParsingContext_v2023_09
 
 
 class TestInterpolationExpression:
     def test_init_builds_expr_tree(self):
-        with patch.object(Parser, "parse") as mock:
+        with patch.object(FormatStringExprParser_v2023_09, "parse") as mock:
             # WHEN
-            InterpolationExpression("Foo.Bar")
+            InterpolationExpression("Foo.Bar", context=ModelParsingContext_v2023_09())
 
             # THEN
             mock.assert_called_once_with("Foo.Bar")
@@ -24,7 +25,7 @@ class TestInterpolationExpression:
 
         # THEN
         with pytest.raises(TokenError):
-            InterpolationExpression(expr)
+            InterpolationExpression(expr, context=ModelParsingContext_v2023_09())
 
     def test_init_reraises_tokenizer_error(self):
         # GIVEN
@@ -32,12 +33,12 @@ class TestInterpolationExpression:
 
         # THEN
         with pytest.raises(TokenError):
-            InterpolationExpression(expr)
+            InterpolationExpression(expr, context=ModelParsingContext_v2023_09())
 
     def test_validate_success(self) -> None:
         # GIVEN
         symbols = set(("Test.Name",))
-        expr = InterpolationExpression("Test.Name")
+        expr = InterpolationExpression("Test.Name", context=ModelParsingContext_v2023_09())
 
         # THEN
         expr.validate_symbol_refs(symbols=symbols)  # Does not raise
@@ -67,7 +68,7 @@ class TestInterpolationExpression:
     )
     def test_validate_error(self, symbols: set[str], expr: str, error_matches: str) -> None:
         # GIVEN
-        test = InterpolationExpression(expr)
+        test = InterpolationExpression(expr, context=ModelParsingContext_v2023_09())
 
         # THEN
         with pytest.raises(ValueError, match=error_matches):
@@ -77,7 +78,7 @@ class TestInterpolationExpression:
         # GIVEN
         symtab = SymbolTable()
         symtab["Test.Name"] = "value"
-        expr = InterpolationExpression("Test.Name")
+        expr = InterpolationExpression("Test.Name", context=ModelParsingContext_v2023_09())
 
         # WHEN
         result = expr.evaluate(symtab=symtab)
@@ -91,7 +92,7 @@ class TestInterpolationExpression:
         symtab["Test.Name"] = "value"
 
         # WHEN
-        expr = InterpolationExpression("Test.Fail")
+        expr = InterpolationExpression("Test.Fail", context=ModelParsingContext_v2023_09())
 
         # THEN
         with pytest.raises(ExpressionError) as exc:
@@ -103,7 +104,7 @@ class TestInterpolationExpression:
         # GIVEN
         symtab = SymbolTable()
         symtab["Test.Name"] = {"foo": "bar"}
-        expr = InterpolationExpression("Test.Name")
+        expr = InterpolationExpression("Test.Name", context=ModelParsingContext_v2023_09())
 
         # THEN
         with pytest.raises(ExpressionError):

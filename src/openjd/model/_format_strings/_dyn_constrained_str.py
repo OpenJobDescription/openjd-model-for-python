@@ -2,15 +2,22 @@
 
 from typing import Any, Callable, Optional, Pattern, Union
 
-from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler, ValidationInfo
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 import re
+
+from .._types import ModelParsingContextInterface
 
 
 class DynamicConstrainedStr(str):
     """Constrained string type for interfacing with Pydantic.
     The maximum string length can be dynamically defined at runtime.
+
+    The parsing context, a subclass of ModelParsingContextInterface,
+    is required to construct a DynamicConstrainedStr or subclass.
+    This enables the FormatString to handle the supported expression types
+    based on the Open Job Description revision version and extensions.
 
     Note: Does *not* run model validation when constructed.
     """
@@ -23,6 +30,9 @@ class DynamicConstrainedStr(str):
     # ================================
     # Reference: https://pydantic-docs.helpmanual.io/usage/types/#custom-data-types
 
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface):
+        return super().__new__(cls, value)
+
     @classmethod
     def _get_max_length(cls) -> Optional[int]:
         if callable(cls._max_length):
@@ -30,7 +40,7 @@ class DynamicConstrainedStr(str):
         return cls._max_length
 
     @classmethod
-    def _validate(cls, value: str) -> Any:
+    def _validate(cls, value: str, info: ValidationInfo) -> Any:
         if not isinstance(value, str):
             raise ValueError("String required")
 
@@ -46,13 +56,20 @@ class DynamicConstrainedStr(str):
                 pattern: str = cls._regex if isinstance(cls._regex, str) else cls._regex.pattern
                 raise ValueError(f"String does not match the required pattern: {pattern}")
 
-        return cls(value)
+        if type(value) is cls:
+            return value
+        else:
+            if info.context is None:
+                raise ValueError(
+                    f"Internal parsing error: No parsing context was provided during model validation for the DynamicConstrainedStr subclass {cls.__name__}."
+                )
+            return cls(value, context=info.context)
 
     @classmethod
     def __get_pydantic_core_schema__(
         cls, source_type: type[Any], handler: GetCoreSchemaHandler
     ) -> core_schema.CoreSchema:
-        return core_schema.no_info_plain_validator_function(cls._validate)
+        return core_schema.with_info_plain_validator_function(cls._validate)
 
     @classmethod
     def __get_pydantic_json_schema__(

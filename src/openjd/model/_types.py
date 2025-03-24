@@ -6,7 +6,7 @@ import sys
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Type, Union
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Optional, Iterable, Type, Union
 
 from pydantic import ConfigDict, BaseModel
 
@@ -247,14 +247,13 @@ class JobCreationMetadata:
     not be provided values, or kwargs even, for these fields.
     """
 
-    adds_fields: Optional[Callable[[str, "OpenJDModel", SymbolTable], dict[str, Any]]] = field(
+    adds_fields: Optional[Callable[["OpenJDModel", SymbolTable], dict[str, Any]]] = field(
         default=None
     )
     """This property defines a callable that uses the instantiation context (i.e. SymbolTable) and
     can materialize new fields that are not already present in the model.
-        arg0 - The model key where this model was found.
-        arg1 - The model that is adding a value.
-        arg2 - The symbol table used in the instantiation.
+        arg0 - The model that is adding a value.
+        arg1 - The symbol table used in the instantiation.
         Use-case: Transforming Job Parameters from their Template form to Job form; we inject the
             value of the parameter from the SymbolTable into the Job.
     """
@@ -322,3 +321,36 @@ class JobParameterInterface(ABC):
             ValueError if the value does not meet at least one constraint
         """
         pass
+
+
+class ModelParsingContextInterface(ABC):
+    """Context required while parsing an OpenJDModel. A subclass
+    must be provided when calling model_validate.
+
+        OpenJDModelSubclass.model_validate(data, context=ModelParsingContext())
+
+    Individual validators receive this value as ValidationInfo.context.
+    """
+
+    spec_rev: SpecificationRevision
+    """This contains the revision of the Open Job Description being parsed (e.g. "2023-09").
+    By providing it in the context, shared code like the FormatString class can do
+    version-specific processing.
+    """
+
+    extensions: set[str]
+    """When parsing a top-level model instance, this is the set of supported extension names.
+    The 'extensions' field is second in the list of model properties for both the job template
+    and environment template, and when that field is processed it becomes the set of extensions
+    that the template requested.
+
+    When fields of a model that depend on an extension are processed, its validators should
+    check whether the needed extension is included in the context and adjust its parsing
+    as written in the specification.
+    """
+
+    def __init__(
+        self, *, spec_rev: SpecificationRevision, supported_extensions: Optional[Iterable[str]]
+    ) -> None:
+        self.spec_rev = spec_rev
+        self.extensions = set(supported_extensions or [])
