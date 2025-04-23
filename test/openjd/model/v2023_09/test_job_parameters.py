@@ -152,6 +152,13 @@ class TestJobStringParameterDefinition:
                 },
                 id="all fields",
             ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "STRING",
+                },
+                id="allowedValues not provided",
+            ),
         ),
     )
     def test_parse_success(self, data: dict[str, Any]) -> None:
@@ -194,6 +201,14 @@ class TestJobStringParameterDefinition:
             ),
             pytest.param(
                 {"name": "Foo", "type": "STRING", "allowedValues": []}, id="allowedValues too small"
+            ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "STRING",
+                    "allowedValues": None,
+                },
+                id="allowedValues is explicitly None",
             ),
             pytest.param(
                 {"name": "Foo", "type": "STRING", "allowedValues": [12]},
@@ -315,6 +330,54 @@ class TestJobStringParameterDefinition:
 
         # THEN
         assert len(excinfo.value.errors()) > 0
+
+    def test_allowedvalues_minlength_error_location(self) -> None:
+        # Test that error location reporting includes the field name and index for minLength validation
+        data = {
+            "name": "Foo",
+            "type": "STRING",
+            "minLength": 10,  # Make this larger to ensure validation fails
+            "allowedValues": ["short", "short", "long_enough_value"],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobStringParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        assert any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 1) for error in errors)
+        # Verify that the third value doesn't trigger an error (it's long enough)
+        assert not any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value is shorter than minLength" in str(excinfo.value)
+
+    def test_allowedvalues_maxlength_error_location(self) -> None:
+        # Test that error location reporting includes the field name and index for maxLength validation
+        data = {
+            "name": "Foo",
+            "type": "STRING",
+            "maxLength": 2,  # Make this smaller to ensure validation fails
+            "allowedValues": ["ok", "ok", "too_long_value"],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobStringParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        # Only the third value should fail (it's too long)
+        assert not any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert not any(error["loc"] == ("allowedValues", 1) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value is longer than maxLength" in str(excinfo.value)
 
     @pytest.mark.parametrize(
         "value,parameter",
@@ -591,6 +654,13 @@ class TestJobPathParameterDefinition:
                 },
                 id="all fields",
             ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "PATH",
+                },
+                id="allowedValues not provided",
+            ),
         ),
     )
     def test_parse_success(self, data: dict[str, Any]) -> None:
@@ -625,6 +695,14 @@ class TestJobPathParameterDefinition:
             pytest.param({"name": "Foo", "type": "PATH", "maxLength": "1"}, id="max length string"),
             pytest.param(
                 {"name": "Foo", "type": "PATH", "allowedValues": []}, id="allowedValues too small"
+            ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "PATH",
+                    "allowedValues": None,
+                },
+                id="allowedValues is explicitly None",
             ),
             pytest.param(
                 {"name": "Foo", "type": "PATH", "allowedValues": [12]},
@@ -908,6 +986,54 @@ class TestJobPathParameterDefinition:
         # THEN
         assert len(excinfo.value.errors()) > 0
 
+    def test_allowedvalues_minlength_error_location(self) -> None:
+        # Test that error location reporting includes the field name and index for minLength validation
+        data = {
+            "name": "Foo",
+            "type": "PATH",
+            "minLength": 10,  # Make this larger to ensure validation fails
+            "allowedValues": ["short", "short", "long_enough_value"],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobPathParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        assert any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 1) for error in errors)
+        # Verify that the third value doesn't trigger an error (it's long enough)
+        assert not any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value is shorter than minLength" in str(excinfo.value)
+
+    def test_allowedvalues_maxlength_error_location(self) -> None:
+        # Test that error location reporting includes the field name and index for maxLength validation
+        data = {
+            "name": "Foo",
+            "type": "PATH",
+            "maxLength": 2,  # Make this smaller to ensure validation fails
+            "allowedValues": ["ok", "ok", "too_long_value"],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobPathParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        # Only the third value should fail (it's too long)
+        assert not any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert not any(error["loc"] == ("allowedValues", 1) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value is longer than maxLength" in str(excinfo.value)
+
     @pytest.mark.parametrize(
         "value,parameter",
         [
@@ -1105,6 +1231,13 @@ class TestJobIntParameterDefinition:
                 },
                 id="all fields",
             ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "INT",
+                },
+                id="allowedValues not provided",
+            ),
         ),
     )
     def test_parse_success(self, data: dict[str, Any]) -> None:
@@ -1135,6 +1268,14 @@ class TestJobIntParameterDefinition:
             #
             pytest.param(
                 {"name": "Foo", "type": "INT", "allowedValues": []}, id="allowedValues too small"
+            ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "INT",
+                    "allowedValues": None,
+                },
+                id="allowedValues is explicitly None",
             ),
             pytest.param(
                 {"name": "Foo", "type": "INT", "allowedValues": ["aa"]},
@@ -1274,6 +1415,54 @@ class TestJobIntParameterDefinition:
 
         # THEN
         assert len(excinfo.value.errors()) > 0
+
+    def test_allowedvalues_minvalue_error_location_int(self) -> None:
+        # Test that error location reporting includes the field name and index for minValue validation
+        data = {
+            "name": "Foo",
+            "type": "INT",
+            "minValue": 10,  # Make this larger to ensure validation fails
+            "allowedValues": [5, 6, 15],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobIntParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        assert any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 1) for error in errors)
+        # Verify that the third value doesn't trigger an error (it's large enough)
+        assert not any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value less than minValue" in str(excinfo.value)
+
+    def test_allowedvalues_maxvalue_error_location_int(self) -> None:
+        # Test that error location reporting includes the field name and index for maxValue validation
+        data = {
+            "name": "Foo",
+            "type": "INT",
+            "maxValue": 10,
+            "allowedValues": [5, 10, 15],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobIntParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        # Only the third value should fail (it's too large)
+        assert not any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert not any(error["loc"] == ("allowedValues", 1) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value larger than maxValue" in str(excinfo.value)
 
     @pytest.mark.parametrize(
         "value,parameter",
@@ -1500,6 +1689,13 @@ class TestJobFloatParameterDefinition:
                 },
                 id="all fields",
             ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "FLOAT",
+                },
+                id="allowedValues not provided",
+            ),
         ),
     )
     def test_parse_success(self, data: dict[str, Any]) -> None:
@@ -1529,6 +1725,14 @@ class TestJobFloatParameterDefinition:
             ),
             pytest.param(
                 {"name": "Foo", "type": "FLOAT", "allowedValues": []}, id="allowedValues too small"
+            ),
+            pytest.param(
+                {
+                    "name": "Foo",
+                    "type": "FLOAT",
+                    "allowedValues": None,
+                },
+                id="allowedValues is explicitly None",
             ),
             pytest.param(
                 {"name": "Foo", "type": "FLOAT", "allowedValues": ["aa"]},
@@ -1638,6 +1842,54 @@ class TestJobFloatParameterDefinition:
 
         # THEN
         assert len(excinfo.value.errors()) > 0
+
+    def test_allowedvalues_minvalue_error_location_float(self) -> None:
+        # Test that error location reporting includes the field name and index for minValue validation
+        data = {
+            "name": "Foo",
+            "type": "FLOAT",
+            "minValue": "10.0",  # Make this larger to ensure validation fails
+            "allowedValues": ["5.0", "6.0", "15.0"],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobFloatParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        assert any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 1) for error in errors)
+        # Verify that the third value doesn't trigger an error (it's large enough)
+        assert not any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value less than minValue" in str(excinfo.value)
+
+    def test_allowedvalues_maxvalue_error_location_float(self) -> None:
+        # Test that error location reporting includes the field name and index for maxValue validation
+        data = {
+            "name": "Foo",
+            "type": "FLOAT",
+            "maxValue": "10.0",
+            "allowedValues": ["5.0", "10.0", "15.0"],
+        }
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=JobFloatParameterDefinition, obj=data)
+
+        # THEN
+        errors = excinfo.value.errors()
+        assert len(errors) > 0
+        # Check that the error location includes both "allowedValues" and the index
+        # Only the third value should fail (it's too large)
+        assert not any(error["loc"] == ("allowedValues", 0) for error in errors)
+        assert not any(error["loc"] == ("allowedValues", 1) for error in errors)
+        assert any(error["loc"] == ("allowedValues", 2) for error in errors)
+        # Check the error message
+        assert "Value larger than maxValue" in str(excinfo.value)
 
     @pytest.mark.parametrize(
         "value,parameter",

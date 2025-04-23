@@ -56,6 +56,11 @@ from .._types import (
     TemplateVariableDef,
 )
 
+# Error message constants
+_ALLOWED_VALUES_NONE_ERROR = "allowedValues cannot be None. The field must contain at least one value or be omitted entirely."
+_VALUE_LESS_THAN_MIN_ERROR = "Value less than minValue."
+_VALUE_LARGER_THAN_MAX_ERROR = "Value larger than maxValue."
+
 
 class ModelParsingContext(ModelParsingContextInterface):
     """Context required while parsing an OpenJDModel. An instance of this class
@@ -1211,6 +1216,8 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
     def _validate_allowed_values_item(
         cls, value: AllowedParameterStringValueList, info: ValidationInfo
     ) -> AllowedParameterStringValueList:
+        if value is None:
+            raise ValueError(_ALLOWED_VALUES_NONE_ERROR)
         min_length = info.data.get("minLength")
         max_length = info.data.get("maxLength")
         errors = list[InitErrorDetails]()
@@ -1421,7 +1428,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
             "default",
         },
         adds_fields=lambda this, symtab: {
-            "value": symtab[f"RawParam.{cast(JobStringParameterDefinition,this).name}"]
+            "value": symtab[f"RawParam.{cast(JobPathParameterDefinition,this).name}"]
         },
     )
 
@@ -1451,8 +1458,10 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
     @field_validator("allowedValues")
     @classmethod
     def _validate_allowed_values_item(
-        cls, value: ParameterStringValue, info: ValidationInfo
-    ) -> ParameterStringValue:
+        cls, value: AllowedParameterStringValueList, info: ValidationInfo
+    ) -> AllowedParameterStringValueList:
+        if value is None:
+            raise ValueError(_ALLOWED_VALUES_NONE_ERROR)
         min_length = info.data.get("minLength")
         max_length = info.data.get("maxLength")
         errors = list[InitErrorDetails]()
@@ -1462,7 +1471,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
                     errors.append(
                         InitErrorDetails(
                             type="value_error",
-                            loc=("allowedValues", i),
+                            loc=(i,),
                             ctx={"error": ValueError("Value is shorter than minLength.")},
                             input=item,
                         )
@@ -1472,7 +1481,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
                     errors.append(
                         InitErrorDetails(
                             type="value_error",
-                            loc=("allowedValues", i),
+                            loc=(i,),
                             ctx={"error": ValueError("Value is longer than maxLength.")},
                             input=item,
                         )
@@ -1610,7 +1619,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
         allowedValues (Optional[AllowedIntParameterList]): Explicit list of values that the
             parameter is allowed to take on.
         minValue (Optional[int]): Minimum value that the parameter is allowed to be.
-        maxValue (Optional[int]): Minimum value that the parameter is allowed to be.
+        maxValue (Optional[int]): Maximum value that the parameter is allowed to be.
     """
 
     name: Identifier
@@ -1671,7 +1680,12 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
 
     @field_validator("allowedValues", mode="before")
     @classmethod
-    def _validate_allowed_values_item_type(cls, value: Any) -> Any:
+    def _validate_allowed_values_item_type(
+        cls, value: AllowedIntParameterList
+    ) -> AllowedIntParameterList:
+        if value is None:
+            raise ValueError(_ALLOWED_VALUES_NONE_ERROR)
+
         errors = list[InitErrorDetails]()
         for i, item in enumerate(value):
             if isinstance(item, bool) or not isinstance(item, (int, str)):
@@ -1712,7 +1726,11 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
 
     @field_validator("allowedValues")
     @classmethod
-    def _validate_allowed_values_item(cls, value: list[int], info: ValidationInfo) -> list[int]:
+    def _validate_allowed_values_item(
+        cls, value: AllowedIntParameterList, info: ValidationInfo
+    ) -> AllowedIntParameterList:
+        if value is None:
+            raise ValueError(_ALLOWED_VALUES_NONE_ERROR)
         min_value = info.data.get("minValue")
         max_value = info.data.get("maxValue")
         errors = list[InitErrorDetails]()
@@ -1723,7 +1741,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
                         InitErrorDetails(
                             type="value_error",
                             loc=(i,),
-                            ctx={"error": ValueError("Value less than minValue.")},
+                            ctx={"error": ValueError(_VALUE_LESS_THAN_MIN_ERROR)},
                             input=item,
                         )
                     )
@@ -1733,7 +1751,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
                         InitErrorDetails(
                             type="value_error",
                             loc=(i,),
-                            ctx={"error": ValueError("Value larger than minValue.")},
+                            ctx={"error": ValueError(_VALUE_LARGER_THAN_MAX_ERROR)},
                             input=item,
                         )
                     )
@@ -1747,11 +1765,11 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
         min_value = info.data.get("minValue")
         if min_value is not None:
             if value < min_value:
-                raise ValueError("Value less than minValue.")
+                raise ValueError(_VALUE_LESS_THAN_MIN_ERROR)
         max_value = info.data.get("maxValue")
         if max_value is not None:
             if value > max_value:
-                raise ValueError("Value larger than maxValue.")
+                raise ValueError(_VALUE_LARGER_THAN_MAX_ERROR)
 
         allowed_values = info.data.get("allowedValues")
         if allowed_values is not None:
@@ -1856,7 +1874,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
         allowedValues (Optional[AllowedFloatParameterList]): Explicit list of values that the
             parameter is allowed to take on.
         minValue (Optional[Decimal]): Minimum value that the parameter is allowed to be.
-        maxValue (Optional[Decimal]): Minimum value that the parameter is allowed to be.
+        maxValue (Optional[Decimal]): Maximum value that the parameter is allowed to be.
     """
 
     name: Identifier
@@ -1909,8 +1927,10 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("allowedValues")
     @classmethod
     def _validate_allowed_values_item(
-        cls, value: list[Decimal], info: ValidationInfo
-    ) -> list[Decimal]:
+        cls, value: AllowedFloatParameterList, info: ValidationInfo
+    ) -> AllowedFloatParameterList:
+        if value is None:
+            raise ValueError(_ALLOWED_VALUES_NONE_ERROR)
         min_value = info.data.get("minValue")
         max_value = info.data.get("maxValue")
         errors = list[InitErrorDetails]()
@@ -1921,7 +1941,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
                         InitErrorDetails(
                             type="value_error",
                             loc=(i,),
-                            ctx={"error": ValueError("Value less than minValue.")},
+                            ctx={"error": ValueError(_VALUE_LESS_THAN_MIN_ERROR)},
                             input=item,
                         )
                     )
@@ -1931,7 +1951,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
                         InitErrorDetails(
                             type="value_error",
                             loc=(i,),
-                            ctx={"error": ValueError("Value larger than maxValue.")},
+                            ctx={"error": ValueError(_VALUE_LARGER_THAN_MAX_ERROR)},
                             input=item,
                         )
                     )
@@ -1945,11 +1965,11 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
         min_value = info.data.get("minValue")
         if min_value is not None:
             if value < min_value:
-                raise ValueError("Value less than minValue.")
+                raise ValueError(_VALUE_LESS_THAN_MIN_ERROR)
         max_value = info.data.get("maxValue")
         if max_value is not None:
             if value > max_value:
-                raise ValueError("Value larger than maxValue.")
+                raise ValueError(_VALUE_LARGER_THAN_MAX_ERROR)
 
         allowed_values = info.data.get("allowedValues")
         if allowed_values is not None:
