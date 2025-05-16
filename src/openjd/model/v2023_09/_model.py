@@ -89,6 +89,8 @@ class ExtensionName(str, Enum):
 
     # # https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0001-task-chunking.md
     TASK_CHUNKING = "TASK_CHUNKING"
+    # Extension that enables the use of openjd_redacted_env for setting environment variables with redacted values in logs
+    REDACTED_ENV_VARS = "REDACTED_ENV_VARS"
 
 
 ExtensionNameList = Annotated[list[str], Field(min_length=1)]
@@ -512,24 +514,6 @@ TaskParameterStringValueAsJob = Annotated[str, StringConstraints(min_length=0, m
 TaskRangeList = list[Union[TaskParameterStringValueAsJob, int, float, Decimal]]
 
 
-# Target model for task parameters when instantiating a job.
-class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
-    # element type of items in the range
-    type: TaskParameterType
-    # NOTE: Pydantic V1 was allowing non-string values in this range, V2 is enforcing that type.
-    range: TaskRangeList
-    # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
-    chunks: Optional[TaskChunksDefinition] = None
-
-
-class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
-    # element type of items in the range
-    type: TaskParameterType
-    range: IntRangeExpr
-    # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
-    chunks: Optional[TaskChunksDefinition] = None
-
-
 class TaskChunksRangeConstraint(str, Enum):
     CONTIGUOUS = "CONTIGUOUS"
     NONCONTIGUOUS = "NONCONTIGUOUS"
@@ -557,6 +541,24 @@ class TaskChunksDefinition(OpenJDModel_v2023_09):
             return value
         context = cast(Optional[ModelParsingContextInterface], info.context)
         return validate_int_fmtstring_field(value, ge=0, context=context)
+
+
+# Target model for task parameters when instantiating a job.
+class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
+    # element type of items in the range
+    type: TaskParameterType
+    # NOTE: Pydantic V1 was allowing non-string values in this range, V2 is enforcing that type.
+    range: TaskRangeList
+    # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
+    chunks: Optional[TaskChunksDefinition] = None
+
+
+class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
+    # element type of items in the range
+    type: TaskParameterType
+    range: IntRangeExpr
+    # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
+    chunks: Optional[TaskChunksDefinition] = None
 
 
 class IntTaskParameterDefinition(OpenJDModel_v2023_09):
