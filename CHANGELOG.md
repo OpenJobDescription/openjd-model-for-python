@@ -1,3 +1,10 @@
+## 0.8.0 (2025-05-21)
+
+
+### Features
+* Adding support for redacted environment variable values through openjd_redacted_env ([`460656a`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/460656aa06d5f9e16b64a8b67f705bc80bdd31dc))
+
+
 ## 0.7.0 (2025-03-03)
 
 ### BREAKING CHANGES
