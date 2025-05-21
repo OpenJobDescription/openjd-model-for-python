@@ -323,13 +323,17 @@ class JobParameterInterface(ABC):
         pass
 
 
-class ModelParsingContextInterface(ABC):
-    """Context required while parsing an OpenJDModel. A subclass
-    must be provided when calling model_validate.
+class RevisionExtensions:
+    """
+    Data class for representing a specific OpenJD Specification Revision and set of extensions
+    in order to evaluate supported capabilities.
 
-        OpenJDModelSubclass.model_validate(data, context=ModelParsingContext())
+    This class encapsulates both the specification revision and the set of extensions that are
+    supported or requested by a template.
 
-    Individual validators receive this value as ValidationInfo.context.
+    Attributes:
+        spec_rev: The revision of the Open Job Description specification being used.
+        extensions: The set of extension names that are supported or requested.
     """
 
     spec_rev: SpecificationRevision
@@ -343,14 +347,88 @@ class ModelParsingContextInterface(ABC):
     The 'extensions' field is second in the list of model properties for both the job template
     and environment template, and when that field is processed it becomes the set of extensions
     that the template requested.
+    """
+
+    def __init__(
+        self, *, spec_rev: SpecificationRevision, supported_extensions: Optional[Iterable[str]]
+    ) -> None:
+        """
+        Initialize a RevisionExtensions instance.
+
+        Args:
+            spec_rev: The specification revision to use.
+            supported_extensions: An optional iterable of extension names that are supported.
+                                 If None, an empty set will be used.
+        """
+        self.spec_rev = spec_rev
+        self.extensions = set(supported_extensions or [])
+
+
+class ModelParsingContextInterface(ABC):
+    """Context required while parsing an OpenJDModel. A subclass
+    must be provided when calling model_validate.
+
+        OpenJDModelSubclass.model_validate(data, context=ModelParsingContext())
+
+    Individual validators receive this value as ValidationInfo.context.
+
+    This interface defines the contract for model parsing contexts across different
+    specification revisions. It provides access to the specification revision and
+    extensions that are supported or requested by a template, which allows validators
+    to adjust their behavior based on the specification version and enabled extensions.
+    """
+
+    revision_extensions: RevisionExtensions
+    """Contains information about the specification revision and supported extensions.
+    This allows shared code like the FormatString class to perform version-specific
+    processing and extension-dependent validation.
 
     When fields of a model that depend on an extension are processed, its validators should
     check whether the needed extension is included in the context and adjust its parsing
     as written in the specification.
     """
 
+    @property
+    def spec_rev(self) -> SpecificationRevision:
+        """
+        Get the specification revision being used.
+
+        Returns:
+            The specification revision from the revision_extensions.
+        """
+        return self.revision_extensions.spec_rev
+
+    @property
+    def extensions(self) -> set[str]:
+        """
+        Get the set of supported extensions.
+
+        Returns:
+            The set of extension names from the revision_extensions.
+        """
+        return self.revision_extensions.extensions
+
+    @extensions.setter
+    def extensions(self, extension_set: set[str]):
+        """
+        Set the supported extensions.
+
+        Args:
+            extension_set: The new set of extension names to use.
+        """
+        self.revision_extensions.extensions = extension_set
+
     def __init__(
         self, *, spec_rev: SpecificationRevision, supported_extensions: Optional[Iterable[str]]
     ) -> None:
-        self.spec_rev = spec_rev
-        self.extensions = set(supported_extensions or [])
+        """
+        Initialize a ModelParsingContextInterface instance.
+
+        Args:
+            spec_rev: The specification revision to use.
+            supported_extensions: An optional iterable of extension names that are supported.
+                                 If None, an empty set will be used.
+        """
+        self.revision_extensions = RevisionExtensions(
+            spec_rev=spec_rev, supported_extensions=supported_extensions
+        )
