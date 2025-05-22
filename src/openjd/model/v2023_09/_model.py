@@ -183,6 +183,9 @@ _file_dialog_filter_pattern_regex = (
 class JobTemplateName(FormatString):
     _min_length = 1
 
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
+
 
 JobName = Annotated[
     str,
@@ -225,11 +228,17 @@ class CommandString(FormatString):
     # All unicode except the [Cc] (control characters) category
     _regex = f"(?-m:^[^{_Cc_characters}]+\\Z)"
 
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
+
 
 class ArgString(FormatString):
     # All unicode except the [Cc] (control characters) category
     # Allow CR, LF, and TAB.
     _regex = f"(?-m:^[^{_Cc_characters}]*\\Z)"
+
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
 
 
 class CancelationMode(str, Enum):
@@ -363,6 +372,9 @@ Filename = Annotated[str, StringConstraints(min_length=1, max_length=64, strict=
 class DataString(FormatString):
     _min_length = 1
 
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
+
 
 class EmbeddedFileText(OpenJDModel_v2023_09):
     """A plain text file embedded directly into the Job Template.
@@ -485,7 +497,8 @@ class TaskParameterStringValue(FormatString):
     # as a TaskParameterStringValueAsJob type after the template
     # has been instantiated in to a Job, and this format string
     # has been evaluated.
-    pass
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
 
 
 class TaskParameterType(str, Enum):
@@ -498,6 +511,9 @@ class TaskParameterType(str, Enum):
 
 class RangeString(FormatString):
     _min_length = 1
+
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
 
 
 # Note: Ordering within the Unions is important. Pydantic will try to match in
@@ -993,6 +1009,9 @@ EnvironmentVariableNameString = Annotated[
 
 class EnvironmentVariableValueString(FormatString):
     _max_length = 2048
+
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
 
 
 EnvironmentVariableObject = dict[EnvironmentVariableNameString, EnvironmentVariableValueString]
@@ -2011,6 +2030,9 @@ class AmountCapabilityName(FormatString):
     _min_length = 1
     _max_length = 100
 
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
+
 
 class AttributeCapabilityName(FormatString):
     """The name of an attrubute capability."""
@@ -2018,9 +2040,15 @@ class AttributeCapabilityName(FormatString):
     _min_length = 1
     _max_length = 100
 
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
+
 
 class AttributeCapabilityValue(FormatString):
     _min_length = 1
+
+    def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
+        return super().__new__(cls, value, context=context)
 
 
 AttributeCapabilityList = Annotated[
