@@ -1,3 +1,13 @@
+## 0.8.0 (2025-05-22)
+
+### BREAKING CHANGES
+* Creation of a DynamicConstrainedStr or FormatString now requires a model parsing context, including the Open Job Description revision and any extensions that are enabled. ([`2a8db9d`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/2a8db9d7064715079b3f7160988787c90fa93f0e))
+* instantiate_model no longer accepts optional loc and within_field arguments. ([`2a8db9d`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/2a8db9d7064715079b3f7160988787c90fa93f0e))
+
+### Features
+* Added extension definition, REDACTED_ENV_VARS, for RFC-0003: Redacted Environment Variables ([`460656a`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/460656aa06d5f9e16b64a8b67f705bc80bdd31dc))
+
+
 ## 0.7.0 (2025-03-03)
 
 ### BREAKING CHANGES
