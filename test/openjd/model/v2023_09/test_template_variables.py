@@ -1128,6 +1128,17 @@ PARAMETRIZE_CASES = (
         2,  # Validation of Job Foo & Task Foo
         id="all parameter symbols are defined when validation errors",
     ),
+    pytest.param(
+        {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Foo",
+            "parameterDefinitions": [FOO_PARAMETER_STRING],
+            "steps": [STEP_TEMPLATE_FOO],
+            "jobEnvironments": [{"name": "VariableEnv", "script": {"actions": []}}],
+        },
+        1,
+        id="jobEnvironments.script.actions needs to be a dict",
+    ),
 )
 
 
