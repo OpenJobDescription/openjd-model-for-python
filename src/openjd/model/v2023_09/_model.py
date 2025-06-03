@@ -351,6 +351,9 @@ class EnvironmentActions(OpenJDModel_v2023_09):
     @classmethod
     def _requires_oneof(cls, values: dict[str, Any]) -> dict[str, Any]:
         """A validator that runs on the model data before parsing."""
+        if not isinstance(values, dict):
+            raise ValueError("Expected a dictionary of values")
+
         on_enter = values.get("onEnter")
         on_exit = values.get("onExit")
         if on_enter is None and on_exit is None:
