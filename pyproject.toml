@@ -41,7 +41,6 @@ Source = "https://github.com/OpenJobDescription/openjd-model-for-python"
 artifacts = [
   "*_version.py",
 ]
-only-packages = true
 
 [tool.hatch.version]
 source = "vcs"
@@ -64,11 +63,9 @@ destinations = [
 ]
 
 [tool.hatch.build.targets.sdist]
-packages = [
+include = [
   "src/openjd",
-]
-only-include = [
-  "src/openjd",
+  "hatch_version_hook.py"
 ]
 
 [tool.hatch.build.targets.wheel]
