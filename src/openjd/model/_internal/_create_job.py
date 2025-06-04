@@ -80,7 +80,7 @@ def instantiate_model(  # noqa: C901
         elif create_as_metadata.callable is not None:
             target_model = create_as_metadata.callable(model)
 
-    for field_name in model.model_fields.keys():
+    for field_name in model.__class__.model_fields.keys():
         if field_name in model._job_creation_metadata.exclude_fields:
             # The field is marked for being excluded
             continue
