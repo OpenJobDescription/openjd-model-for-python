@@ -2675,7 +2675,7 @@ class JobTemplate(OpenJDModel_v2023_09):
         if not envlist:
             return self
 
-        job_env_names = set(env.name for env in cast(JobEnvironmentsList, envlist))
+        job_env_names = set(env.name for env in envlist)
 
         errors = list[InitErrorDetails]()
         for i, step in enumerate(steplist):
