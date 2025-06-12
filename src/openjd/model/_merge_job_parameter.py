@@ -197,10 +197,7 @@ def merge_job_parameter_definitions_for_one(
     if errors:
         raise CompatibilityError("\n".join(errors))
 
-    return cast(
-        JobParameterDefinition,
-        parse_model(model=params[0].definition.__class__, obj=merged_properties),
-    )
+    return parse_model(model=params[0].definition.__class__, obj=merged_properties)
 
 
 def _merge_allowed_values(
