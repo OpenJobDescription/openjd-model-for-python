@@ -1,3 +1,14 @@
+## 1.0.0 (2025-06-16)
+
+
+### Features
+* Exposing ExtensionName publicy (#200) ([`0a0cb4a`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/0a0cb4acc6d8d70f5419c4f9b49c1a1b56b01b60))
+* Exposing ExtensionName publicy ([`0a0cb4a`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/0a0cb4acc6d8d70f5419c4f9b49c1a1b56b01b60))
+
+### Bug Fixes
+* sdist failed to install (#198) ([`ed30b7f`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/ed30b7f38c8828a6d33969196dc8db7a74894d09))
+* EnvironmentActions validation edge case (#197) ([`ae69150`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/ae691502f547bd845001c5f10e32175f386cbe96))
+
 ## 0.8.0 (2025-05-22)
 
 ### BREAKING CHANGES
