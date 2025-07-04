@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from contextlib import contextmanager
-from typing import Annotated, Any, Union
+from typing import Annotated, Any, Union, Dict
 
 from pydantic import ValidationError
 from pydantic import TypeAdapter
@@ -12,6 +12,27 @@ from .._format_strings import FormatString
 from .._types import OpenJDModel
 
 __all__ = ("instantiate_model",)
+
+# Cache for TypeAdapter instances
+_type_adapter_cache: Dict[int, TypeAdapter] = {}
+
+
+def get_type_adapter(field_type: Any) -> TypeAdapter:
+    """Get a TypeAdapter for the given field type, using a cache for efficiency.
+    Assumes field_type refers to shared type definitions from the model so two field_types
+    referring to the same underlying model type will have the same id and share an adapter.
+
+    Args:
+        field_type: The type to adapt.
+
+    Returns:
+        A TypeAdapter for the given type.
+    """
+    # Use id as cache key
+    type_key = id(field_type)
+    if type_key not in _type_adapter_cache:
+        _type_adapter_cache[type_key] = TypeAdapter(field_type)
+    return _type_adapter_cache[type_key]
 
 
 @contextmanager
@@ -114,9 +135,9 @@ def instantiate_model(  # noqa: C901
             else:
                 instantiated = _instantiate_noncollection_value(field_value, symtab, needs_resolve)
 
-            # Validate as the target field type
-            type_adaptor: Any = TypeAdapter(target_field_type)
-            instantiated = type_adaptor.validate_python(instantiated)
+            # Validate as the target field type using cached TypeAdapter
+            type_adapter = get_type_adapter(target_field_type)
+            instantiated = type_adapter.validate_python(instantiated)
             instantiated_fields[target_field_name] = instantiated
 
     if not errors:

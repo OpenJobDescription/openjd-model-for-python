@@ -10,13 +10,47 @@ from pydantic import PositiveInt, ValidationError
 from openjd.model import SymbolTable
 from openjd.model._format_strings import FormatString
 from openjd.model import SpecificationRevision
-from openjd.model._internal._create_job import instantiate_model
+from openjd.model._internal._create_job import (
+    instantiate_model,
+    get_type_adapter,
+    _type_adapter_cache,
+)
 from openjd.model._types import (
     JobCreateAsMetadata,
     JobCreationMetadata,
     OpenJDModel,
 )
 from openjd.model.v2023_09 import ModelParsingContext as ModelParsingContext_v2023_09
+
+
+class TestGetTypeAdapter:
+    """Tests for the get_type_adapter function."""
+
+    def setup_method(self):
+        """Clear the type adapter cache before each test."""
+        _type_adapter_cache.clear()
+
+    def test_get_type_adapter_caching(self):
+        """Test that get_type_adapter caches TypeAdapters for repeated calls with the same type."""
+        # First call should create a new TypeAdapter
+        str_type = str
+        str_type_id = id(str_type)
+        adapter1 = get_type_adapter(str_type)
+
+        # Second call should return the cached TypeAdapter
+        adapter2 = get_type_adapter(str_type)
+
+        # The adapters should be the same object (not just equal)
+        assert adapter1 is adapter2
+
+        # The cache should contain the entry
+        assert str_type_id in _type_adapter_cache
+
+        # Different types should get different adapters
+        int_type = int
+        adapter_int = get_type_adapter(int_type)
+        assert adapter_int is not adapter1
+        assert id(int_type) in _type_adapter_cache
 
 
 class BaseModelForTesting(OpenJDModel):

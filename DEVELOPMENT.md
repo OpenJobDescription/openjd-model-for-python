@@ -31,6 +31,7 @@ from any directory of this repository:
 * `hatch build` - To build the installable Python wheel and sdist packages into the `dist/` directory.
 * `hatch run test` - To run the PyTest unit tests found in the `test/` directory. See [Testing](#testing).
 * `hatch run all:test` - To run the PyTest unit tests against all available supported versions of Python.
+* `hatch run benchmark` - To run performance benchmark tests found in the `test/openjd/model/benchmark/` directory.
 * `hatch run lint` - To check that the package's formatting adheres to our standards.
 * `hatch run fmt` - To automatically reformat all code to adhere to our formatting standards.
 * `hatch shell` - Enter a shell environment where you can run the `deadline` command-line directly as it is implemented in your
@@ -93,6 +94,17 @@ You can run tests with:
 
 Any arguments that you add to these commands are passed through to PyTest. So, if you want to, say, run the
 [Python debugger](https://docs.python.org/3/library/pdb.html) to investigate a test failure then you can run: `hatch run test --pdb`
+
+### Running Benchmarks
+
+Performance benchmark tests are kept separate from the regular test suite and can be run with:
+
+* `hatch run benchmark` - To run all benchmark tests.
+* `hatch run benchmark -k <benchmark>` - To run a specific benchmark test.
+
+Benchmarks are designed to measure performance characteristics of the library and may take longer to run than regular tests.
+
+Benchmarks may include log output which can be enabled following the instructions in the test output section below.
 
 ### Super verbose test output
 
