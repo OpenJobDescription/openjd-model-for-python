@@ -130,7 +130,6 @@ addopts = [
     "--timeout=30"
 ]
 
-
 [tool.coverage.run]
 branch = true
 parallel = true

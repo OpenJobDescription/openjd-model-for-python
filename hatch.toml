@@ -5,7 +5,8 @@ pre-install-commands = [
 
 [envs.default.scripts]
 sync = "pip install -r requirements-testing.txt"
-test = "pytest --cov-config pyproject.toml {args:test}"
+test = "pytest test/ --cov-config pyproject.toml --ignore=test/openjd/model/benchmark {args}"
+benchmark = "pytest test/openjd/model/benchmark --no-cov {args}"
 typing = "mypy {args:src test}"
 style = [
   "ruff check {args:src test}",
