@@ -1,3 +1,10 @@
+## 0.8.2 (2025-07-08)
+
+
+
+### Bug Fixes
+* Adding a TypeAdapter cache to fix a performance regression with larger templates. ([`b62a4f1`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b62a4f133b33bbea13da2f9dbb97e33441ffe8ca))
+
 ## 0.8.1 (2025-06-30)
 
 
