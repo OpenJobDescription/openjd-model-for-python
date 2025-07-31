@@ -1,6 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import json
+import os
 from dataclasses import is_dataclass
 from decimal import Decimal
 from enum import Enum
@@ -31,6 +32,18 @@ __all__ = (
 class DocumentType(str, Enum):
     JSON = "JSON"
     YAML = "YAML"
+
+
+# Environment variable can optionally disable CSafeLoader (used for benchmarking)
+use_csafe_loader = os.environ.get("OPENJD_USE_CSAFE_LOADER", "true").lower() in ("true", "1", "yes")
+
+try:
+    if use_csafe_loader:
+        from yaml import CSafeLoader as _YamlLoader  # type: ignore[attr-defined]
+    else:
+        raise ImportError("CSafeLoader disabled by environment variable")
+except ImportError:
+    from yaml import SafeLoader as _YamlLoader  # type: ignore[assignment]
 
 
 # Pydantic injects a __pydantic_model__ attribute into all dataclasses. To be able to parse
@@ -111,7 +124,7 @@ def document_string_to_object(*, document: str, document_type: DocumentType) -> 
         if document_type == DocumentType.JSON:
             parsed_document = json.loads(document)
         else:  # YAML
-            parsed_document = yaml.safe_load(document)
+            parsed_document = yaml.load(document, Loader=_YamlLoader)
         if not isinstance(parsed_document, dict):
             raise ValueError()
         return parsed_document
