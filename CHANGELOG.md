@@ -1,3 +1,9 @@
+## 0.8.3 (2025-08-18)
+
+
+### Features
+* Attempting to load use CSafeLoader for faster YAML parsing where available. CSafeLoader can offer 9->11x performance improvements in some cases while still performing the safe loading methods of safe_load (#219) ([`37d3a65`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/37d3a65fe0cfe27473586005f5a22cfc109f891d))
+
 ## 0.8.2 (2025-07-08)
 
 
