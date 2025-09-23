@@ -1,3 +1,10 @@
+## 0.8.4 (2025-09-12)
+
+
+
+### Bug Fixes
+* improve error reporting when allowedValues is set to None (#184) ([`3b9c703`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/3b9c7036654ad724e806d5404701fea7990cc06f))
+
 ## 0.8.3 (2025-08-18)
 
 
