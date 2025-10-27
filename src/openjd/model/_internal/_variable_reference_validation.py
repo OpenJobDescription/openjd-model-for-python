@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+import sys
 from collections import defaultdict
 import typing
 from typing import cast, Any, Optional, Type, Literal, Union
@@ -9,8 +10,11 @@ from pydantic import Discriminator
 from pydantic_core import InitErrorDetails
 from pydantic.fields import FieldInfo, ModelPrivateAttr
 
-# Workaround for Python 3.9 where issubclass raises an error "TypeError: issubclass() arg 1 must be a class"
-from pydantic.v1.utils import lenient_issubclass
+if sys.version_info >= (3, 10):
+    _issubclass_for_pydantic = issubclass
+else:
+    # Workaround for Python 3.9 where issubclass raises an error "TypeError: issubclass() arg 1 must be a class"
+    from pydantic.v1.utils import lenient_issubclass as _issubclass_for_pydantic
 
 from .._types import OpenJDModel, ResolutionScope, ModelParsingContextInterface
 from .._format_strings import FormatString, FormatStringError
@@ -307,7 +311,7 @@ def _validate_model_template_variable_references(
         else:
             return errors
 
-    if isclass(model) and lenient_issubclass(model, FormatString):
+    if isclass(model) and _issubclass_for_pydantic(model, FormatString):
         if not isinstance(value, FormatString):
             if context is None:
                 raise ValueError(
@@ -321,7 +325,9 @@ def _validate_model_template_variable_references(
         return _check_format_string(value, current_scope, symbols, loc, context=context)
 
     # Return an empty error list if it's not an OpenJDModel, or if it's not a dict
-    if not (isclass(model) and lenient_issubclass(model, OpenJDModel) and isinstance(value, dict)):
+    if not (
+        isclass(model) and _issubclass_for_pydantic(model, OpenJDModel) and isinstance(value, dict)
+    ):
         return []
 
     # Does this cls change the variable reference scope for itself and its children? If so, then update
@@ -557,7 +563,7 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             return {"__export__": ScopedSymtabs()}
 
     # Anything except for an OpenJDModel returns an empty result
-    if not isclass(model) or not lenient_issubclass(model, OpenJDModel):
+    if not isclass(model) or not _issubclass_for_pydantic(model, OpenJDModel):
         return {"__export__": ScopedSymtabs()}
 
     # If the model has no exported variable definitions, prune it
