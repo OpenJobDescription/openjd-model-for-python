@@ -1,3 +1,11 @@
+## 0.8.5 (2025-10-27)
+
+
+
+### Bug Fixes
+* Running in Python 3.14 produces a pydantic.v1 warning message. ([`3e9086e`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/3e9086eb6964e893920487d1ad6acd0a53bd88c0))
+
+
 ## 0.8.4 (2025-09-12)
 
 
