@@ -40,85 +40,126 @@ Please see [CONTRIBUTING.md](./CONTRIBUTING.md) for our contributing guidelines.
 
 ## Example Usage
 
-### Reading and Validating a Template File
+### Reading and Validating a Job Template
+
+To validate a job template, you can read the JSON or YAML input
+into Python data structures and then pass the result to `decode_job_template`.
+By default, this will accept templates of any supported version number with
+no extensions enabled. Use `decode_environment_template` for environment templates.
+
+To accept extensions in templates, provide the list of the names you support. See the
+[Open Job Description 2023-09 specification](https://github.com/OpenJobDescription/openjd-specifications/wiki/2023-09-Template-Schemas#1-root-elements)
+for the list of extensions available.
 
 ```python
-from openjd.model import (
-    DecodeValidationError,
-    DocumentType,
-    JobTemplate,
-    document_string_to_object,
-    decode_job_template
-)
+from openjd.model import DocumentType, decode_job_template, document_string_to_object
 
 # String containing the json of the job template
-template_string = "..."
-try:
-    template_object = document_string_to_object(
-        document=template_string,
-        document_type=DocumentType.JSON
-    )
-    # Use 'decode_environment_template()' instead if decoding an
-    # Environment Template
-    job_template = decode_job_template(template=template_object)
-except DecodeValidationError as e:
-    print(str(e))
-```
+template_string = """specificationVersion: jobtemplate-2023-09
+name: DemoJob
+steps:
+  - name: DemoStep
+    script:
+      actions:
+        onRun:
+          command: python
+          args: ["-c", "print('Hello')"]
+"""
 
-### Creating a Template Model
-
-```python
-from openjd.model.v2023_09 import *
-
-job_template = JobTemplate(
-    specificationVersion="jobtemplate-2023-09",
-    name="DemoJob",
-    steps=[
-        StepTemplate(
-            name="DemoStep",
-            script=StepScript(
-                actions=StepActions(
-                    onRun=Action(
-                        command="python",
-                        args=["-c", "print('Hello world!')"]
-                    )
-                )
-            )
-        )
-    ]
+# You can use 'json.loads' or 'yaml.safe_load' directly as well
+template_object = document_string_to_object(
+    document=template_string,
+    document_type=DocumentType.YAML
 )
+
+# Raises a DecodeValidationError if it fails.
+job_template = decode_job_template(template=template_object, supported_extensions=["TASK_CHUNKING"])
 ```
 
-### Converting a Template Model to a Dictionary
+Once you have the Open Job Description model object, you can use the `model_to_object` function
+to convert it into an object suitable for converting to JSON or YAML.
 
 ```python
 import json
-from openjd.model import (
-    decode_job_template,
-    model_to_object,
-)
-from openjd.model.v2023_09 import *
-
-job_template = JobTemplate(
-    specificationVersion="jobtemplate-2023-09",
-    name="DemoJob",
-    steps=[
-        StepTemplate(
-            name="DemoStep",
-            script=StepScript(
-                actions=StepActions(
-                    onRun=Action(
-                        command="echo",
-                        args=["Hello world"]
-                    )
-                )
-            )
-        )
-    ]
-)
+from openjd.model import model_to_object
 
 obj = model_to_object(model=job_template)
-print(json.dumps(obj))
+print(json.dumps(obj, indent=2))
+```
+
+### Creating Template Model Objects
+
+As an alternative to assembling full job templates as raw data following the specification data model,
+you can use the library to construct model objects of components, such as for StepTemplates,
+and then assemble the result into a job template. The `parse_model` function provides a way to
+do this.
+
+To call `parse_model`, you will need to provide the list of extensions you want to enable as the
+`supported_extensions` argument. Individual model objects can accept inputs differently depending on
+what extensions are requested in the job template, and the model parsing context holds that list.
+The functions `decode_job_template` and `decode_environment_template` create this
+context from top-level template fields, but when using `parse_model` to process interior model types
+you must provide it explicitly.
+
+```python
+import json
+from openjd.model import parse_model, model_to_object
+from openjd.model.v2023_09 import StepTemplate
+
+extensions_list = ["TASK_CHUNKING"]
+
+step_template = parse_model(
+    model=StepTemplate,
+    obj={
+        "name": "DemoStep",
+        "script": {
+            "actions": {"onRun": {"command": "python", "args": ["-c", "print('Hello world!')"]}}
+        },
+    },
+    supported_extensions=extensions_list,
+)
+
+obj = model_to_object(model=step_template)
+print(json.dumps(obj, indent=2))
+```
+
+You can also construct the individual elements of the template from the model object types.
+This can be more effort than using `parse_model` depending on how the enabled extensions
+affect processing. You will need to create a ModelParsingContext object to hold
+the extensions list, and pass it to any model object constructors that need it.
+
+```python
+import json
+from openjd.model import model_to_object
+from openjd.model.v2023_09 import (
+    StepTemplate,
+    StepScript,
+    StepActions,
+    Action,
+    ArgString,
+    CommandString,
+    ModelParsingContext,
+)
+
+context = ModelParsingContext(supported_extensions=["TASK_CHUNKING"])
+
+step_template = StepTemplate(
+    name="DemoStep",
+    script=StepScript(
+        actions=StepActions(
+            onRun=Action(
+                command=CommandString("python", context=context),
+                args=[
+                    ArgString("-c", context=context),
+                    ArgString("print('Hello world!')", context=context),
+                ],
+            )
+        )
+    ),
+)
+
+obj = model_to_object(model=step_template)
+print(json.dumps(obj, indent=2))
 ```
 
 ### Creating a Job from a Job Template
