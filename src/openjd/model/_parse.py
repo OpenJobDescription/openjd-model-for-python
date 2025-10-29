@@ -96,6 +96,18 @@ def _parse_model(*, model: Type[T], obj: Any, context: Any = None) -> T:
 def parse_model(
     *, model: Type[T], obj: Any, supported_extensions: Optional[Iterable[str]] = None
 ) -> T:
+    """
+    Parses an Open Job Description model object from an object following the Open Job Description
+    specification.
+
+    Arguments:
+        model: The Open Job Description model type, e.g. JobTemplate or JobParameterDefinition.
+        obj: The object to parse, e.g. {"specificationVersion": "2023-09", ...}
+        supported_extensions (optional): If the model type is a base template like JobTemplate or EnvironmentTemplate,
+                this is the list of extensions to allow in parsing the object. Otherwise, it is
+                the list of extensions that are accepted for parsing as if they were listed in the
+                base template's extensions field.
+    """
     try:
         return _parse_model(
             model=model,
