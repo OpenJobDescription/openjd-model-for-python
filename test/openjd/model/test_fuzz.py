@@ -15,6 +15,7 @@ import string
 import sys
 import time
 import traceback
+from typing import Optional
 
 from openjd.model import (
     DecodeValidationError,
@@ -197,7 +198,7 @@ def fuzz_yaml_json_string():
     )
 
 
-def run_fuzzer(num_tests: int, seed: int | None, verbose: bool) -> bool:
+def run_fuzzer(num_tests: int, seed: Optional[int], verbose: bool) -> bool:
     if seed is not None:
         random.seed(seed)
     else:
