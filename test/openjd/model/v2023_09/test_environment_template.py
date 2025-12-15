@@ -102,6 +102,14 @@ class TestEnvironmentTemplate:
                 1,
                 id="missing spec ver",
             ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
+                    "environment": None,
+                },
+                1,
+                id="environment is None",
+            ),
             #
             pytest.param(
                 {
