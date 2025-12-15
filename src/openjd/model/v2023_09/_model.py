@@ -1055,6 +1055,8 @@ class Environment(OpenJDModel_v2023_09):
     @model_validator(mode="before")
     @classmethod
     def _validate_has_script_or_variables(cls, values: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(values, dict):
+            raise ValueError("Environment must be a mapping.")
         if values.get("script") is None and values.get("variables") is None:
             raise ValueError("Environment must have either a script or variables.")
         return values
