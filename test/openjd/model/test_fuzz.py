@@ -5,7 +5,8 @@ Fuzzer for openjd-model-for-python to ensure malformed templates
 only raise DecodeValidationError or NotImplementedError.
 
 Usage:
-    python scripts/fuzz.py [--num-tests N] [--seed S] [--verbose]
+    CLI:    python test/openjd/model/test_fuzz.py [--num-tests N] [--seed S] [--verbose]
+    pytest: pytest test/openjd/model/test_fuzz.py::test_fuzz
 """
 
 import argparse
@@ -196,7 +197,7 @@ def fuzz_yaml_json_string():
     )
 
 
-def run_fuzzer(num_tests: int, seed: int | None, verbose: bool):
+def run_fuzzer(num_tests: int, seed: int | None, verbose: bool) -> bool:
     if seed is not None:
         random.seed(seed)
     else:
@@ -272,6 +273,11 @@ def run_fuzzer(num_tests: int, seed: int | None, verbose: bool):
             print(f"\n... and {len(crashes) - 10} more crashes")
 
     return len(crashes) == 0
+
+
+def test_fuzz():
+    """Fuzz test: all malformed inputs should raise DecodeValidationError or NotImplementedError."""
+    assert run_fuzzer(num_tests=1000, seed=None, verbose=False)
 
 
 def main():
