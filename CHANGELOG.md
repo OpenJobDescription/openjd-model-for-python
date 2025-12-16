@@ -1,3 +1,11 @@
+## 0.8.6 (2025-12-15)
+
+
+
+### Bug Fixes
+* handle None value for environment field in EnvironmentTemplate ([`41b2494`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/41b2494d186d7d3c7d5b4d4e67ccd6e0e2a1809e))
+
+
 ## 0.8.5 (2025-10-27)
 
 
