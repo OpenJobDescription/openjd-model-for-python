@@ -71,6 +71,42 @@ def fuzz_format_string():
     )
 
 
+def fuzz_cancelation():
+    return random.choice(
+        [
+            None,
+            {},
+            {"mode": "NOTIFY_THEN_TERMINATE"},
+            {"mode": "TERMINATE"},
+            {"mode": "INVALID_MODE"},
+            {"mode": random_string(1, 20)},
+            {"mode": None},
+            {"mode": 123},
+            {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": 30},
+            {"mode": "NOTIFY_THEN_TERMINATE", "notifyPeriodInSeconds": "invalid"},
+            random_string(1, 10),
+        ]
+    )
+
+
+def fuzz_task_parameter():
+    return random.choice(
+        [
+            {},
+            {"name": "P", "type": "INT", "range": "1-10"},
+            {"name": "P", "type": "FLOAT", "range": [1.0, 2.0]},
+            {"name": "P", "type": "STRING", "values": ["a", "b"]},
+            {"name": "P", "type": "PATH", "values": ["/tmp"]},
+            {"name": "P", "type": "INVALID_TYPE", "range": "1-10"},
+            {"name": "P", "type": random_string(1, 15), "range": "1-10"},
+            {"name": "P", "type": None},
+            {"name": "P", "type": 123},
+            {"type": "INT", "range": "1-10"},
+            random_string(1, 10),
+        ]
+    )
+
+
 def fuzz_step():
     base = {"name": "Step1", "script": {"actions": {"onRun": {"command": "echo"}}}}
     mutations = [
@@ -81,8 +117,15 @@ def fuzz_step():
         {"name": "Step1", "script": {"actions": {}}},
         {"name": "Step1", "script": {"actions": {"onRun": {}}}},
         {"name": "Step1", "script": {"actions": {"onRun": {"command": ""}}}},
+        {
+            "name": "Step1",
+            "script": {
+                "actions": {"onRun": {"command": "echo", "cancelation": fuzz_cancelation()}}
+            },
+        },
         {**base, "parameterSpace": {}},
         {**base, "parameterSpace": {"taskParameterDefinitions": []}},
+        {**base, "parameterSpace": {"taskParameterDefinitions": [fuzz_task_parameter()]}},
         {
             **base,
             "parameterSpace": {
@@ -106,12 +149,16 @@ def fuzz_job_parameter():
             {"name": "Param1", "type": "FLOAT"},
             {"name": "Param1", "type": "PATH"},
             {"name": "Param1", "type": "INVALID"},
+            {"name": "Param1", "type": random_string(1, 15)},
+            {"name": "Param1", "type": None},
+            {"name": "Param1", "type": 123},
             {"name": "", "type": "STRING"},
             {"name": 123, "type": "STRING"},
             {"type": "STRING"},
             {"name": "P", "type": "INT", "minValue": 10, "maxValue": 5},
             {"name": "P", "type": "INT", "default": "notanint"},
             {"name": "P", "type": "STRING", "allowedValues": []},
+            random_string(1, 10),
         ]
     )
 
