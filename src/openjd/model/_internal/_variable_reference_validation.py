@@ -459,6 +459,8 @@ def _get_model_for_singleton_value(
     # Find the correct model for the discriminator value by unwrapping the Union and then the discriminator Literals
     assert typing.get_origin(model) is typing.Union  # For the type checker
     for sub_model in typing.get_args(model):
+        if sub_model is type(None):
+            continue
         sub_model_discr_value = sub_model.model_fields[discriminator].annotation
         if typing.get_origin(sub_model_discr_value) is not typing.Literal:
             raise NotImplementedError(

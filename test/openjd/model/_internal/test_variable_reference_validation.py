@@ -1,6 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
-from typing import Any, Literal, Union
+from typing import Any, Literal, Optional, Union
 from enum import Enum
 from typing_extensions import Annotated
 from pydantic import Field
@@ -1129,6 +1129,54 @@ class TestDiscriminatedUnion:
         class BaseModel(OpenJDModel):
             name: str
             sub: list[Annotated[Union[SubModel1, SubModel2], Field(..., discriminator="kind")]]
+            _template_variable_definitions = DefinesTemplateVariables(
+                defines={TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE)},
+                field="name",
+            )
+            _template_variable_sources = {
+                "sub": {"__self__"},
+            }
+
+        # WHEN
+        errors = prevalidate_model_template_variable_references(
+            BaseModel, data, context=ModelParsingContext_v2023_09()
+        )
+
+        # THEN
+        assert len(errors) == 0
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"name": "Foo", "sub": {"kind": "INVALID"}}, id="invalid discriminator"),
+            pytest.param({"name": "Foo", "sub": {"kind": ""}}, id="empty discriminator"),
+            pytest.param({"name": "Foo", "sub": None}, id="None value"),
+        ],
+    )
+    def test_optional_discriminated_union_invalid_discriminator(self, data: dict[str, Any]) -> None:
+        # Test that Optional discriminated unions with invalid discriminator values
+        # don't crash with AttributeError on NoneType.
+
+        # GIVEN
+        class Kind(str, Enum):
+            ONE = "ONE"
+            TWO = "TWO"
+
+        class SubModel1(OpenJDModel):
+            kind: Literal[Kind.ONE]
+            field1: FormatString
+            _template_variable_scope = ResolutionScope.TEMPLATE
+
+        class SubModel2(OpenJDModel):
+            kind: Literal[Kind.TWO]
+            field2: FormatString
+            _template_variable_scope = ResolutionScope.TEMPLATE
+
+        class BaseModel(OpenJDModel):
+            name: str
+            sub: Optional[
+                Annotated[Union[SubModel1, SubModel2], Field(..., discriminator="kind")]
+            ] = None
             _template_variable_definitions = DefinesTemplateVariables(
                 defines={TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE)},
                 field="name",
