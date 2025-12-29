@@ -1,3 +1,11 @@
+## 0.8.7 (2025-12-29)
+
+
+
+### Bug Fixes
+* fix crash on invalid discriminator in Optional discriminated unions (#256) ([`13e1c79`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/13e1c793f115644fc8df7534b1d6be44724cab99))
+
+
 ## 0.8.6 (2025-12-15)
 
 
