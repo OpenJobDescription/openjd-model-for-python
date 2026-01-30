@@ -150,7 +150,7 @@ class TestJobName:
         (
             pytest.param({"name": 12}, id="not string"),
             pytest.param({"name": ""}, id="too short"),
-            pytest.param({"name": "a" * 129}, id="too long"),
+            pytest.param({"name": "a" * 513}, id="too long"),
             pytest.param({"name": "\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"name": "\u0000"}, id="NULL disallowed"),
@@ -194,7 +194,7 @@ class TestStepName:
         (
             pytest.param({"name": 12}, id="not string"),
             pytest.param({"name": ""}, id="too short"),
-            pytest.param({"name": "a" * 65}, id="too long"),
+            pytest.param({"name": "a" * 513}, id="too long"),
             pytest.param({"name": "\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"name": "\u0000"}, id="NULL disallowed"),
@@ -238,7 +238,7 @@ class TestEnvironmentName:
         (
             pytest.param({"name": 12}, id="not string"),
             pytest.param({"name": ""}, id="too short"),
-            pytest.param({"name": "a" * 65}, id="too long"),
+            pytest.param({"name": "a" * 513}, id="too long"),
             pytest.param({"name": "\n"}, id="no newline"),
             # Just testing the boundary points of the allowable characters
             pytest.param({"name": "\u0000"}, id="NULL disallowed"),
@@ -390,7 +390,7 @@ class TestIdentifier:
         [
             pytest.param({"id": 12}, id="not string"),
             pytest.param({"id": ""}, id="too short"),
-            pytest.param({"id": "a" * 65}, id="too long"),
+            pytest.param({"id": "a" * 513}, id="too long"),
             pytest.param({"id": " a"}, id="start space"),
             pytest.param({"id": "a "}, id="end space"),
             pytest.param({"id": "0"}, id="no digit start(0)"),

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import secrets
+import string
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from graphlib import CycleError, TopologicalSorter
@@ -61,6 +63,15 @@ _ALLOWED_VALUES_NONE_ERROR = "allowedValues cannot be None. The field must conta
 _VALUE_LESS_THAN_MIN_ERROR = "Value less than minValue."
 _VALUE_LARGER_THAN_MAX_ERROR = "Value larger than maxValue."
 
+# Interpreter syntax sugar configuration: (command, extension, arg_prefix)
+_INTERPRETER_MAP: dict[str, tuple[str, str, list[str]]] = {
+    "python": ("python", ".py", []),
+    "bash": ("bash", ".sh", []),
+    "cmd": ("cmd", ".bat", ["/C"]),
+    "powershell": ("powershell", ".ps1", ["-File"]),
+    "node": ("node", ".js", []),
+}
+
 
 class ModelParsingContext(ModelParsingContextInterface):
     """Context required while parsing an OpenJDModel. An instance of this class
@@ -92,10 +103,13 @@ class ExtensionName(str, Enum):
     This appears in the 'extensions' list property of all model instances.
     """
 
-    # # https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0001-task-chunking.md
+    # https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0001-task-chunking.md
     TASK_CHUNKING = "TASK_CHUNKING"
     # Extension that enables the use of openjd_redacted_env for setting environment variables with redacted values in logs
     REDACTED_ENV_VARS = "REDACTED_ENV_VARS"
+    # Extension for increased limits, format strings in timeout/min/max/notifyPeriodInSeconds,
+    # endOfLine control, and script interpreter syntax sugar
+    FEATURE_BUNDLE_1 = "FEATURE_BUNDLE_1"
 
 
 ExtensionNameList = Annotated[list[str], Field(min_length=1)]
@@ -187,6 +201,8 @@ _file_dialog_filter_pattern_regex = (
 
 class JobTemplateName(FormatString):
     _min_length = 1
+    # Max length is validated after resolution in Job model, not here
+    # because the template name can contain format strings
 
     def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
         return super().__new__(cls, value, context=context)
@@ -194,10 +210,10 @@ class JobTemplateName(FormatString):
 
 JobName = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=128, strict=True, pattern=_standard_string_regex),
+    StringConstraints(min_length=1, max_length=512, strict=True, pattern=_standard_string_regex),
 ]
 Identifier = Annotated[
-    str, StringConstraints(min_length=1, max_length=64, strict=True, pattern=_identifier_regex)
+    str, StringConstraints(min_length=1, max_length=512, strict=True, pattern=_identifier_regex)
 ]
 Description = Annotated[
     str,
@@ -212,11 +228,11 @@ Description = Annotated[
 ]
 EnvironmentName = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=64, strict=True, pattern=_standard_string_regex),
+    StringConstraints(min_length=1, max_length=512, strict=True, pattern=_standard_string_regex),
 ]
 StepName = Annotated[
     str,
-    StringConstraints(min_length=1, max_length=64, strict=True, pattern=_standard_string_regex),
+    StringConstraints(min_length=1, max_length=512, strict=True, pattern=_standard_string_regex),
 ]
 ParameterStringValue = Annotated[str, StringConstraints(min_length=0, max_length=1024, strict=True)]
 
@@ -285,7 +301,33 @@ class CancelationMethodNotifyThenTerminate(OpenJDModel_v2023_09):
     """
 
     mode: Literal[CancelationMode.NOTIFY_THEN_TERMINATE]
-    notifyPeriodInSeconds: Optional[NotifyPeriodType] = None  # noqa: N815
+    notifyPeriodInSeconds: Optional[Union[NotifyPeriodType, FormatString]] = None  # noqa: N815
+
+    _job_creation_metadata = JobCreationMetadata(resolve_fields={"notifyPeriodInSeconds"})
+
+    @field_validator("notifyPeriodInSeconds", mode="before")
+    @classmethod
+    def _validate_notify_period(
+        cls, v: Any, info: ValidationInfo
+    ) -> Optional[Union[int, FormatString]]:
+        if v is None:
+            return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        if isinstance(v, str):
+            if context and "FEATURE_BUNDLE_1" not in context.extensions:
+                # Try to parse as int, fail if not
+                try:
+                    return int(v)
+                except ValueError:
+                    raise ValueError(
+                        "notifyPeriodInSeconds as a format string requires the FEATURE_BUNDLE_1 extension."
+                    )
+            return validate_int_fmtstring_field(v, ge=1, context=context)
+        if isinstance(v, int):
+            if v < 1 or v > 600:
+                raise ValueError("notifyPeriodInSeconds must be between 1 and 600")
+            return v
+        return v
 
 
 class CancelationMethodTerminate(OpenJDModel_v2023_09):
@@ -313,6 +355,7 @@ class Action(OpenJDModel_v2023_09):
         args (Optional[list[FormatString]]): The arguments that are provided to the command
             when it is run.
         timeout (Optional[int]): Maximum allowed runtime of the Action in seconds.
+            Can be a format string with FEATURE_BUNDLE_1 extension.
             Default: No timeout
         cancelation (Optional[Union[CancelationMethodNotifyThenTerminate, CancelationMethodTerminate]]):
             If defined, provides details regarding how this action should be canceled.
@@ -321,10 +364,34 @@ class Action(OpenJDModel_v2023_09):
 
     command: CommandString
     args: Optional[ArgListType] = None
-    timeout: Optional[PositiveInt] = None
+    timeout: Optional[Union[PositiveInt, FormatString]] = None
     cancelation: Optional[
         Union[CancelationMethodNotifyThenTerminate, CancelationMethodTerminate]
     ] = Field(None, discriminator="mode")
+
+    _job_creation_metadata = JobCreationMetadata(resolve_fields={"timeout"})
+
+    @field_validator("timeout", mode="before")
+    @classmethod
+    def _validate_timeout(cls, v: Any, info: ValidationInfo) -> Optional[Union[int, FormatString]]:
+        if v is None:
+            return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        if isinstance(v, str):
+            if context and "FEATURE_BUNDLE_1" not in context.extensions:
+                # Try to parse as int, fail if not
+                try:
+                    return int(v)
+                except ValueError:
+                    raise ValueError(
+                        "timeout as a format string requires the FEATURE_BUNDLE_1 extension."
+                    )
+            return validate_int_fmtstring_field(v, ge=1, context=context)
+        if isinstance(v, int):
+            if v < 1:
+                raise ValueError("timeout must be a positive integer")
+            return v
+        return v
 
 
 class StepActions(OpenJDModel_v2023_09):
@@ -373,8 +440,16 @@ class EmbeddedFileTypes(str, Enum):
     TEXT = "TEXT"
 
 
+class EndOfLine(str, Enum):
+    """Line ending style for embedded files."""
+
+    AUTO = "AUTO"
+    LF = "LF"
+    CRLF = "CRLF"
+
+
 # TODO - regex of allowable filename characters
-Filename = Annotated[str, StringConstraints(min_length=1, max_length=64, strict=True)]
+Filename = Annotated[str, StringConstraints(min_length=1, max_length=256, strict=True)]
 
 
 class DataString(FormatString):
@@ -398,6 +473,8 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
             will have its execute-permissions set.
             Default: False
         data (FormatString): The text data to write to the file.
+        endOfLine (Optional[EndOfLine]): Line ending style. Requires FEATURE_BUNDLE_1 extension.
+            Default: AUTO
     """
 
     name: Identifier
@@ -405,6 +482,7 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
     data: DataString
     filename: Optional[Filename] = None
     runnable: Optional[StrictBool] = None
+    endOfLine: Optional[EndOfLine] = None  # noqa: N815
 
     _template_variable_definitions = DefinesTemplateVariables(
         defines={TemplateVariableDef(prefix="File.", resolves=ResolutionScope.SESSION)},
@@ -415,10 +493,89 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
         "data": {"__self__"},
     }
 
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, v: str, info: ValidationInfo) -> str:
+        context = cast(Optional[ModelParsingContext], info.context)
+        max_len = 512 if context and "FEATURE_BUNDLE_1" in context.extensions else 64
+        if len(v) > max_len:
+            raise ValueError(f"name must be at most {max_len} characters long")
+        return v
+
+    @field_validator("filename")
+    @classmethod
+    def _validate_filename(cls, v: Optional[Filename], info: ValidationInfo) -> Optional[Filename]:
+        if v is None:
+            return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        max_len = 256 if context and "FEATURE_BUNDLE_1" in context.extensions else 64
+        if len(v) > max_len:
+            raise ValueError(f"String must be at most {max_len} characters long")
+        return v
+
+    @field_validator("endOfLine")
+    @classmethod
+    def _validate_end_of_line(
+        cls, v: Optional[EndOfLine], info: ValidationInfo
+    ) -> Optional[EndOfLine]:
+        if v is None:
+            return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        # Skip extension check if no context (e.g., during job creation from validated template)
+        if context and "FEATURE_BUNDLE_1" not in context.extensions:
+            raise ValueError("The endOfLine property requires the FEATURE_BUNDLE_1 extension.")
+        return v
+
 
 # --------------------- Script types ----------------------------
 
 EmbeddedFiles = Annotated[list[EmbeddedFileText], Field(min_length=1)]
+
+
+class ScriptInterpreter(str, Enum):
+    """Script interpreter types for SimpleAction syntax sugar."""
+
+    PYTHON = "python"
+    BASH = "bash"
+    CMD = "cmd"
+    POWERSHELL = "powershell"
+    NODE = "node"
+
+
+class SimpleAction(OpenJDModel_v2023_09):
+    """Syntax sugar for a script action with a specific interpreter.
+
+    This is only available with the FEATURE_BUNDLE_1 extension.
+
+    Attributes:
+        script (DataString): The script content to execute.
+        args (Optional[list[ArgString]]): Additional arguments to pass to the interpreter.
+        timeout (Optional[Union[int, FormatString]]): Maximum allowed runtime in seconds.
+            Can be a format string.
+        cancelation (Optional[CancelationMethod]): How to cancel the action.
+    """
+
+    script: DataString
+    args: Optional[ArgListType] = None
+    timeout: Optional[Union[PositiveInt, FormatString]] = None
+    cancelation: Optional[
+        Union[CancelationMethodNotifyThenTerminate, CancelationMethodTerminate]
+    ] = Field(None, discriminator="mode")
+
+    @field_validator("timeout", mode="before")
+    @classmethod
+    def _validate_timeout(cls, v: Any, info: ValidationInfo) -> Optional[Union[int, FormatString]]:
+        if v is None:
+            return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        if isinstance(v, str):
+            # SimpleAction always requires FEATURE_BUNDLE_1, so format strings are allowed
+            return validate_int_fmtstring_field(v, ge=1, context=context)
+        if isinstance(v, int):
+            if v < 1:
+                raise ValueError("timeout must be a positive integer")
+            return v
+        return v
 
 
 class StepScript(OpenJDModel_v2023_09):
@@ -1051,6 +1208,15 @@ class Environment(OpenJDModel_v2023_09):
     description: Optional[Description] = None
 
     _template_variable_scope = ResolutionScope.SESSION
+
+    @field_validator("name")
+    @classmethod
+    def _validate_environment_name(cls, v: str, info: ValidationInfo) -> str:
+        context = cast(Optional[ModelParsingContext], info.context)
+        max_len = 512 if context and "FEATURE_BUNDLE_1" in context.extensions else 64
+        if len(v) > max_len:
+            raise ValueError(f"name must be at most {max_len} characters long")
+        return v
 
     @model_validator(mode="before")
     @classmethod
@@ -2146,12 +2312,12 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
     """
 
     name: AmountCapabilityName
-    min: Optional[Decimal] = None
-    max: Optional[Decimal] = None
+    min: Optional[Union[Decimal, FormatString]] = None
+    max: Optional[Union[Decimal, FormatString]] = None
 
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=AmountRequirement),
-        resolve_fields={"name"},
+        resolve_fields={"name", "min", "max"},
     )
 
     @field_validator("name")
@@ -2162,26 +2328,74 @@ class AmountRequirementTemplate(OpenJDModel_v2023_09):
         )
         return v
 
-    @field_validator("min")
+    @field_validator("min", mode="before")
     @classmethod
-    def _validate_min(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+    def _validate_min(
+        cls, v: Optional[Any], info: ValidationInfo
+    ) -> Optional[Union[Decimal, FormatString]]:
         if v is None:
             return v
-        if v < 0:
-            raise ValueError(f"Value {v} must be zero or greater")
-        return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        if isinstance(v, str):
+            if context and "FEATURE_BUNDLE_1" not in context.extensions:
+                # Try to parse as Decimal, fail if not
+                try:
+                    dec_val = Decimal(v)
+                    if dec_val < 0:
+                        raise ValueError("Value must be zero or greater")
+                    return dec_val
+                except InvalidOperation:
+                    raise ValueError(
+                        "min as a format string requires the FEATURE_BUNDLE_1 extension."
+                    )
+            return validate_float_fmtstring_field(v, ge=Decimal(0), context=context)
+        if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
+            dec_val = Decimal(str(v))
+            if dec_val < 0:
+                raise ValueError(f"Value {v} must be zero or greater")
+            return dec_val
+        raise ValueError("Value must be a number or string")
 
-    @field_validator("max")
+    @field_validator("max", mode="before")
     @classmethod
-    def _validate_max(cls, v: Optional[Decimal], info: ValidationInfo) -> Optional[Decimal]:
+    def _validate_max(
+        cls, v: Optional[Any], info: ValidationInfo
+    ) -> Optional[Union[Decimal, FormatString]]:
         if v is None:
             return v
-        if v <= 0:
-            raise ValueError("Value must be greater than 0")
-        v_min = info.data.get("min")
-        if v_min is not None and v_min > v:
-            raise ValueError("Value for 'max' must be greater or equal to 'min'")
-        return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        if isinstance(v, str):
+            if context and "FEATURE_BUNDLE_1" not in context.extensions:
+                # Try to parse as Decimal, fail if not
+                try:
+                    dec_val = Decimal(v)
+                    if dec_val <= 0:
+                        raise ValueError("Value must be greater than 0")
+                    return dec_val
+                except InvalidOperation:
+                    raise ValueError(
+                        "max as a format string requires the FEATURE_BUNDLE_1 extension."
+                    )
+            return validate_float_fmtstring_field(v, ge=Decimal(0), context=context)
+        if isinstance(v, (int, float, Decimal)) and not isinstance(v, bool):
+            dec_val = Decimal(str(v))
+            if dec_val <= 0:
+                raise ValueError("Value must be greater than 0")
+            return dec_val
+        raise ValueError("Value must be a number or string")
+
+    @model_validator(mode="after")
+    def _validate_min_max_relationship(self) -> Self:
+        # Can only validate relationship if both are concrete values (not format strings)
+        if (
+            self.min is not None
+            and self.max is not None
+            and not isinstance(self.min, FormatString)
+            and not isinstance(self.max, FormatString)
+        ):
+            if self.min > self.max:
+                raise ValueError("Value for 'max' must be greater or equal to 'min'")
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -2434,21 +2648,90 @@ class StepTemplate(OpenJDModel_v2023_09):
         hostRequirements (Optional[HostRequirementsTemplate]): The capabilities that a host requires for
             this Step to run on it.
         dependencies (Optional[StepDependenciesList]): A list of this Step's dependencies.
+        python (Optional[SimpleAction]): Python script syntax sugar (FEATURE_BUNDLE_1).
+        bash (Optional[SimpleAction]): Bash script syntax sugar (FEATURE_BUNDLE_1).
+        cmd (Optional[SimpleAction]): Windows cmd script syntax sugar (FEATURE_BUNDLE_1).
+        powershell (Optional[SimpleAction]): PowerShell script syntax sugar (FEATURE_BUNDLE_1).
+        node (Optional[SimpleAction]): Node.js script syntax sugar (FEATURE_BUNDLE_1).
     """
 
     name: StepName
     description: Optional[Description] = None
-    script: StepScript
+    script: Optional[StepScript] = None
     stepEnvironments: Optional[StepEnvironmentList] = None
     parameterSpace: Optional[StepParameterSpaceDefinition] = None  # noqa: N815
     hostRequirements: Optional[HostRequirementsTemplate] = None
     dependencies: Optional[StepDependenciesList] = None
+    python: Optional[SimpleAction] = None
+    bash: Optional[SimpleAction] = None
+    cmd: Optional[SimpleAction] = None
+    powershell: Optional[SimpleAction] = None
+    node: Optional[SimpleAction] = None
 
     _template_variable_sources = {
         "script": {"__self__", "parameterSpace"},
         "stepEnvironments": {"__self__"},
+        "python": {"__self__", "parameterSpace"},
+        "bash": {"__self__", "parameterSpace"},
+        "cmd": {"__self__", "parameterSpace"},
+        "powershell": {"__self__", "parameterSpace"},
+        "node": {"__self__", "parameterSpace"},
     }
-    _job_creation_metadata = JobCreationMetadata(create_as=JobCreateAsMetadata(model=Step))
+    _job_creation_metadata = JobCreationMetadata(
+        create_as=JobCreateAsMetadata(model=Step),
+        exclude_fields={"python", "bash", "cmd", "powershell", "node"},
+        transform=lambda t: cast("StepTemplate", t).resolve_syntax_sugar(),
+    )
+
+    @field_validator("name")
+    @classmethod
+    def _validate_step_name(cls, v: str, info: ValidationInfo) -> str:
+        context = cast(Optional[ModelParsingContext], info.context)
+        max_len = 512 if context and "FEATURE_BUNDLE_1" in context.extensions else 64
+        if len(v) > max_len:
+            raise ValueError(f"name must be at most {max_len} characters long")
+        return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_script_or_interpreter(
+        cls, values: dict[str, Any], info: ValidationInfo
+    ) -> dict[str, Any]:
+        if not isinstance(values, dict):
+            raise ValueError("Expected a dictionary of values")
+
+        context = cast(Optional[ModelParsingContext], info.context)
+        interpreter_keys = {i.value for i in ScriptInterpreter}
+        has_script = "script" in values
+        has_interpreter = any(k in values for k in interpreter_keys)
+        interpreter_count = sum(1 for k in interpreter_keys if k in values)
+
+        # Check for FEATURE_BUNDLE_1 extension if using interpreter syntax sugar
+        if has_interpreter:
+            if context and "FEATURE_BUNDLE_1" not in context.extensions:
+                raise ValueError(
+                    "Script interpreter syntax sugar (python, bash, cmd, powershell, node) "
+                    "requires the FEATURE_BUNDLE_1 extension."
+                )
+
+        # Must have exactly one of: script or an interpreter
+        if has_script and has_interpreter:
+            raise ValueError(
+                "Cannot specify both 'script' and script interpreter "
+                "(python, bash, cmd, powershell, node)."
+            )
+        if not has_script and not has_interpreter:
+            raise ValueError(
+                "Must specify either 'script' or a script interpreter "
+                "(python, bash, cmd, powershell, node)."
+            )
+        if interpreter_count > 1:
+            raise ValueError(
+                "Cannot specify multiple script interpreters. "
+                "Choose one of: python, bash, cmd, powershell, node."
+            )
+
+        return values
 
     @field_validator("dependencies")
     @classmethod
@@ -2482,6 +2765,70 @@ class StepTemplate(OpenJDModel_v2023_09):
             raise ValueError("A step cannot depend upon itself.")
         return self
 
+    def resolve_syntax_sugar(self) -> "StepTemplate":
+        """Transform interpreter syntax sugar into equivalent script + embeddedFiles.
+
+        If this StepTemplate uses script interpreter syntax sugar (python, bash, cmd,
+        powershell, node) introduced in RFC 0004 (FEATURE_BUNDLE_1), returns a new
+        StepTemplate with the equivalent script and embeddedFiles structure.
+        If already using script, returns self unchanged.
+
+        Returns:
+            StepTemplate: A new StepTemplate with de-sugared script, or self if no sugar.
+        """
+        if self.script:
+            return self
+
+        for name, (command, ext, arg_prefix) in _INTERPRETER_MAP.items():
+            simple_action = getattr(self, name, None)
+            if simple_action is not None:
+                break
+        else:
+            return self
+
+        # Generate unique embedded file name from step name + random suffix
+        # Max filename is 256, reserve 7 for "_" + 6-char suffix, and len(ext) for extension
+        safe_name = re.sub(r"[^a-zA-Z0-9]", "_", self.name)
+        max_name_len = 256 - 7 - len(ext)
+        safe_name = safe_name[:max_name_len]
+        suffix = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(6))
+        embedded_name = f"{safe_name}_{suffix}"
+        file_ref = f"{{{{Task.File.{embedded_name}}}}}"
+
+        # Build args: prefix + file reference + user args
+        args: list[ArgString] = [*(ArgString(arg) for arg in arg_prefix), ArgString(file_ref)]
+        if simple_action.args:
+            args.extend(simple_action.args)
+
+        # Construct directly - inputs are already validated
+        return StepTemplate.model_construct(
+            name=self.name,
+            description=self.description,
+            script=StepScript.model_construct(
+                actions=StepActions.model_construct(
+                    onRun=Action.model_construct(
+                        command=CommandString(command),
+                        args=args,
+                        timeout=simple_action.timeout,
+                        cancelation=simple_action.cancelation,
+                    )
+                ),
+                embeddedFiles=[
+                    EmbeddedFileText.model_construct(
+                        name=embedded_name,
+                        type=EmbeddedFileTypes.TEXT,
+                        filename=f"{embedded_name}{ext}",
+                        runnable=True,
+                        data=simple_action.script,
+                    )
+                ],
+            ),
+            stepEnvironments=self.stepEnvironments,
+            parameterSpace=self.parameterSpace,
+            hostRequirements=self.hostRequirements,
+            dependencies=self.dependencies,
+        )
+
 
 StepTemplateList = Annotated[list[StepTemplate], Field(min_length=1)]
 JobParameterDefinitionList = Annotated[
@@ -2498,7 +2845,7 @@ JobParameterDefinitionList = Annotated[
     ],
     Field(
         min_length=1,
-        max_length=50,
+        max_length=200,  # Extended limit; base limit of 50 is validated in JobTemplate
     ),
 ]
 JobEnvironmentsList = Annotated[list[Environment], Field(min_length=1)]
@@ -2514,6 +2861,15 @@ class Job(OpenJDModel_v2023_09):
     parameters: Optional[JobParameters] = None
     jobEnvironments: Optional[JobEnvironmentsList] = None
     extensions: Optional[list[ExtensionName]] = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_job_name_length(cls, v: str, info: ValidationInfo) -> str:
+        context = cast(Optional[ModelParsingContext], info.context)
+        max_len = 512 if context and "FEATURE_BUNDLE_1" in context.extensions else 128
+        if len(v) > max_len:
+            raise ValueError(f"String should have at most {max_len} characters")
+        return v
 
 
 class JobTemplate(OpenJDModel_v2023_09):
@@ -2557,6 +2913,18 @@ class JobTemplate(OpenJDModel_v2023_09):
         reshape_field_to_dict={"parameterDefinitions": "name"},
         rename_fields={"parameterDefinitions": "parameters"},
     )
+
+    @field_validator("name")
+    @classmethod
+    def _validate_job_name_length(cls, v: JobTemplateName, info: ValidationInfo) -> JobTemplateName:
+        # Only validate length if there are no expressions to resolve
+        if len(v.expressions) > 0:
+            return v
+        context = cast(Optional[ModelParsingContext], info.context)
+        max_len = 512 if context and "FEATURE_BUNDLE_1" in context.extensions else 128
+        if len(v) > max_len:
+            raise ValueError(f"name must be at most {max_len} characters long")
+        return v
 
     @field_validator("extensions")
     @classmethod
@@ -2605,10 +2973,18 @@ class JobTemplate(OpenJDModel_v2023_09):
 
     @field_validator("parameterDefinitions")
     @classmethod
-    def _unique_parameter_names(
-        cls, v: Optional[JobParameterDefinitionList]
+    def _validate_parameter_definitions(
+        cls, v: Optional[JobParameterDefinitionList], info: ValidationInfo
     ) -> Optional[JobParameterDefinitionList]:
         if v is not None:
+            # Validate max length based on extension
+            context = cast(Optional[ModelParsingContext], info.context)
+            max_len = 200 if context and "FEATURE_BUNDLE_1" in context.extensions else 50
+            if len(v) > max_len:
+                raise ValueError(
+                    f"parameterDefinitions must have at most {max_len} elements"
+                    + (" (use FEATURE_BUNDLE_1 extension for up to 200)" if max_len == 50 else "")
+                )
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 
@@ -2785,10 +3161,13 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
 
     @field_validator("parameterDefinitions")
     @classmethod
-    def _unique_parameter_names(
-        cls, v: Optional[JobParameterDefinitionList]
+    def _validate_parameter_definitions(
+        cls, v: Optional[JobParameterDefinitionList], info: ValidationInfo
     ) -> Optional[JobParameterDefinitionList]:
         if v is not None:
+            # EnvironmentTemplate always has max 50 parameters (no extension increases this)
+            if len(v) > 50:
+                raise ValueError("parameterDefinitions must have at most 50 elements")
             return validate_unique_elements(v, item_value=lambda v: v.name, property="name")
         return v
 

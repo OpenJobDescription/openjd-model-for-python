@@ -14,7 +14,7 @@ def validate_int_fmtstring_field(
     ge: Optional[int] = None,
     *,
     context: Optional[ModelParsingContextInterface],
-) -> Union[int, float, Decimal, FormatString]:
+) -> Union[int, FormatString]:
     """Validates a field that is allowed to be either an integer, a string containing an integer,
     or a string containing expressions that resolve to an integer."""
     value_type_wrong_msg = "Value must be an integer or a string containing an integer."
@@ -57,7 +57,7 @@ def validate_float_fmtstring_field(
     ge: Optional[Decimal] = None,
     *,
     context: Optional[ModelParsingContextInterface],
-) -> Union[int, float, Decimal, FormatString]:
+) -> Union[Decimal, FormatString]:
     """Validates a field that is allowed to be either an float, a string containing an float,
     or a string containing expressions that resolve to a float."""
     value_type_wrong_msg = "Value must be a float or a string containing a float."

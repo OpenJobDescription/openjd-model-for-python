@@ -92,6 +92,10 @@ def instantiate_model(  # noqa: C901
     errors = list[InitErrorDetails]()
     instantiated_fields = dict[str, Any]()
 
+    # Apply pre-transform if defined
+    if model._job_creation_metadata.transform is not None:
+        model = model._job_creation_metadata.transform(model)
+
     # Determine the target model to create as
     target_model = model.__class__
     if model._job_creation_metadata.create_as is not None:
