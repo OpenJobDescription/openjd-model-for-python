@@ -268,6 +268,13 @@ class JobCreationMetadata:
     """This instructs the instantiation code to rename the given fields.
     """
 
+    transform: Optional[Callable[["OpenJDModel"], "OpenJDModel"]] = field(default=None)
+    """A callable that transforms the source model before field processing.
+        arg0 - The model to transform.
+        returns - The transformed model (can be the same instance or a new one).
+        Use-case: Resolving syntax sugar on StepTemplate before creating Step.
+    """
+
 
 class OpenJDModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
