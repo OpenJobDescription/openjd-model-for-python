@@ -1,3 +1,11 @@
+## 0.9.0 (2026-02-02)
+
+
+### Features
+* Implement FEATURE_BUNDLE_1 RFC 0004 ([`86f79ee`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/86f79ee823ff15f4385b59d3e7b5224241963d50))
+
+
+
 ## 0.8.7 (2025-12-29)
 
 
