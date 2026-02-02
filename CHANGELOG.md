@@ -1,8 +1,13 @@
 ## 0.9.0 (2026-02-02)
 
+### BREAKING CHANGES
+* The types of some model class fields are extended from `Optional[int]` to `Optional[int | FormatString]`, so downstream code
+  that relies on those types can fail type checking.
 
 ### Features
-* Implement FEATURE_BUNDLE_1 RFC 0004 ([`86f79ee`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/86f79ee823ff15f4385b59d3e7b5224241963d50))
+* Implement [FEATURE_BUNDLE_1 RFC 0004](https://github.com/OpenJobDescription/openjd-specifications/blob/mainline/rfcs/0004-enhanced-limits-and-capabilities.md), increasing limits
+  for job parameter counts and name lengths, enabling format strings in integer properties, providing control over embedded file line endings, and adding syntax sugar
+  to simplify templates that run simple scripts with common interpreters ([`86f79ee`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/86f79ee823ff15f4385b59d3e7b5224241963d50))
 
 
 
