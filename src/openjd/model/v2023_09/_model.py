@@ -473,7 +473,9 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
             will have its execute-permissions set.
             Default: False
         data (FormatString): The text data to write to the file.
-        endOfLine (Optional[EndOfLine]): Line ending style. Requires FEATURE_BUNDLE_1 extension.
+        endOfLine (Optional[EndOfLine]): The line endings that the embedded file will have when
+            written to disk. If AUTO the embedded file will have the default line endings of the
+            host operating system. Requires FEATURE_BUNDLE_1 extension.
             Default: AUTO
     """
 

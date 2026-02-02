@@ -194,7 +194,6 @@ class MockExtensionName(str, Enum):
     """A mock enum with only SUPPORTED_NAME for testing."""
 
     SUPPORTED_NAME = "SUPPORTED_NAME"
-    FEATURE_BUNDLE_1 = "FEATURE_BUNDLE_1"
 
 
 class MockExtensionNameWithTwoNames(str, Enum):
@@ -202,7 +201,6 @@ class MockExtensionNameWithTwoNames(str, Enum):
 
     SUPPORTED_NAME = "SUPPORTED_NAME"
     ANOTHER_SUPPORTED_NAME = "ANOTHER_SUPPORTED_NAME"
-    FEATURE_BUNDLE_1 = "FEATURE_BUNDLE_1"
 
 
 @pytest.mark.parametrize(
