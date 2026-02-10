@@ -4,7 +4,7 @@
 import pytest
 from pydantic import ValidationError
 
-from openjd.model import create_job
+from openjd.model import create_job, decode_job_template
 from openjd.model._parse import _parse_model
 from openjd.model.v2023_09 import (
     Action,
@@ -55,6 +55,59 @@ class TestFeatureBundle1Extension:
         with pytest.raises(ValidationError) as excinfo:
             _parse_model(model=JobTemplate, obj=data, context=ModelParsingContext())
         assert "FEATURE_BUNDLE_1" in str(excinfo.value)
+
+
+class TestExtensionFieldEnablement:
+    """Tests for extension enablement based on template's extensions field and supported_extensions."""
+
+    @pytest.mark.parametrize(
+        "template_declares_ext,supported_extensions,param_count,should_pass",
+        [
+            # Template declares extension, supported includes it - passes with 51 params
+            (True, ["FEATURE_BUNDLE_1"], 51, True),
+            # Template declares extension, supported excludes it - fails (unsupported ext)
+            (True, ["TASK_CHUNKING"], 51, False),
+            # Template declares extension, supported is None - fails (unsupported ext)
+            (True, None, 51, False),
+            # Template omits extension, supported includes it - fails (50 param limit)
+            (False, ["FEATURE_BUNDLE_1"], 51, False),
+            # Template omits extension, all supported - fails (50 param limit)
+            (False, ["TASK_CHUNKING", "REDACTED_ENV_VARS", "FEATURE_BUNDLE_1"], 51, False),
+            # Template omits extension, none supported - fails (50 param limit)
+            (False, [], 51, False),
+            # Template omits extension, supported is None - fails (50 param limit)
+            (False, None, 51, False),
+            # Template within default limit - passes regardless
+            (False, ["FEATURE_BUNDLE_1"], 50, True),
+            # Template omits extension, supported is None, within limit - passes
+            (False, None, 50, True),
+        ],
+    )
+    def test_extension_enablement(
+        self,
+        template_declares_ext: bool,
+        supported_extensions: list[str],
+        param_count: int,
+        should_pass: bool,
+    ) -> None:
+        """Test that extension features require explicit declaration in template."""
+        params = [{"name": f"P{i}", "type": "INT", "default": i} for i in range(param_count)]
+        data: dict = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Test",
+            "parameterDefinitions": params,
+            "steps": [{"name": "s", "script": STEP_SCRIPT}],
+        }
+        if template_declares_ext:
+            data["extensions"] = ["FEATURE_BUNDLE_1"]
+
+        if should_pass:
+            result = decode_job_template(template=data, supported_extensions=supported_extensions)
+            assert result.parameterDefinitions is not None
+            assert len(result.parameterDefinitions) == param_count
+        else:
+            with pytest.raises(Exception):
+                decode_job_template(template=data, supported_extensions=supported_extensions)
 
 
 class TestActionTimeoutFormatString:
