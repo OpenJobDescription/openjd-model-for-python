@@ -2893,7 +2893,7 @@ class JobTemplate(OpenJDModel_v2023_09):
     """
 
     specificationVersion: Literal[TemplateSpecificationVersion.JOBTEMPLATE_v2023_09]  # noqa: N815
-    extensions: Optional[ExtensionNameList] = None
+    extensions: Optional[ExtensionNameList] = Field(default=None, validate_default=True)
     name: JobTemplateName
     steps: StepTemplateList
     description: Optional[Description] = None
@@ -3116,7 +3116,7 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
     """
 
     specificationVersion: Literal[TemplateSpecificationVersion.ENVIRONMENT_v2023_09]
-    extensions: Optional[ExtensionNameList] = None
+    extensions: Optional[ExtensionNameList] = Field(default=None, validate_default=True)
     parameterDefinitions: Optional[JobParameterDefinitionList] = None
     environment: Environment
 
