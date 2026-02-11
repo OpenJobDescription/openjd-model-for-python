@@ -203,6 +203,8 @@ class JobTemplateName(FormatString):
     _min_length = 1
     # Max length is validated after resolution in Job model, not here
     # because the template name can contain format strings
+    # All unicode except the [Cc] (control characters) category
+    _regex = f"(?-m:^[^{_Cc_characters}]+\\Z)"
 
     def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
         return super().__new__(cls, value, context=context)

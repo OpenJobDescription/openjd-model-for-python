@@ -197,6 +197,33 @@ class TestJobTemplate:
             ),
             pytest.param(
                 {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Job\x1fName",
+                    "steps": [STEP_TEMPLATE],
+                },
+                1,
+                id="name with control char 0x1F",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Job\x7fName",
+                    "steps": [STEP_TEMPLATE],
+                },
+                1,
+                id="name with control char 0x7F",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Job\x9fName",
+                    "steps": [STEP_TEMPLATE],
+                },
+                1,
+                id="name with control char 0x9F",
+            ),
+            pytest.param(
+                {
                     "name": "Foo",
                     "steps": [STEP_TEMPLATE],
                 },
