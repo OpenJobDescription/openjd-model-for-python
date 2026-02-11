@@ -509,6 +509,10 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
     def _validate_filename(cls, v: Optional[Filename], info: ValidationInfo) -> Optional[Filename]:
         if v is None:
             return v
+        if "/" in v or "\\" in v:
+            raise ValueError(
+                "filename must be a basename only and cannot contain path separators ('/' or '\\\\')"
+            )
         context = cast(Optional[ModelParsingContext], info.context)
         max_len = 256 if context and "FEATURE_BUNDLE_1" in context.extensions else 64
         if len(v) > max_len:
