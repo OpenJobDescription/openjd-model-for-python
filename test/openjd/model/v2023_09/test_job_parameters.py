@@ -26,9 +26,7 @@ class TestJobStringParameterDefinition:
             pytest.param(
                 {"name": "Foo", "type": "STRING", "default": "some value"}, id="has default"
             ),
-            pytest.param(
-                {"name": "Foo", "type": "STRING", "minLength": 1}, id="smallest min length"
-            ),
+            pytest.param({"name": "Foo", "type": "STRING", "minLength": 0}, id="minLength zero"),
             pytest.param(
                 {"name": "Foo", "type": "STRING", "maxLength": 1}, id="smallest max length"
             ),
@@ -215,7 +213,9 @@ class TestJobStringParameterDefinition:
                 id="allowedValues item not string",
             ),
             #
-            pytest.param({"name": "Foo", "type": "STRING", "minLength": 0}, id="0 < min"),
+            pytest.param(
+                {"name": "Foo", "type": "STRING", "minLength": -1}, id="negative minLength"
+            ),
             pytest.param({"name": "Foo", "type": "STRING", "maxLength": 0}, id="0 < max"),
             pytest.param(
                 {"name": "Foo", "type": "STRING", "minLength": 2, "maxLength": 1}, id="min > max"
@@ -495,7 +495,7 @@ class TestJobPathParameterDefinition:
             pytest.param(
                 {"name": "Foo", "type": "PATH", "default": "some value"}, id="has default"
             ),
-            pytest.param({"name": "Foo", "type": "PATH", "minLength": 1}, id="smallest min length"),
+            pytest.param({"name": "Foo", "type": "PATH", "minLength": 0}, id="minLength zero"),
             pytest.param({"name": "Foo", "type": "PATH", "maxLength": 1}, id="smallest max length"),
             pytest.param(
                 {"name": "Foo", "type": "PATH", "allowedValues": ["a"]}, id="has allowedValues"
@@ -709,7 +709,7 @@ class TestJobPathParameterDefinition:
                 id="allowedValues item not string",
             ),
             #
-            pytest.param({"name": "Foo", "type": "PATH", "minLength": 0}, id="0 < min"),
+            pytest.param({"name": "Foo", "type": "PATH", "minLength": -1}, id="negative minLength"),
             pytest.param({"name": "Foo", "type": "PATH", "maxLength": 0}, id="0 < max"),
             pytest.param(
                 {"name": "Foo", "type": "PATH", "minLength": 2, "maxLength": 1}, id="min > max"
