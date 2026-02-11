@@ -1363,8 +1363,8 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
     def _validate_min_length(cls, value: Optional[int]) -> Optional[int]:
         if value is None:
             return value
-        if value <= 0:
-            raise ValueError("Required: 0 < minLength.")
+        if value < 0:
+            raise ValueError("Required: 0 <= minLength.")
         return value
 
     @field_validator("maxLength")
@@ -1607,8 +1607,8 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
     def _validate_min_length(cls, value: Optional[int]) -> Optional[int]:
         if value is None:
             return value
-        if value <= 0:
-            raise ValueError("Required: 0 < minLength.")
+        if value < 0:
+            raise ValueError("Required: 0 <= minLength.")
         return value
 
     @field_validator("maxLength")
