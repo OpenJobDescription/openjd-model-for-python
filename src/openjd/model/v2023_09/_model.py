@@ -2579,7 +2579,7 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
             return v
         if len(v) == 0:
             raise ValueError("List must contain at least one element or not be defined.")
-        return v
+        return validate_unique_elements(v, item_value=lambda v: v.name.lower(), property="name")
 
     @field_validator("attributes")
     @classmethod
@@ -2590,7 +2590,7 @@ class HostRequirementsTemplate(OpenJDModel_v2023_09):
             return v
         if len(v) == 0:
             raise ValueError("List must contain at least one element or not be defined.")
-        return v
+        return validate_unique_elements(v, item_value=lambda v: v.name.lower(), property="name")
 
     @model_validator(mode="after")
     def _validate(self) -> Self:
