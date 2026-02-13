@@ -63,7 +63,14 @@ class TestEmbeddedFileText:
                 {"name": "foo", "type": "TEXT", "data": "some text", "runnable": "True"},
                 id="runnable must be bool",
             ),
-            # TODO - tests for filename allowed characters
+            pytest.param(
+                {"name": "foo", "type": "TEXT", "data": "some text", "filename": "dir/file.txt"},
+                id="filename with forward slash",
+            ),
+            pytest.param(
+                {"name": "foo", "type": "TEXT", "data": "some text", "filename": "dir\\file.txt"},
+                id="filename with backslash",
+            ),
         ),
     )
     def test_parse_fails(self, data: dict[str, Any]) -> None:
