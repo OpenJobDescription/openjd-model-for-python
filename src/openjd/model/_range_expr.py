@@ -150,6 +150,10 @@ class IntRangeExpr(Sized):
 
     def _validate(self) -> None:
         """raises: ValueError - if not valid"""
+        if len(self) > 1024:
+            raise ValueError(
+                f"Range expression produces {len(self)} values, but the maximum is 1024."
+            )
         # Validate that the ranges are not overlapping
         prev_range: IntRange | None = None
         for range_ in self.ranges:

@@ -362,6 +362,30 @@ class TestIntRangeExpr:
         assert -3 not in IntRangeExpr.from_str("-1--2:-1")
         assert 0 not in IntRangeExpr.from_str("-1--2:-1")
 
+    def test_range_expr_max_1024_items_succeeds(self):
+        expr = IntRangeExpr.from_str("1-1024")
+        assert len(expr) == 1024
+
+    def test_range_expr_1025_items_fails(self):
+        with pytest.raises(ExpressionError):
+            IntRangeExpr.from_str("1-1025")
+
+    def test_range_expr_combined_subranges_exceed_1024_fails(self):
+        with pytest.raises(ExpressionError):
+            IntRangeExpr.from_str("1-600,700-1300")
+
+    def test_range_expr_stepped_within_limit_succeeds(self):
+        expr = IntRangeExpr.from_str("1-2047:2")
+        assert len(expr) == 1024
+
+    def test_range_expr_stepped_exceeds_limit_fails(self):
+        with pytest.raises(ExpressionError):
+            IntRangeExpr.from_str("1-3000:2")
+
+    def test_range_expr_negative_range_exceeds_limit_fails(self):
+        with pytest.raises(ExpressionError):
+            IntRangeExpr.from_str("-512-512")
+
 
 class TestIntRange:
     def test_length(self):
