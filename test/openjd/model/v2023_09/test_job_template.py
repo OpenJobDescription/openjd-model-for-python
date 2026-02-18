@@ -224,6 +224,24 @@ class TestJobTemplate:
             ),
             pytest.param(
                 {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "JobName\n",
+                    "steps": [STEP_TEMPLATE],
+                },
+                1,
+                id="name with trailing newline",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Job\nName",
+                    "steps": [STEP_TEMPLATE],
+                },
+                1,
+                id="name with embedded newline",
+            ),
+            pytest.param(
+                {
                     "name": "Foo",
                     "steps": [STEP_TEMPLATE],
                 },
