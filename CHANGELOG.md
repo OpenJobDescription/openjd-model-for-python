@@ -1,3 +1,13 @@
+## 0.9.1 (2026-02-20)
+
+
+
+### Bug Fixes
+* reject path separators in embedded filenames (#264) ([`d2ff7e0`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d2ff7e0967b95dd38522332ad7cbfbf1a49ffe96))
+* allow minLength of 0 for strings and paths (#262) ([`96651fa`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/96651fa9eec05d0fa222f0e5bf8b394cd0b2ca34))
+* run extensions field validator even when template omits extensions field ([`4c2c253`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/4c2c2535f3202a64adce32028453362ea7afc0d9))
+
+
 ## 0.9.0 (2026-02-02)
 
 ### BREAKING CHANGES
