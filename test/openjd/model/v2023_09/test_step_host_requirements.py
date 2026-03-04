@@ -457,24 +457,26 @@ class TestHostRequirementsTemplate:
         # no exception was raised.
 
     @pytest.mark.parametrize(
-        "data,error_count",
+        "data,error_count,error_loc",
         [
-            pytest.param({}, 1, id="missing amounts & attributes"),
-            pytest.param({"unknown": "value"}, 1, id="unknown field"),
-            pytest.param({"amounts": []}, 1, id="too few amounts"),
-            pytest.param({"attributes": []}, 1, id="too few attributes"),
+            pytest.param({}, 1, (), id="missing amounts & attributes"),
+            pytest.param({"unknown": "value"}, 1, ("unknown",), id="unknown field"),
+            pytest.param({"amounts": []}, 1, ("amounts",), id="too few amounts"),
+            pytest.param({"attributes": []}, 1, ("attributes",), id="too few attributes"),
             pytest.param(
                 {"amounts": [{"name": f"amount.mycap{i}", "min": 1} for i in range(0, 51)]},
                 1,
+                (),
                 id="too many as only amounts",
             ),
             pytest.param(
                 {
                     "attributes": [
-                        {"name": f"attr.mycap{i}|", "anyOf": ["foo"]} for i in range(0, 51)
+                        {"name": f"attr.mycap{i}", "anyOf": ["foo"]} for i in range(0, 51)
                     ]
                 },
                 1,
+                (),
                 id="too many as only attributes",
             ),
             pytest.param(
@@ -485,16 +487,66 @@ class TestHostRequirementsTemplate:
                     ],
                 },
                 1,
+                (),
                 id="too many as combination",
+            ),
+            pytest.param(
+                {
+                    "amounts": [
+                        {"name": "amount.mycap", "min": 1},
+                        {"name": "amount.mycap", "min": 2},
+                    ]
+                },
+                1,
+                ("amounts",),
+                id="duplicate amount names",
+            ),
+            pytest.param(
+                {
+                    "amounts": [
+                        {"name": "amount.mycap", "min": 1},
+                        {"name": "amount.MYCAP", "min": 2},
+                    ]
+                },
+                1,
+                ("amounts",),
+                id="duplicate amount names case insensitive",
+            ),
+            pytest.param(
+                {
+                    "attributes": [
+                        {"name": "attr.mycap", "anyOf": ["foo"]},
+                        {"name": "attr.mycap", "anyOf": ["bar"]},
+                    ]
+                },
+                1,
+                ("attributes",),
+                id="duplicate attribute names",
+            ),
+            pytest.param(
+                {
+                    "attributes": [
+                        {"name": "attr.mycap", "anyOf": ["foo"]},
+                        {"name": "attr.MYCAP", "anyOf": ["bar"]},
+                    ]
+                },
+                1,
+                ("attributes",),
+                id="duplicate attribute names case insensitive",
             ),
         ],
     )
-    def test_parse_fails(self, data: dict[str, Any], error_count: int) -> None:
-        # Failure case testing for Open Job Description AmountRequirementTemplate.
+    def test_parse_fails(self, data: dict[str, Any], error_count: int, error_loc: tuple) -> None:
+        # Failure case testing for Open Job Description HostRequirementsTemplate.
 
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
-            _parse_model(model=AmountRequirementTemplate, obj=data)
+            _parse_model(model=HostRequirementsTemplate, obj=data)
 
         # THEN
         assert len(excinfo.value.errors()) == error_count, str(excinfo.value)
+        if error_loc:
+            actual_loc = excinfo.value.errors()[0]["loc"]
+            assert (
+                actual_loc[: len(error_loc)] == error_loc
+            ), f"Expected {error_loc}, got {actual_loc}"
