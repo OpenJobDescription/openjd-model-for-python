@@ -203,6 +203,8 @@ class JobTemplateName(FormatString):
     _min_length = 1
     # Max length is validated after resolution in Job model, not here
     # because the template name can contain format strings
+    # All unicode except the [Cc] (control characters) category
+    _regex = f"(?-m:^[^{_Cc_characters}]+\\Z)"
 
     def __new__(cls, value: str, *, context: ModelParsingContextInterface = ModelParsingContext()):
         return super().__new__(cls, value, context=context)
@@ -509,6 +511,10 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
     def _validate_filename(cls, v: Optional[Filename], info: ValidationInfo) -> Optional[Filename]:
         if v is None:
             return v
+        if "/" in v or "\\" in v:
+            raise ValueError(
+                "filename must be a basename only and cannot contain path separators ('/' or '\\\\')"
+            )
         context = cast(Optional[ModelParsingContext], info.context)
         max_len = 256 if context and "FEATURE_BUNDLE_1" in context.extensions else 64
         if len(v) > max_len:
