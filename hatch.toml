@@ -1,10 +1,11 @@
 [envs.default]
+installer = "uv"
 pre-install-commands = [
-  "pip install -r requirements-testing.txt"
+  "uv pip install -r requirements-testing.txt"
 ]
 
 [envs.default.scripts]
-sync = "pip install -r requirements-testing.txt"
+sync = "uv pip install -r requirements-testing.txt"
 test = "pytest test/ --cov-config pyproject.toml --ignore=test/openjd/model/benchmark {args}"
 benchmark = "pytest test/openjd/model/benchmark --no-cov {args}"
 typing = "mypy {args:src test}"

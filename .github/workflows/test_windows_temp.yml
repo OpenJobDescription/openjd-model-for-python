@@ -1,0 +1,66 @@
+name: Test Windows Temp Dir
+
+on:
+  push:
+    branches: [ mainline ]
+  pull_request:
+    branches: [ mainline ]
+  workflow_dispatch:
+
+jobs:
+  Python:
+    name: windows-latest, python ${{ matrix.python-version }}
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    env:
+      PYTHON: ${{ matrix.python-version }}
+      TEMP: D:\Temp
+      TMP: D:\Temp
+      HATCH_DATA_DIR: D:\Temp\hatch
+      HATCH_CACHE_DIR: D:\Temp\hatch\Cache
+      UV_CACHE_DIR: D:\Temp\uv-cache
+      HATCH_ENV_INSTALLER: uv
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13', '3.14']
+    steps:
+      - name: Prepare temp dir
+        run: mkdir -p D:\Temp
+        shell: cmd
+
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Pin virtualenv for Python 3.9
+        if: matrix.python-version == '3.9'
+        run: uv tool install --with "virtualenv<21" hatch
+
+      - name: Install Hatch
+        if: matrix.python-version != '3.9'
+        run: uv tool install hatch
+
+      - name: Create Hatch env
+        run: hatch -v env create
+
+      - name: Run Ruff
+        run: hatch -v run ruff check src test
+
+      - name: Run Black
+        run: hatch -v run black --check --diff src test
+
+      - name: Run Mypy
+        run: hatch -v run mypy src test
+
+      - name: Run Build
+        run: hatch -v build
+
+      - name: Run Tests
+        run: hatch run test
