@@ -68,6 +68,14 @@ class TestJobStringParameterDefinition:
             ),
             #
             pytest.param(
+                {"name": "Foo", "type": "STRING", "userInterface": {"label": "My Label"}},
+                id="user interface label only no control",
+            ),
+            pytest.param(
+                {"name": "Foo", "type": "STRING", "userInterface": {"groupLabel": "My Group"}},
+                id="user interface groupLabel only no control",
+            ),
+            pytest.param(
                 {"name": "Foo", "type": "STRING", "userInterface": {"control": "LINE_EDIT"}},
                 id="user interface LINE_EDIT",
             ),
@@ -534,6 +542,14 @@ class TestJobPathParameterDefinition:
                 id="description with newlines and tabs",
             ),
             #
+            pytest.param(
+                {"name": "Foo", "type": "PATH", "userInterface": {"label": "My Label"}},
+                id="user interface label only no control",
+            ),
+            pytest.param(
+                {"name": "Foo", "type": "PATH", "userInterface": {"groupLabel": "My Group"}},
+                id="user interface groupLabel only no control",
+            ),
             pytest.param(
                 {"name": "Foo", "type": "PATH", "userInterface": {"control": "CHOOSE_INPUT_FILE"}},
                 id="user interface CHOOSE_INPUT_FILE",
@@ -1190,6 +1206,14 @@ class TestJobIntParameterDefinition:
             ),
             #
             pytest.param(
+                {"name": "Foo", "type": "INT", "userInterface": {"label": "My Label"}},
+                id="user interface label only no control",
+            ),
+            pytest.param(
+                {"name": "Foo", "type": "INT", "userInterface": {"groupLabel": "My Group"}},
+                id="user interface groupLabel only no control",
+            ),
+            pytest.param(
                 {"name": "Foo", "type": "INT", "userInterface": {"control": "SPIN_BOX"}},
                 id="user interface SPIN_BOX",
             ),
@@ -1647,6 +1671,14 @@ class TestJobFloatParameterDefinition:
                 id="default is allowed",
             ),
             #
+            pytest.param(
+                {"name": "Foo", "type": "FLOAT", "userInterface": {"label": "My Label"}},
+                id="user interface label only no control",
+            ),
+            pytest.param(
+                {"name": "Foo", "type": "FLOAT", "userInterface": {"groupLabel": "My Group"}},
+                id="user interface groupLabel only no control",
+            ),
             pytest.param(
                 {"name": "Foo", "type": "FLOAT", "userInterface": {"control": "SPIN_BOX"}},
                 id="user interface SPIN_BOX",

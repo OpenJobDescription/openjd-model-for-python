@@ -1301,14 +1301,15 @@ class JobStringParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """User interface attributes for a job string parameter.
 
     Attributes:
-        control (StringUserInterfaceControl): The user interface control to use when editing this parameter.
+        control (Optional[StringUserInterfaceControl]): The user interface control to use when editing this parameter.
+            Default is LINE_EDIT when allowedValues is not provided, DROPDOWN_LIST when it is.
         label (Optional[UserInterfaceLabelStringValue]): The label to display for the user interface control. Defaults
             to the `name` of the parameter.
         groupLabel (Optional[UserInterfaceLabelStringValue]): The label of the group box to place the user interface
             control in.
     """
 
-    control: StringUserInterfaceControl
+    control: Optional[StringUserInterfaceControl] = None
     label: Optional[UserInterfaceLabelStringValue] = None
     groupLabel: Optional[UserInterfaceLabelStringValue] = None
 
@@ -1447,6 +1448,8 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         # validate that the user interface control is compatible with the value constraints
         if self.userInterface:
             user_interface_control = self.userInterface.control
+            if user_interface_control is None:
+                return self
             if self.allowedValues and user_interface_control in (
                 StringUserInterfaceControl.LINE_EDIT,
                 StringUserInterfaceControl.MULTILINE_EDIT,
@@ -1530,7 +1533,8 @@ class JobPathParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """User interface attributes for a job path parameter.
 
     Attributes:
-        control (PathUserInterfaceControl): The user interface control to use when editing this parameter.
+        control (Optional[PathUserInterfaceControl]): The user interface control to use when editing this parameter.
+            Default depends on objectType, dataFlow, and allowedValues.
         label (Optional[UserInterfaceLabelStringValue]): The label to display for the user interface control. Defaults
             to the `name` of the parameter.
         groupLabel (Optional[UserInterfaceLabelStringValue]): The label of the group box to place the user interface
@@ -1542,7 +1546,7 @@ class JobPathParameterDefinitionUserInterface(OpenJDModel_v2023_09):
             “CHOOSE_OUTPUT_FILE”. The default file filter that’s shown in the file choice dialog.
     """
 
-    control: PathUserInterfaceControl
+    control: Optional[PathUserInterfaceControl] = None
     label: Optional[UserInterfaceLabelStringValue] = None
     groupLabel: Optional[UserInterfaceLabelStringValue] = None
     fileFilters: Optional[JobPathParameterDefinitionFileFilterList] = None
@@ -1691,6 +1695,8 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
         # validate that the user interface control is compatible with the value constraints
         if self.userInterface:
             user_interface_control = self.userInterface.control
+            if user_interface_control is None:
+                return self
             if self.allowedValues and user_interface_control in (
                 PathUserInterfaceControl.CHOOSE_INPUT_FILE,
                 PathUserInterfaceControl.CHOOSE_OUTPUT_FILE,
@@ -1765,7 +1771,8 @@ class JobIntParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """User interface attributes for a job int parameter.
 
     Attributes:
-        control (IntUserInterfaceControl): The user interface control to use when editing this parameter.
+        control (Optional[IntUserInterfaceControl]): The user interface control to use when editing this parameter.
+            Default is SPIN_BOX when allowedValues is not provided, DROPDOWN_LIST when it is.
         label (Optional[UserInterfaceLabelStringValue]): The label to display for the user interface control. Defaults
             to the `name` of the parameter.
         groupLabel (Optional[UserInterfaceLabelStringValue]): The label of the group box to place the user interface
@@ -1774,7 +1781,7 @@ class JobIntParameterDefinitionUserInterface(OpenJDModel_v2023_09):
             as selecting an up or down arrow in the user interface control.
     """
 
-    control: IntUserInterfaceControl
+    control: Optional[IntUserInterfaceControl] = None
     label: Optional[UserInterfaceLabelStringValue] = None
     groupLabel: Optional[UserInterfaceLabelStringValue] = None
     singleStepDelta: Optional[PositiveInt] = None
@@ -1958,6 +1965,8 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
         # validate that the user interface control is compatible with the value constraints
         if self.userInterface:
             user_interface_control = self.userInterface.control
+            if user_interface_control is None:
+                return self
             if self.allowedValues and user_interface_control == IntUserInterfaceControl.SPIN_BOX:
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used when 'allowedValues' is provided"
@@ -2016,7 +2025,8 @@ class JobFloatParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     """User interface attributes for a job float parameter.
 
     Attributes:
-        control (FloatUserInterfaceControl): The user interface control to use when editing this parameter.
+        control (Optional[FloatUserInterfaceControl]): The user interface control to use when editing this parameter.
+            Default is SPIN_BOX when allowedValues is not provided, DROPDOWN_LIST when it is.
         label (Optional[UserInterfaceLabelStringValue]): The label to display for the user interface control. Defaults
             to the `name` of the parameter.
         groupLabel (Optional[UserInterfaceLabelStringValue]): The label of the group box to place the user interface
@@ -2028,7 +2038,7 @@ class JobFloatParameterDefinitionUserInterface(OpenJDModel_v2023_09):
             absolute value, otherwise it is the fraction of the current value to use as an adaptive step.
     """
 
-    control: FloatUserInterfaceControl
+    control: Optional[FloatUserInterfaceControl] = None
     label: Optional[UserInterfaceLabelStringValue] = None
     groupLabel: Optional[UserInterfaceLabelStringValue] = None
     decimals: Optional[PositiveInt] = None
@@ -2158,6 +2168,8 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
         # validate that the user interface control is compatible with the value constraints
         if self.userInterface:
             user_interface_control = self.userInterface.control
+            if user_interface_control is None:
+                return self
             if self.allowedValues and user_interface_control == FloatUserInterfaceControl.SPIN_BOX:
                 raise ValueError(
                     f"User interface control {user_interface_control.name} cannot be used when 'allowedValues' is provided"
