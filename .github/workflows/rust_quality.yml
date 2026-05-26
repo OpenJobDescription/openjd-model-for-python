@@ -1,0 +1,77 @@
+name: Rust Quality
+
+# Build, lint, and test the Rust bindings crate at rust-bindings/.
+#
+# The existing Python-side code_quality workflow covers Python tests and
+# transitively builds the Rust extension via `maturin develop`, but does
+# not run `cargo test` (which covers doctests and any pure-Rust unit
+# tests added to the bindings crate).
+#
+# The bindings' `openjd-*` dependencies come from crates.io at the
+# versions pinned in `rust-bindings/Cargo.toml`. There is no sibling
+# repository requirement — local-development overrides are documented
+# in a commented-out `[patch.crates-io]` block at the bottom of that
+# file.
+
+on:
+  pull_request:
+    branches: [ mainline, release, 'patch_*' ]
+  workflow_call:
+    inputs:
+      branch:
+        required: false
+        type: string
+      tag:
+        required: false
+        type: string
+
+jobs:
+  rust_quality:
+    name: Rust (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout openjd-model-for-python
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache Cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ matrix.os }}-${{ hashFiles('Cargo.lock', 'rust-bindings/Cargo.toml') }}
+          restore-keys: |
+            cargo-${{ matrix.os }}-
+
+      - name: cargo fmt --check
+        run: cargo fmt --manifest-path rust-bindings/Cargo.toml --check
+
+      - name: cargo build
+        run: cargo build --manifest-path rust-bindings/Cargo.toml --all-targets
+
+      - name: cargo clippy
+        run: cargo clippy --manifest-path rust-bindings/Cargo.toml --all-targets -- -D warnings
+
+      - name: cargo test
+        run: cargo test --manifest-path rust-bindings/Cargo.toml
+
+      - name: cargo test --doc
+        # Runs separately from `cargo test` above so a docstring regression
+        # (e.g. a Python example rustdoc tries to compile as Rust) is
+        # clearly visible in the CI log.
+        run: cargo test --manifest-path rust-bindings/Cargo.toml --doc

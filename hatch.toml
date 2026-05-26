@@ -1,12 +1,21 @@
 [envs.default]
 pre-install-commands = [
+  "pip install maturin setuptools_scm",
+  "python scripts/maturin_build.py develop --manifest-path rust-bindings/Cargo.toml",
   "pip install -r requirements-testing.txt"
 ]
 
 [envs.default.scripts]
 sync = "pip install -r requirements-testing.txt"
-test = "pytest test/ --cov-config pyproject.toml --ignore=test/openjd/model/benchmark {args}"
-benchmark = "pytest test/openjd/model/benchmark --no-cov {args}"
+# `test` runs the canonical full test suite with the 94% coverage gate
+# enforced. CI invokes this. For ad-hoc subset runs during local
+# development (e.g. `hatch run test-subset test/openjd/expr`), use
+# `test-subset`, which collects coverage but does not enforce the gate
+# (the gate only makes sense against a full-suite run that touches every
+# coverable source tree).
+test = "pytest test/ --cov-config pyproject.toml --cov-fail-under=94 --ignore=test/openjd/model_v0/benchmark --ignore=test/openjd/model_v1/benchmark {args}"
+test-subset = "pytest --cov-config pyproject.toml --ignore=test/openjd/model_v0/benchmark --ignore=test/openjd/model_v1/benchmark {args}"
+benchmark = "pytest test/openjd/model_v0/benchmark test/openjd/model_v1/benchmark --no-cov {args}"
 typing = "mypy {args:src test}"
 style = [
   "ruff check {args:src test}",
