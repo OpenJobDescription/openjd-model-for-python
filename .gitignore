@@ -1,6 +1,7 @@
 *~
 *#
 *.swp
+*.pdb
 
 *.DS_Store
 
@@ -22,3 +23,17 @@ __pycache__/
 /build
 /dist
 _version.py
+
+# scripts/maturin_build.py backup file
+/pyproject.toml.vcs-bak
+
+# Rust build artifacts
+/target/
+/rust-bindings/target/
+Cargo.lock
+
+# Compiled extension modules
+*.so
+*.pyd
+*.dylib
+.hypothesis/

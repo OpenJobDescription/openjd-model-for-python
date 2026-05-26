@@ -24,11 +24,7 @@ class FormatStringError(ValueError):
         self.input = string
         expression = f"Expression: {expr}. " if expr else ""
         reason = f"Reason: {details}." if details else ""
-        msg = (
-            f"Failed to parse interpolation expression at [{start}, {end}]. "
-            f"{expression}"
-            f"{reason}"
-        )
+        msg = f"Failed to parse interpolation expression at [{start}, {end}]. {expression}{reason}"
         super().__init__(msg)
 
 

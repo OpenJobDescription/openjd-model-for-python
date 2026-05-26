@@ -1361,7 +1361,7 @@ class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
             "default",
         },
         adds_fields=lambda this, symtab: {
-            "value": symtab[f"RawParam.{cast(JobStringParameterDefinition,this).name}"]
+            "value": symtab[f"RawParam.{cast(JobStringParameterDefinition, this).name}"]
         },
     )
 
@@ -1608,7 +1608,7 @@ class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
             "default",
         },
         adds_fields=lambda this, symtab: {
-            "value": symtab[f"RawParam.{cast(JobPathParameterDefinition,this).name}"]
+            "value": symtab[f"RawParam.{cast(JobPathParameterDefinition, this).name}"]
         },
     )
 
@@ -1834,7 +1834,7 @@ class JobIntParameterDefinition(OpenJDModel_v2023_09):
             "default",
         },
         adds_fields=lambda this, symtab: {
-            "value": symtab[f"RawParam.{cast(JobIntParameterDefinition,this).name}"]
+            "value": symtab[f"RawParam.{cast(JobIntParameterDefinition, this).name}"]
         },
     )
 
@@ -2092,7 +2092,7 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
             "default",
         },
         adds_fields=lambda this, symtab: {
-            "value": symtab[f"RawParam.{cast(JobFloatParameterDefinition,this).name}"]
+            "value": symtab[f"RawParam.{cast(JobFloatParameterDefinition, this).name}"]
         },
     )
 
