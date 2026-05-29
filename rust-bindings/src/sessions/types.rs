@@ -328,6 +328,27 @@ impl PyActionStatus {
         )
     }
 
+    /// Field-wise structural equality. Two ``ActionStatus`` instances
+    /// compare equal when every field matches. Without this, the
+    /// pyclass falls back to identity comparison, which breaks
+    /// ``mock.assert_called_with`` and dataclass ``__eq__`` for
+    /// dataclasses that hold an ``ActionStatus``.
+    fn __eq__(&self, other: &Self) -> bool {
+        let a = &self.inner;
+        let b = &other.inner;
+        a.state == b.state
+            && a.progress == b.progress
+            && a.status_message == b.status_message
+            && a.fail_message == b.fail_message
+            && a.exit_code == b.exit_code
+            && a.started_at == b.started_at
+            && a.ended_at == b.ended_at
+    }
+
+    fn __ne__(&self, other: &Self) -> bool {
+        !self.__eq__(other)
+    }
+
     /// Internal classmethod used by pickle to reconstruct an
     /// `ActionStatus` with its full state including `started_at` and
     /// `ended_at`. Not intended for normal user code; use

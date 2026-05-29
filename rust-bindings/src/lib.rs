@@ -66,6 +66,7 @@ fn openjd_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTypeCode>()?;
     m.add_class::<PyExprValue>()?;
     m.add_class::<PySymbolTable>()?;
+    m.add_class::<PySerializedSymbolTable>()?;
     m.add_class::<PyExprRevision>()?;
     m.add_class::<PyExprExtension>()?;
     m.add_class::<PyHostContext>()?;
@@ -81,6 +82,7 @@ fn openjd_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(parse_expression, m)?)?;
     m.add_function(wrap_pyfunction!(escape_format_string, m)?)?;
     m.add_function(wrap_pyfunction!(_reconstruct_expr_value, m)?)?;
+    m.add_function(wrap_pyfunction!(_reconstruct_serialized_symtab, m)?)?;
 
     m.add("DEFAULT_MEMORY_LIMIT", DEFAULT_MEMORY_LIMIT)?;
     m.add("DEFAULT_OPERATION_LIMIT", DEFAULT_OPERATION_LIMIT)?;
@@ -214,15 +216,22 @@ fn openjd_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyHiddenOnlyUserInterface>()?;
 
     m.add_function(wrap_pyfunction!(decode_job_template_str, m)?)?;
-    m.add_function(wrap_pyfunction!(decode_job_template_dict, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_job_template, m)?)?;
     m.add_function(wrap_pyfunction!(decode_environment_template_str, m)?)?;
-    m.add_function(wrap_pyfunction!(decode_environment_template_dict, m)?)?;
+    m.add_function(wrap_pyfunction!(decode_environment_template, m)?)?;
     m.add_function(wrap_pyfunction!(py_create_job, m)?)?;
     m.add_function(wrap_pyfunction!(py_create_environment, m)?)?;
     m.add_function(wrap_pyfunction!(py_deserialize_step, m)?)?;
     m.add_function(wrap_pyfunction!(py_preprocess_job_parameters, m)?)?;
     m.add_function(wrap_pyfunction!(py_merge_job_parameter_definitions, m)?)?;
     m.add_function(wrap_pyfunction!(py_evaluate_let_bindings, m)?)?;
+
+    // Capability validation and standard-capability lookup
+    m.add_function(wrap_pyfunction!(validate_amount_capability_name, m)?)?;
+    m.add_function(wrap_pyfunction!(validate_attribute_capability_name, m)?)?;
+    m.add_function(wrap_pyfunction!(standard_amount_capability_names, m)?)?;
+    m.add_function(wrap_pyfunction!(standard_attribute_capability_names, m)?)?;
+    m.add_function(wrap_pyfunction!(standard_attribute_capabilities, m)?)?;
 
     register_renamed_exception(
         m,

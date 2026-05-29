@@ -16,139 +16,12 @@ Cross-reference:
 
 from __future__ import annotations
 
-from pathlib import PureWindowsPath
-
 import pytest
 
 from openjd.expr import (
-    ExprValue,
     ExpressionError,
-    PathFormat,
-    PathMappingRule,
     SymbolTable,
 )
-
-
-# ── ExprValue NaN / Inf raise plain ValueError, not ExpressionError ──
-#
-# The pure-Python reference (`openjd.expr._value._create`) raises
-# ``ExpressionError`` for NaN and infinity inputs:
-#
-#     if isnan(float_value):
-#         raise ExpressionError("Float operation produced NaN")
-#     if isinf(float_value):
-#         raise ExpressionError("Float operation produced infinity")
-#
-# The Rust-backed binding raises a plain ``ValueError`` (carrying the
-# message from the underlying ``Float64::new`` validator). Catching
-# ``ExpressionError`` no longer covers these paths, so callers porting
-# from v0 will see different exception class identity in
-# ``except ExpressionError`` blocks. Fix path: have
-# ``rust-bindings/src/expr/expr_value.rs::py_to_expr_value`` and
-# ``from_float`` map ``Float64::new`` errors through
-# ``PyExpressionError::new_err`` instead of ``PyValueError::new_err``,
-# matching ``make_list_err_to_py``'s pattern of remapping
-# upstream errors to the reference's exception class.
-#
-# Cross-reference: report Recommendation #1.
-
-
-class TestExprValueNaNInfErrorClass:
-    def test_nan_raises_expression_error(self) -> None:
-        with pytest.raises(ExpressionError, match="NaN"):
-            ExprValue(float("nan"))
-
-    def test_inf_raises_expression_error(self) -> None:
-        with pytest.raises(ExpressionError, match="infinity"):
-            ExprValue(float("inf"))
-
-    def test_neg_inf_raises_expression_error(self) -> None:
-        with pytest.raises(ExpressionError, match="infinity"):
-            ExprValue(float("-inf"))
-
-
-# Mark every test in the class above as xfail; the ``except`` clause
-# matches ``ValueError`` (the binding's current behaviour) but NOT
-# ``ExpressionError``, so each assertion above raises a non-matching
-# exception today. Pytest collects the four tests into the class so
-# we put the marker on the class declaration above.
-pytest.mark.xfail(
-    reason="Reference raises ExpressionError for NaN/Inf; binding raises plain ValueError",
-    raises=ValueError,
-    strict=True,
-)(TestExprValueNaNInfErrorClass)
-
-
-# ── ExprValue(int outside i64) leaks the inner OverflowError text ──
-#
-# The reference raises:
-#
-#     ExpressionError("Integer overflow: result is outside the 64-bit signed range")
-#
-# The binding currently produces a longer message that leaks the inner
-# PyO3 OverflowError into the user-visible string:
-#
-#     "Integer overflow: value does not fit in i64
-#      (OverflowError: Python int too large to convert to C long)"
-#
-# This drifts the message away from the reference and surfaces an
-# implementation detail of the binding. Fix path:
-# ``rust-bindings/src/expr/expr_value.rs::py_to_expr_value`` should
-# raise ``PyExpressionError::new_err("Integer overflow: result is
-# outside the 64-bit signed range")`` for the ``i64`` extract failure,
-# matching the reference message verbatim.
-#
-# Cross-reference: report Recommendation #2.
-
-
-@pytest.mark.xfail(
-    reason="Binding leaks underlying OverflowError text; reference uses canonical phrasing",
-    strict=True,
-)
-def test_expr_value_int_overflow_message_matches_reference() -> None:
-    with pytest.raises(ExpressionError) as excinfo:
-        ExprValue(2**63)  # one past i64::MAX
-    # Reference's exact message — no "value does not fit in i64",
-    # no "(OverflowError: ...)" suffix.
-    assert str(excinfo.value) == "Integer overflow: result is outside the 64-bit signed range"
-
-
-# ── PathMappingRule constructor raises TypeError, not ValueError ──
-#
-# Reference:
-#
-#     elif source_path_format == PathFormat.POSIX:
-#         if not isinstance(source_path, PurePosixPath):
-#             raise ValueError(
-#                 "Path mapping rule source_path_format does not match source_path type"
-#             )
-#
-# The binding raises ``TypeError`` with a different message:
-#
-#     "source_path must be str or PurePosixPath for POSIX format,
-#      got PureWindowsPath"
-#
-# The exception class identity matters because callers porting from v0
-# write ``except ValueError`` blocks. Fix path:
-# ``rust-bindings/src/expr/path_mapping.rs::extract_path_arg`` should
-# raise ``PyValueError::new_err`` with the reference's exact message
-# when the supplied pathlib type doesn't match the format.
-#
-# Cross-reference: report Recommendation #3.
-
-
-@pytest.mark.xfail(
-    reason="Binding raises TypeError; reference raises ValueError on path format mismatch",
-    raises=TypeError,
-    strict=True,
-)
-def test_path_mapping_rule_format_mismatch_raises_value_error() -> None:
-    with pytest.raises(ValueError, match="source_path_format does not match source_path type"):
-        PathMappingRule(
-            source_path_format=PathFormat.POSIX,
-            source_path=PureWindowsPath("C:\\foo"),
-            destination_path="/dst",
-        )
 
 
 # ── SymbolTable['Key'] = value when Key is already a subtable ──
@@ -188,32 +61,6 @@ def test_symbol_table_setitem_overwrites_subtable() -> None:
     assert st["Param"].item() == 99
     # And the previously-nested 'Param.Frame' is no longer reachable.
     assert "Param.Frame" not in st
-
-
-# ── Integer overflow message leaks the inner OverflowError text ──
-#
-# (See test_expr_value_int_overflow_message_matches_reference above for
-# the i64::MAX side; the same drift applies symmetrically below
-# i64::MIN.) The reference's ``ExprValue._create`` raises
-# ``ExpressionError("Integer overflow: result is outside the 64-bit
-# signed range")`` for *any* integer outside the i64 window. The
-# binding's ``py_to_expr_value`` produces the same drifted phrasing
-# regardless of sign, so a separate strict xfail pins the negative
-# side explicitly — without it, a partial fix that only addresses
-# i64::MAX would silently start xpassing the existing positive-side
-# test and miss the negative-side regression.
-#
-# Cross-reference: report Recommendation #2.
-
-
-@pytest.mark.xfail(
-    reason="Negative i64 overflow shares the same message-leak drift as i64::MAX",
-    strict=True,
-)
-def test_expr_value_negative_int_overflow_message_matches_reference() -> None:
-    with pytest.raises(ExpressionError) as excinfo:
-        ExprValue(-(2**63) - 1)  # one below i64::MIN
-    assert str(excinfo.value) == "Integer overflow: result is outside the 64-bit signed range"
 
 
 # ── ExpressionError raised from Rust does not populate `expr` /

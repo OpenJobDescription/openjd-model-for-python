@@ -58,15 +58,16 @@ The `openjd.model._v1` package is split into four submodules that
 mirror the underlying Rust crate's organization. The top-level
 `openjd.model._v1` re-exports the *entry points* (decode/create
 functions, the `SpecificationRevision` and
-`TemplateSpecificationVersion` enums, the `RevisionExtensions`
-legacy compat wrapper), but **does not** re-export the structural
-pyclasses — those live in their respective submodules. Examples in
-this spec import each symbol from its canonical location.
+`TemplateSpecificationVersion` enums, and the cross-cutting types
+`ModelProfile`, `CallerLimits`, `DocumentType`), but **does not**
+re-export the structural pyclasses — those live in their respective
+submodules. Examples in this spec import each symbol from its
+canonical location.
 
 | Submodule | Contents |
 |---|---|
-| `openjd.model._v1` (top level) | Entry-point functions (`decode_job_template`, `decode_job_template_str`, `decode_environment_template`, `decode_environment_template_str`, `create_job`, `preprocess_job_parameters`, `merge_job_parameter_definitions`, `evaluate_let_bindings`, `decode_template`, `document_string_to_object`), the `CallerLimits` and `ModelProfile` cross-cutting types, `DocumentType` (also in `.types`), the Rust pyclass enums `SpecificationRevision` and `TemplateSpecificationVersion` (re-exported from `openjd._openjd_rs`; behave like `str`-Enums with lowercase variant names — see their dedicated sections below), `RevisionExtensions` (legacy compat wrapper around `ModelProfile`), and the capability-validation helpers (`validate_amount_capability_name`, `validate_attribute_capability_name`, `STANDARD_AMOUNT_CAPABILITIES`, `STANDARD_ATTRIBUTE_CAPABILITIES`). **Explicitly NOT exposed at v1**: the v0 names `ParameterValue`, `ParameterValueType`, `ValueReferenceConstants`, `CancelationMethodTerminate`, `CancelationMethodNotifyThenTerminate`, `CompatibilityError`, `CommandString`, `ArgString`, `EmbeddedFileText`, `EmbeddedFiles`, `StepDependencyGraphNode`, `StepDependencyGraphStepToStepEdge`, `FormatStringError`, and the legacy `openjd.expr` re-exports (`SymbolTable`, `FormatString`, `RangeExpr`, `ExpressionError`). Use the canonical locations: `openjd.model._v1.types` (parameter types/values, `JobParameterValue`/`TaskParameterValue`, `JobParameterType`/`TaskParameterType`); `openjd.model._v1.template` / `openjd.model._v1.job` (structural pyclasses, `EmbeddedFile`, `StepDependencyEdge`); `openjd.model._v1.errors` (`DecodeValidationError`, `ModelValidationError`, `UnsupportedSchema`); and `openjd.expr` (expression-layer types). |
-| `openjd.model._v1.template` | Template-time pyclasses returned by `decode_*_template`: `JobTemplate`, `EnvironmentTemplate`, `StepTemplate`, `Action`, `EmbeddedFile`, the typed `JobParameterDefinition`/`TaskParameterDefinition`/`*UserInterface` variants, etc. |
+| `openjd.model._v1` (top level) | Entry-point functions (`decode_job_template`, `decode_job_template_str`, `decode_environment_template`, `decode_environment_template_str`, `create_job`, `preprocess_job_parameters`, `merge_job_parameter_definitions`, `evaluate_let_bindings`), the `CallerLimits` and `ModelProfile` cross-cutting types, `DocumentType` (also in `.types`), the Rust pyclass enums `SpecificationRevision` and `TemplateSpecificationVersion` (re-exported from `openjd._openjd_rs`; behave like `str`-Enums with lowercase variant names — see their dedicated sections below), and the capability-validation helpers (`validate_amount_capability_name`, `validate_attribute_capability_name`, `standard_amount_capability_names`, `standard_attribute_capability_names`, `standard_attribute_capabilities`). **Explicitly NOT exposed at v1**: the v0 names `ParameterValue`, `ParameterValueType`, `ValueReferenceConstants`, `CancelationMethodTerminate`, `CancelationMethodNotifyThenTerminate`, `CompatibilityError`, `CommandString`, `ArgString`, `EmbeddedFileText`, `EmbeddedFiles`, `StepDependencyGraphNode`, `StepDependencyGraphStepToStepEdge`, `FormatStringError`, `RevisionExtensions`, and the legacy `openjd.expr` re-exports (`SymbolTable`, `FormatString`, `RangeExpr`, `ExpressionError`). Use the canonical locations: `openjd.model._v1.types` (parameter types/values, `JobParameterValue`/`TaskParameterValue`, `JobParameterType`/`TaskParameterType`); `openjd.model._v1.template` / `openjd.model._v1.job` (structural pyclasses, `EmbeddedFile`, `StepDependencyEdge`); `openjd.model._v1.errors` (`DecodeValidationError`, `ModelValidationError`, `UnsupportedSchema`); and `openjd.expr` (expression-layer types). For revision/extensions information, use `ModelProfile.from_strings(revision, extensions)` directly — `RevisionExtensions` was a v0 wrapper that no longer has a v1 counterpart. The `openjd.model._v1.v2023_09` submodule is also gone — it was a v0-shaped per-revision compat shim with no Rust-API counterpart; structural pyclasses live in their canonical submodules (`_v1.template`, `_v1.job`, `_v1.types`, `_v1.errors`) and revision is a property of types, not a namespace. |
+| `openjd.model._v1.template` | Template-time pyclasses returned by `decode_*_template`: `JobTemplate`, `EnvironmentTemplate`, `StepTemplate`, `Action`, `EmbeddedFile`, the 12 typed job-parameter-definition variants (`JobStringParameterDefinition`, `JobIntParameterDefinition`, `JobFloatParameterDefinition`, `JobPathParameterDefinition`, `JobBoolParameterDefinition`, `JobRangeExprParameterDefinition`, `JobListStringParameterDefinition`, `JobListPathParameterDefinition`, `JobListIntParameterDefinition`, `JobListFloatParameterDefinition`, `JobListBoolParameterDefinition`, `JobListListIntParameterDefinition`), the typed task-parameter-definition variants, and the `*UserInterface` pyclasses. |
 | `openjd.model._v1.job` | Job-time pyclasses returned by `create_job`: `Job`, `Step`, `StepScript`, `StepActions`, `Action`, `Environment`, `StepParameterSpace`, `StepParameterSpaceIterator`, `StepDependencyGraph`, the typed task-parameter pyclasses, and the job-time `EmbeddedFile`. |
 | `openjd.model._v1.types` | Cross-cutting types: `JobParameterType`, `JobParameterValue`, `TaskParameterType`, `TaskParameterValue`, `DocumentType`, `ModelProfile`, `ModelExtension`, `SpecificationRevision`, `TemplateSpecificationVersion`, `CallerLimits`, `ValidationContext`. |
 | `openjd.model._v1.errors` | Exception classes raised by decode/create paths: `DecodeValidationError`, `ModelValidationError`, `UnsupportedSchema`. |
@@ -157,22 +158,6 @@ The `ModelProfile` type is used as an *output* of decoding (via
 (`create_job(validation_context=...)`, `ModelProfile.to_expr_profile(host)`).
 It is not an input to `decode_*_template` itself — that function takes
 a flat list of strings, mirroring the Rust crate.
-
-#### `decode_template` (deprecated)
-
-Deprecated alias for ``decode_job_template``. Mirrors the v0
-reference, which also exports a deprecated ``decode_template`` for
-backward compatibility. New code should call ``decode_job_template``
-directly.
-
-```python
-from openjd.model._v1 import decode_template
-
-# Same signature and return type as decode_job_template.
-template = decode_template(template={...})
-```
-
-Will be removed in a future release.
 
 #### `decode_job_template_str`
 
@@ -442,9 +427,116 @@ The v0 module retains `from openjd.model import model_to_object`
 unchanged; it works on v0 / pydantic models only, and importing
 it through `openjd.model._v1` is intentionally not supported.
 
+### Capability validation
+
+Capability *names* (the string identifiers like `amount.worker.vcpu`
+or `attr.worker.os.family`) follow a constrained lexical shape:
+optional vendor prefix (`vendor:`), required first segment of
+`amount` or `attr`, then one or more dot-separated identifier
+segments. The OpenJD specification reserves a small set of
+"standard" capabilities under the reserved scopes `worker`, `job`,
+`step`, and `task` — only spec-defined capabilities may use those
+scopes. Vendor-prefixed names and non-reserved-scope unprefixed
+names are accepted unconditionally.
+
+`openjd.model._v1` exposes both the validators and the standard-
+capability lookups directly:
+
+```python
+from openjd.model._v1 import (
+    validate_amount_capability_name,
+    validate_attribute_capability_name,
+    standard_amount_capability_names,
+    standard_attribute_capability_names,
+    standard_attribute_capabilities,
+)
+```
+
+#### `validate_amount_capability_name` / `validate_attribute_capability_name`
+
+```python
+validate_amount_capability_name(
+    *,
+    capability_name: str | FormatString,
+    profile: ModelProfile | None = None,
+) -> None
+```
+
+Returns `None` on success and raises `ValueError` on a malformed
+name. Checks (in order):
+
+1. Length must be ≤ 100 characters.
+2. Must match the capability-name regex (vendor prefix optional;
+   required first segment is `amount.` or `attr.`).
+3. Names without a vendor prefix that match a spec-defined
+   standard capability (e.g. `amount.worker.vcpu`) are accepted.
+4. Names whose second dot-segment is one of the reserved scopes
+   (`worker`, `job`, `step`, `task`) are rejected unless they
+   appear in (3) — those scopes are reserved for OpenJD-defined
+   capabilities.
+
+`profile` defaults to a profile equivalent to `ModelProfile()`.
+Pass an explicit profile to validate against a different
+revision/extensions combination's standard-capability set.
+
+`capability_name` accepts either a plain `str` or a `FormatString`.
+A `FormatString` containing unresolved expressions short-circuits
+— validation is deferred to expression-resolution time. A literal
+`FormatString` falls through to the same checks as a plain string.
+
+`validate_attribute_capability_name` has the same shape and
+semantics, with `attr.` rather than `amount.` as the required
+first segment.
+
+#### `standard_amount_capability_names` / `standard_attribute_capability_names`
+
+```python
+standard_amount_capability_names(*, profile: ModelProfile | None = None) -> list[str]
+standard_attribute_capability_names(*, profile: ModelProfile | None = None) -> list[str]
+```
+
+Return the names of the spec-defined amount/attribute capabilities
+for the given profile. For example, with `profile=None` (current
+default revision):
+
+```python
+>>> standard_amount_capability_names()
+['amount.worker.vcpu', 'amount.worker.memory', 'amount.worker.gpu',
+ 'amount.worker.gpu.memory', 'amount.worker.disk.scratch']
+>>> standard_attribute_capability_names()
+['attr.worker.os.family', 'attr.worker.cpu.arch']
+```
+
+#### `standard_attribute_capabilities`
+
+```python
+standard_attribute_capabilities(
+    *, profile: ModelProfile | None = None
+) -> list[tuple[str, list[str]]]
+```
+
+Returns the spec-defined attribute capabilities along with each
+capability's allowed values:
+
+```python
+>>> standard_attribute_capabilities()
+[('attr.worker.os.family', ['linux', 'windows', 'macos']),
+ ('attr.worker.cpu.arch', ['x86_64', 'arm64'])]
+```
+
+There is no equivalent function for amount capabilities — amount
+values are unconstrained non-negative numbers, so there is nothing
+to enumerate per name.
+
 ## Output Types (from Rust)
 
 Both snake_case and camelCase property accessors are provided.
+Constructors that take template-shape kwargs (e.g. ``StepActions``,
+``EnvironmentActions``, ``StepScript``, ``EnvironmentScript``,
+``EmbeddedFile``) accept either the snake-case form or the
+camelCase alias used by v0 (Pydantic) and the JSON template
+schema. If both flavours of the same field are passed, the
+snake-case form wins.
 
 ### `Job`
 
@@ -1057,9 +1149,13 @@ Step dependency graph for topological ordering.
 from openjd.model._v1.job import StepDependencyGraph
 
 graph = StepDependencyGraph(job=job)
-graph.topo_sorted()         # ["Render", "Composite"] — dependency order
+graph.topo_sorted()         # [Step(name="Render"), Step(name="Composite")] — dependency order
 graph.step_names()          # ["Render", "Composite"]
 ```
+
+`topo_sorted()` returns the actual ``Step`` pyclass objects (so callers
+can read parameters, dependency lists, etc. without re-indexing).
+``step_names()`` is a convenience that returns just the names.
 
 ## Enums
 
@@ -1216,33 +1312,33 @@ expr_profile = profile.to_expr_profile(HostContext.unresolved())
 | `FEATURE_BUNDLE_1` | `"FEATURE_BUNDLE_1"` | RFC 0004 |
 | `EXPR` | `"EXPR"` | RFC 0005 |
 
-### `RevisionExtensions` (legacy)
+## Names removed from v0
 
-`RevisionExtensions(spec_rev=..., supported_extensions=[...])` is a
-thin Python wrapper kept for backward compatibility with code in
-`openjd-sessions`, `openjd-cli`, and `deadline-cloud-worker-agent`.
-It exposes `.to_profile()` to convert to a `ModelProfile`. New code
-should construct a `ModelProfile` directly.
-
-## Compatibility Aliases
-
-| Alias | Target | Usage |
-|---|---|---|
-| `JobParameterValues` | `dict` | `dict[str, JobParameterValue]` |
-| `TaskParameterSet` | `dict` | `dict[str, Any]` |
-
-> **Note.** Earlier versions of `openjd.model._v1` exposed a much
-> broader compatibility surface: `CancelationMethodTerminate`,
-> `CancelationMethodNotifyThenTerminate`, `CompatibilityError`,
-> `CommandString`, `ArgString`, `EmbeddedFileText`, `EmbeddedFiles`,
-> `StepDependencyGraphNode`, `StepDependencyGraphStepToStepEdge`,
-> `ValueReferenceConstants`, `FormatStringError`, `IntRangeExpr`,
-> and the `openjd.expr` re-exports `SymbolTable`, `FormatString`,
-> `RangeExpr`, `ExpressionError`. These have been removed. v0
-> callers should remain on `openjd.model`; v1 callers should import
-> structural pyclasses from their canonical submodules
-> (`_v1.template`, `_v1.job`, `_v1.types`, `_v1.errors`) and
-> expression-layer types from `openjd.expr` directly.
+> **Note.** v0 (`openjd.model`) exposed a number of names that are
+> deliberately not carried forward into v1: the structural classes
+> `CancelationMethodTerminate`, `CancelationMethodNotifyThenTerminate`,
+> `CompatibilityError`, `CommandString`, `ArgString`,
+> `EmbeddedFileText`, `EmbeddedFiles`, `StepDependencyGraphNode`,
+> `StepDependencyGraphStepToStepEdge`, `ValueReferenceConstants`,
+> `FormatStringError`, `IntRangeExpr`, the `openjd.expr` re-exports
+> `SymbolTable`, `FormatString`, `RangeExpr`, `ExpressionError`,
+> and a set of opaque type aliases (`JobParameterValues`,
+> `JobParameterInputValues`, `TaskParameterSet`,
+> `JobParameterDefinition`, `OpenJDModel`). v0 callers should
+> remain on `openjd.model`; v1 callers should import structural
+> pyclasses from their canonical submodules (`_v1.template`,
+> `_v1.job`, `_v1.types`, `_v1.errors`) and expression-layer types
+> from `openjd.expr` directly. Where v0 callers used the opaque
+> type aliases, v1 callers should use the concrete typed forms
+> instead — e.g. `dict[str, JobParameterValue]` in place of
+> `JobParameterValues`, `dict[str, str]` in place of
+> `JobParameterInputValues`, `dict[str, TaskParameterValue]` in
+> place of `TaskParameterSet`, and the specific concrete pyclass
+> (`JobStringParameterDefinition`, `JobIntParameterDefinition`,
+> etc.) in place of `JobParameterDefinition`. There is no v1
+> equivalent of `OpenJDModel`: `JobTemplate` and
+> `EnvironmentTemplate` are independent PyO3 pyclasses with no
+> shared base class.
 
 ### Behavior change: `RangeExpr` iteration is always ascending
 

@@ -6,6 +6,7 @@ backend-path = ["."]
 [project]
 dependencies = [
   "pyyaml == 6.0.*",
+  "pydantic >= 2.10, < 3",
 ]
 name = "openjd-model"
 authors = [

@@ -45,8 +45,9 @@ class TestFromFloat:
 
     def test_from_float_rejects_nan(self) -> None:
         import math
+        from openjd.expr import ExpressionError
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(ExpressionError) as excinfo:
             ExprValue.from_float(math.nan)
         # AGENTS.md "Test Quality Standard": pin the full message.
         assert str(excinfo.value) == "Float operation produced NaN"
@@ -54,8 +55,9 @@ class TestFromFloat:
     def test_from_float_rejects_nan_with_original_str(self) -> None:
         # The optional-arg path doesn't bypass NaN validation.
         import math
+        from openjd.expr import ExpressionError
 
-        with pytest.raises(ValueError) as excinfo:
+        with pytest.raises(ExpressionError) as excinfo:
             ExprValue.from_float(math.nan, "nan")
         assert str(excinfo.value) == "Float operation produced NaN"
 
@@ -197,6 +199,35 @@ class TestExprValueConstruction:
     def test_from_value_unsupported_type(self) -> None:
         with pytest.raises(TypeError, match="Cannot convert"):
             ExprValue(object())
+
+
+class TestExprValueNaNInf:
+    """``ExprValue(float)`` rejects NaN and infinity, surfacing the
+    rejection as ``ExpressionError`` (a ``ValueError`` subclass) with
+    the pure-Python reference's canonical message. Mirrors the
+    ``ExprValue.from_float`` covers above for the main-constructor
+    path."""
+
+    def test_nan_raises_expression_error(self) -> None:
+        from openjd.expr import ExpressionError
+
+        with pytest.raises(ExpressionError) as excinfo:
+            ExprValue(float("nan"))
+        assert str(excinfo.value) == "Float operation produced NaN"
+
+    def test_inf_raises_expression_error(self) -> None:
+        from openjd.expr import ExpressionError
+
+        with pytest.raises(ExpressionError) as excinfo:
+            ExprValue(float("inf"))
+        assert str(excinfo.value) == "Float operation produced infinity"
+
+    def test_neg_inf_raises_expression_error(self) -> None:
+        from openjd.expr import ExpressionError
+
+        with pytest.raises(ExpressionError) as excinfo:
+            ExprValue(float("-inf"))
+        assert str(excinfo.value) == "Float operation produced infinity"
 
 
 class TestExprValueTypeCoercionWithString:
@@ -395,14 +426,19 @@ class TestI64OverflowMapping:
     def test_int_above_i64_max(self) -> None:
         from openjd.expr import ExpressionError
 
-        with pytest.raises(ExpressionError, match="Integer overflow"):
+        with pytest.raises(ExpressionError) as excinfo:
             ExprValue(2**63)
+        # Full message pinned per AGENTS.md "Test Quality Standard":
+        # the binding must produce the reference's canonical phrasing
+        # rather than leaking PyO3's internal OverflowError text.
+        assert str(excinfo.value) == "Integer overflow: result is outside the 64-bit signed range"
 
     def test_int_below_i64_min(self) -> None:
         from openjd.expr import ExpressionError
 
-        with pytest.raises(ExpressionError, match="Integer overflow"):
+        with pytest.raises(ExpressionError) as excinfo:
             ExprValue(-(2**63) - 1)
+        assert str(excinfo.value) == "Integer overflow: result is outside the 64-bit signed range"
 
     def test_i64_max_accepted(self) -> None:
         v = ExprValue(2**63 - 1)

@@ -30,7 +30,9 @@ _version.py
 # Rust build artifacts
 /target/
 /rust-bindings/target/
-Cargo.lock
+# Cargo.lock is committed so the `_openjd_rs.abi3.so` Python extension
+# gives reproducible wheel builds and keeps the `THIRD-PARTY-LICENSES.txt`
+# check stable across CI runs.
 
 # Compiled extension modules
 *.so

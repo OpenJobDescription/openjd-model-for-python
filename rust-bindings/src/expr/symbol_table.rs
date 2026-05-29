@@ -226,3 +226,101 @@ fn symbol_table_eq(a: &SymbolTable, b: &SymbolTable) -> bool {
     }
     true
 }
+
+// ── SerializedSymbolTable ──────────────────────────────────────────
+//
+// Opaque box around the Rust-side serialized form. The intended
+// transport path is ``Step.resolved_symtab → Session.run_task``,
+// which never inspects the contents — keeping the value serialized
+// avoids two unnecessary conversions (``to_symtab`` on the getter,
+// ``from_symtab`` on the setter). Callers that *do* want to peek at
+// or modify the symbol table go through ``.to_symtab()`` / a fresh
+// ``SerializedSymbolTable.from_symtab(...)``.
+
+#[cfg_attr(feature = "stub-gen", gen_stub_pyclass(module = "openjd._openjd_rs"))]
+#[pyclass(
+    module = "openjd.expr",
+    name = "SerializedSymbolTable",
+    frozen,
+    from_py_object
+)]
+#[derive(Clone)]
+pub(crate) struct PySerializedSymbolTable {
+    pub(crate) inner: openjd_expr::SerializedSymbolTable,
+}
+
+#[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
+#[pymethods]
+impl PySerializedSymbolTable {
+    /// Build a ``SerializedSymbolTable`` from an in-memory
+    /// ``SymbolTable``. The serialized form is the canonical
+    /// transport between ``create_job`` (which produces it as
+    /// ``Step.resolved_symtab``) and ``Session.run_task`` (which
+    /// consumes it). Callers that build their own symbol tables can
+    /// use this classmethod to convert.
+    #[classmethod]
+    fn from_symtab(_cls: &Bound<'_, pyo3::types::PyType>, symtab: &PySymbolTable) -> Self {
+        Self {
+            inner: openjd_expr::SerializedSymbolTable::from_symtab(&symtab.inner),
+        }
+    }
+
+    /// Deserialize this serialized symbol table into a full
+    /// ``SymbolTable`` suitable for inspection or modification.
+    /// ``path_format`` controls how PATH-typed values are
+    /// reconstructed: ``PathFormat.POSIX`` (the default) uses
+    /// forward slashes, ``PathFormat.WINDOWS`` uses backslashes.
+    /// Most callers should pass the ``PathFormat`` matching the
+    /// session's host OS.
+    #[pyo3(signature = (*, path_format=None))]
+    fn to_symtab(
+        &self,
+        path_format: Option<crate::expr::path_format::PyPathFormat>,
+    ) -> PyResult<PySymbolTable> {
+        let pf = path_format
+            .map(Into::into)
+            .unwrap_or_else(openjd_expr::path_mapping::PathFormat::host);
+        let inner = self.inner.to_symtab(pf).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Failed to deserialize SerializedSymbolTable: {e}"
+            ))
+        })?;
+        Ok(PySymbolTable { inner })
+    }
+
+    fn __repr__(&self) -> String {
+        // Don't try to render the contents — the value is opaque
+        // transport. Emit just the type name.
+        "SerializedSymbolTable(...)".to_string()
+    }
+
+    /// Pickle support — round-trips through the JSON string form.
+    #[allow(clippy::type_complexity)] // pickle reducer tuple shape is by design
+    fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, pyo3::PyAny>, (String,))> {
+        let helper = py
+            .import("openjd._openjd_rs")?
+            .getattr("_reconstruct_serialized_symtab")?;
+        let json = serde_json::to_string(&self.inner).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Failed to pickle SerializedSymbolTable: {e}"
+            ))
+        })?;
+        Ok((helper, (json,)))
+    }
+}
+
+/// Pickle helper — module-level free function so pickled bytes
+/// can be reconstructed across interpreter sessions.
+#[cfg_attr(
+    feature = "stub-gen",
+    gen_stub_pyfunction(module = "openjd._openjd_rs")
+)]
+#[pyfunction]
+pub(crate) fn _reconstruct_serialized_symtab(json: &str) -> PyResult<PySerializedSymbolTable> {
+    let inner = openjd_expr::SerializedSymbolTable::from_json_str(json).map_err(|e| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "Failed to unpickle SerializedSymbolTable: {e}"
+        ))
+    })?;
+    Ok(PySerializedSymbolTable { inner })
+}

@@ -14,3 +14,34 @@ jobs:
     uses: OpenJobDescription/.github/.github/workflows/reusable_codeql.yml@mainline
     permissions:
       security-events: write
+
+  # The org-level reusable workflow above analyses the Python sources in
+  # `src/` and `test/`. The Rust bindings under `rust-bindings/` are a
+  # separate language target that the reusable workflow doesn't cover, so
+  # we run a dedicated Rust analysis here. Pattern matches openjd-rs's
+  # codeql.yml.
+  Analyze-rust:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      # Required for github/codeql-action/init + codeql-action/analyze.
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          # Rust's CodeQL extractor does not support `autobuild` (it
+          # errors out with "Rust does not support the autobuild build
+          # mode"). The extractor reads source files directly via the
+          # rust-analyzer-style frontend; no cargo invocation is needed
+          # for the database build.
+          build-mode: none
+          queries: +security-and-quality
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4

@@ -27,6 +27,13 @@ fn extract_job_parameter_values(py_dict: &Bound<'_, PyDict>) -> PyResult<JobPara
     let mut result = JobParameterValues::new();
     for (key, val) in py_dict.iter() {
         let name: String = key.extract()?;
+        // Direct passthrough when the Python caller already has a
+        // typed ``JobParameterValue`` pyclass — unwrap to the
+        // underlying Rust struct, no dict round-trip required.
+        if let Ok(jpv) = val.extract::<crate::model::types::PyJobParameterValue>() {
+            result.insert(name, jpv.inner);
+            continue;
+        }
         if let Ok(inner_dict) = val.cast::<PyDict>() {
             let type_str: String = inner_dict
                 .get_item("type")?
@@ -44,7 +51,8 @@ fn extract_job_parameter_values(py_dict: &Bound<'_, PyDict>) -> PyResult<JobPara
             result.insert(name, JobParameterValue { param_type, value });
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(
-                "Each parameter value must be a dict with 'type' and 'value' keys",
+                "Each parameter value must be a JobParameterValue or \
+                 a dict with 'type' and 'value' keys",
             ));
         }
     }
@@ -61,6 +69,13 @@ fn extract_task_parameter_values(py_dict: &Bound<'_, PyDict>) -> PyResult<TaskPa
     let mut result = TaskParameterSet::new();
     for (key, val) in py_dict.iter() {
         let name: String = key.extract()?;
+        // Direct passthrough when the Python caller already has a
+        // typed ``TaskParameterValue`` pyclass — unwrap to the
+        // underlying Rust struct, no dict round-trip required.
+        if let Ok(tpv) = val.extract::<crate::model::types::PyTaskParameterValue>() {
+            result.insert(name, tpv.inner);
+            continue;
+        }
         if let Ok(inner_dict) = val.cast::<PyDict>() {
             let type_str: String = inner_dict
                 .get_item("type")?
@@ -124,7 +139,8 @@ impl PySession {
 #[pymethods]
 impl PySession {
     #[new]
-    #[pyo3(signature = (*, session_id, job_parameter_values, path_mapping_rules=None, retain_working_dir=false, os_env_vars=None, session_root_directory=None, user=None))]
+    #[pyo3(signature = (*, session_id, job_parameter_values, path_mapping_rules=None, retain_working_dir=false, os_env_vars=None, session_root_directory=None, user=None, profile=None))]
+    #[allow(clippy::too_many_arguments)] // PyO3 #[new] mirrors a kwarg-rich public constructor
     fn new(
         session_id: String,
         job_parameter_values: &Bound<'_, PyDict>,
@@ -133,6 +149,7 @@ impl PySession {
         os_env_vars: Option<HashMap<String, String>>,
         session_root_directory: Option<PathBuf>,
         user: Option<&Bound<'_, PyAny>>,
+        profile: Option<crate::model::profile::PyModelProfile>,
     ) -> PyResult<Self> {
         let params = extract_job_parameter_values(job_parameter_values)?;
 
@@ -188,7 +205,7 @@ impl PySession {
             os_env_vars,
             session_root_directory,
             user: user_inner,
-            profile: None,
+            profile: profile.map(|p| p.inner),
             cancel_token: None,
             sticky_bit_policy: Default::default(),
             debug_collect_stdout: false,
@@ -277,11 +294,12 @@ impl PySession {
 
     /// Enter an environment. Non-blocking — spawns the onEnter action on a
     /// background thread and returns the environment identifier immediately.
-    #[pyo3(signature = (*, environment, identifier=None, os_env_vars=None))]
+    #[pyo3(signature = (*, environment, identifier=None, resolved_symtab=None, os_env_vars=None))]
     fn enter_environment(
         &self,
         environment: &PyEnvironment,
         identifier: Option<String>,
+        resolved_symtab: Option<&crate::expr::PySerializedSymbolTable>,
         os_env_vars: Option<HashMap<String, String>>,
     ) -> PyResult<String> {
         let env = environment.inner.clone();
@@ -293,6 +311,14 @@ impl PySession {
             }
         };
         let return_id = env_id.clone();
+
+        // Clone the inner ``SerializedSymbolTable`` (a thin
+        // ``serde_json::Value`` wrapper) so the background thread
+        // owns it. ``None`` means the runner sees an empty step-scope
+        // symtab — ``Param.*``, ``RawParam.*``, and step-level let
+        // bindings won't be visible during script-level let-binding
+        // evaluation or expression interpolation.
+        let resolved = resolved_symtab.map(|st| st.inner.clone());
 
         // Take the session out of the mutex so the background thread owns it
         let mut guard = self.session.lock().unwrap();
@@ -319,7 +345,12 @@ impl PySession {
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let env_ref = os_env_vars.as_ref();
-            let _ = rt.block_on(session.enter_environment(&env, None, Some(&env_id), env_ref));
+            let _ = rt.block_on(session.enter_environment(
+                &env,
+                resolved.as_ref(),
+                Some(&env_id),
+                env_ref,
+            ));
             // Put session back BEFORE updating the snapshot. Python callers
             // watch `state` via the snapshot and dispatch the next action the
             // moment it transitions out of Running. If we updated the snapshot
@@ -337,13 +368,16 @@ impl PySession {
 
     /// Exit an environment. Non-blocking — spawns the onExit action on a
     /// background thread.
-    #[pyo3(signature = (*, identifier, keep_session_running=true, os_env_vars=None))]
+    #[pyo3(signature = (*, identifier, resolved_symtab=None, keep_session_running=true, os_env_vars=None))]
     fn exit_environment(
         &self,
         identifier: String,
+        resolved_symtab: Option<&crate::expr::PySerializedSymbolTable>,
         keep_session_running: bool,
         os_env_vars: Option<HashMap<String, String>>,
     ) -> PyResult<()> {
+        let resolved = resolved_symtab.map(|st| st.inner.clone());
+
         let mut guard = self.session.lock().unwrap();
         let mut session = guard.take().ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
@@ -364,7 +398,7 @@ impl PySession {
             let env_ref = os_env_vars.as_ref();
             let _ = rt.block_on(session.exit_environment(
                 &identifier,
-                None,
+                resolved.as_ref(),
                 keep_session_running,
                 env_ref,
             ));
@@ -379,11 +413,12 @@ impl PySession {
     }
 
     /// Run a task. Non-blocking — spawns the onRun action on a background thread.
-    #[pyo3(signature = (*, step_script, task_parameter_values=None, os_env_vars=None))]
+    #[pyo3(signature = (*, step_script, task_parameter_values=None, resolved_symtab=None, os_env_vars=None))]
     fn run_task(
         &self,
         step_script: &PyStepScript,
         task_parameter_values: Option<&Bound<'_, PyDict>>,
+        resolved_symtab: Option<&crate::expr::PySerializedSymbolTable>,
         os_env_vars: Option<HashMap<String, String>>,
     ) -> PyResult<()> {
         let script = step_script.inner.clone();
@@ -391,6 +426,7 @@ impl PySession {
             Some(d) => Some(extract_task_parameter_values(d)?),
             None => None,
         };
+        let resolved = resolved_symtab.map(|st| st.inner.clone());
 
         let mut guard = self.session.lock().unwrap();
         let mut session = guard.take().ok_or_else(|| {
@@ -411,7 +447,7 @@ impl PySession {
             let rt = tokio::runtime::Runtime::new().unwrap();
             let env_ref = os_env_vars.as_ref();
             let task_ref = task_params.as_ref();
-            let _ = rt.block_on(session.run_task(&script, task_ref, None, env_ref));
+            let _ = rt.block_on(session.run_task(&script, task_ref, resolved.as_ref(), env_ref));
             *session_arc.lock().unwrap() = Some(session);
             let guard = session_arc.lock().unwrap();
             if let Some(s) = guard.as_ref() {

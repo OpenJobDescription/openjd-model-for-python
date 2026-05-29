@@ -247,14 +247,26 @@ pub(crate) struct PyStepActions {
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyStepActions {
+    /// Construct a ``StepActions``. Accepts either the snake-case
+    /// ``on_run`` kwarg or the camelCase ``onRun`` alias used by v0
+    /// (Pydantic) and the JSON template schema. If both are passed,
+    /// the snake-case form wins.
     #[new]
-    #[pyo3(signature = (*, on_run))]
-    fn new(on_run: PyAction) -> Self {
-        PyStepActions {
+    #[pyo3(signature = (*, on_run=None, onRun=None))]
+    fn new(
+        on_run: Option<PyAction>,
+        #[allow(non_snake_case)] onRun: Option<PyAction>,
+    ) -> PyResult<Self> {
+        let on_run = on_run.or(onRun).ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "StepActions() missing required keyword argument: 'on_run' (or 'onRun')",
+            )
+        })?;
+        Ok(PyStepActions {
             inner: StepActions {
                 on_run: on_run.inner,
             },
-        }
+        })
     }
 
     #[getter]
@@ -307,9 +319,21 @@ pub(crate) struct PyEnvironmentActions {
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyEnvironmentActions {
+    /// Construct an ``EnvironmentActions``. Accepts either snake-case
+    /// (``on_enter`` / ``on_exit``) or the camelCase aliases
+    /// (``onEnter`` / ``onExit``) used by v0 and the JSON template
+    /// schema. If both flavours of the same field are passed, the
+    /// snake-case form wins.
     #[new]
-    #[pyo3(signature = (*, on_enter=None, on_exit=None))]
-    fn new(on_enter: Option<PyAction>, on_exit: Option<PyAction>) -> Self {
+    #[pyo3(signature = (*, on_enter=None, on_exit=None, onEnter=None, onExit=None))]
+    fn new(
+        on_enter: Option<PyAction>,
+        on_exit: Option<PyAction>,
+        #[allow(non_snake_case)] onEnter: Option<PyAction>,
+        #[allow(non_snake_case)] onExit: Option<PyAction>,
+    ) -> Self {
+        let on_enter = on_enter.or(onEnter);
+        let on_exit = on_exit.or(onExit);
         PyEnvironmentActions {
             inner: EnvironmentActions {
                 on_enter: on_enter.map(|a| a.inner),
@@ -550,13 +574,21 @@ pub(crate) struct PyStepScript {
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyStepScript {
+    /// Construct a ``StepScript``. ``embedded_files`` may be passed
+    /// as either snake-case or its camelCase alias ``embeddedFiles``;
+    /// if both are given the snake-case form wins. A ``let`` alias
+    /// is also accepted for ``let_bindings``.
     #[new]
-    #[pyo3(signature = (*, actions, let_bindings=None, embedded_files=None))]
+    #[pyo3(signature = (*, actions, let_bindings=None, embedded_files=None, embeddedFiles=None, r#let=None))]
     fn new(
         actions: PyStepActions,
         let_bindings: Option<Vec<String>>,
         embedded_files: Option<Vec<PyEmbeddedFile>>,
+        #[allow(non_snake_case)] embeddedFiles: Option<Vec<PyEmbeddedFile>>,
+        r#let: Option<Vec<String>>,
     ) -> Self {
+        let embedded_files = embedded_files.or(embeddedFiles);
+        let let_bindings = let_bindings.or(r#let);
         PyStepScript {
             inner: StepScript {
                 let_bindings,
@@ -642,13 +674,21 @@ pub(crate) struct PyEnvironmentScript {
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyEnvironmentScript {
+    /// Construct an ``EnvironmentScript``. ``embedded_files`` may be
+    /// passed as either snake-case or its camelCase alias
+    /// ``embeddedFiles``; if both are given the snake-case form
+    /// wins. A ``let`` alias is also accepted for ``let_bindings``.
     #[new]
-    #[pyo3(signature = (*, actions, let_bindings=None, embedded_files=None))]
+    #[pyo3(signature = (*, actions, let_bindings=None, embedded_files=None, embeddedFiles=None, r#let=None))]
     fn new(
         actions: PyEnvironmentActions,
         let_bindings: Option<Vec<String>>,
         embedded_files: Option<Vec<PyEmbeddedFile>>,
+        #[allow(non_snake_case)] embeddedFiles: Option<Vec<PyEmbeddedFile>>,
+        r#let: Option<Vec<String>>,
     ) -> Self {
+        let embedded_files = embedded_files.or(embeddedFiles);
+        let let_bindings = let_bindings.or(r#let);
         PyEnvironmentScript {
             inner: EnvironmentScript {
                 let_bindings,

@@ -71,21 +71,30 @@ pub(crate) fn py_to_expr_value(obj: &Bound<'_, pyo3::PyAny>) -> PyResult<ExprVal
         // Map PyO3's `OverflowError` for out-of-range integers to
         // `ExpressionError` so error class identity matches the
         // pure-Python reference (which raises `ExpressionError` for
-        // integers outside the i64 range).
+        // integers outside the i64 range). Use the reference's
+        // canonical message verbatim — the underlying PyO3
+        // `OverflowError` text leaks an implementation detail
+        // ("Python int too large to convert to C long") that's not
+        // useful to callers.
         return i.extract::<i64>().map(ExprValue::Int).map_err(|err| {
             let py = i.py();
             if err.is_instance_of::<pyo3::exceptions::PyOverflowError>(py) {
-                PyExpressionError::new_err(format!(
-                    "Integer overflow: value does not fit in i64 ({err})"
-                ))
+                PyExpressionError::new_err(
+                    "Integer overflow: result is outside the 64-bit signed range",
+                )
             } else {
                 err
             }
         });
     }
     if let Ok(f) = obj.cast::<PyFloat>() {
+        // `Float64::new` already produces canonical "Float operation
+        // produced NaN" / "Float operation produced infinity"
+        // messages — surface them through `ExpressionError` so the
+        // exception class matches the pure-Python reference's
+        // `ExprValue._create`.
         let float = openjd_expr::value::Float64::new(f.extract::<f64>()?)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            .map_err(|e| PyExpressionError::new_err(e.to_string()))?;
         return Ok(ExprValue::Float(float));
     }
     if let Ok(s) = obj.cast::<PyString>() {
@@ -99,8 +108,11 @@ pub(crate) fn py_to_expr_value(obj: &Bound<'_, pyo3::PyAny>) -> PyResult<ExprVal
     if obj.is_instance(&decimal_cls)? {
         let f: f64 = obj.call_method0("__float__")?.extract()?;
         let s: String = obj.call_method0("__str__")?.extract()?;
+        // Same treatment as the `PyFloat` arm above: NaN / infinity
+        // on a `Decimal` should surface as `ExpressionError` to
+        // match the pure-Python reference.
         let float = openjd_expr::value::Float64::with_str(f, s)
-            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+            .map_err(|e| PyExpressionError::new_err(e.to_string()))?;
         return Ok(ExprValue::Float(float));
     }
     if let Ok(ev) = obj.extract::<PyExprValue>() {
@@ -285,7 +297,7 @@ impl PyExprValue {
             Some(s) => openjd_expr::value::Float64::with_str(f, s),
             None => openjd_expr::value::Float64::new(f),
         }
-        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        .map_err(|e| PyExpressionError::new_err(e.to_string()))?;
         Ok(PyExprValue {
             inner: ExprValue::Float(float),
         })

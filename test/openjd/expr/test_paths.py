@@ -389,9 +389,15 @@ class TestRelativeTo:
                 "relative_to(path('//server/share/a/b'), path('//other/share'))",
                 path_format=PathFormat.WINDOWS,
             )
+        # The trailing `\` on the bare UNC root in the error message
+        # matches Python's ``pathlib.PureWindowsPath``: a bare UNC
+        # root has the form ``\\server\share\`` with a trailing
+        # separator (the `anchor` and only `part` of the path),
+        # whereas a child path under it like ``\\server\share\a\b``
+        # does not. ``openjd-expr`` follows the same convention.
         assert str(exc_info.value) == "".join(
             [
-                "relative_to failed: '\\\\server\\share\\a\\b' is not relative to '\\\\other\\share'\n",
+                "relative_to failed: '\\\\server\\share\\a\\b' is not relative to '\\\\other\\share\\'\n",
                 "  relative_to(path('//server/share/a/b'), path('//other/share'))\n",
                 "  ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
             ]
