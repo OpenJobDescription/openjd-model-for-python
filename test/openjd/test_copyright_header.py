@@ -10,7 +10,11 @@ _copyright_header_re = re.compile(
 
 
 def _check_file(filename: Path) -> None:
-    with open(filename) as infile:
+    # Source files in this repo are UTF-8 (comments use Unicode box-
+    # drawing characters and the occasional emoji). Open explicitly
+    # as UTF-8 so this test runs identically on Windows, where the
+    # default Python encoding is cp1252.
+    with open(filename, encoding="utf-8") as infile:
         lines_read = 0
         for line in infile:
             if _copyright_header_re.search(line):
@@ -34,7 +38,7 @@ def _is_version_file(filename: Path) -> bool:
 
 
 def test_copyright_headers():
-    """Verifies every .py file has an Amazon copyright header."""
+    """Verifies every source file has an Amazon copyright header."""
     root_project_dir = Path(__file__)
     # The root of the project is the directory that contains the test directory.
     while not (root_project_dir / "test").exists():
@@ -50,11 +54,17 @@ def test_copyright_headers():
         "scripts",
         "testing_containers",
         "openjdvscode!(/node_modules)",
+        "rust-bindings/src",
+        "rust-bindings/tests",
     ]
     file_count = 0
     for top_level_dir in top_level_dirs:
-        for glob_pattern in ("**/*.py", "**/*.sh", "**/Dockerfile", "**/*.ts"):
+        for glob_pattern in ("**/*.py", "**/*.sh", "**/Dockerfile", "**/*.ts", "**/*.rs"):
             for path in Path(root_project_dir / top_level_dir).glob(glob_pattern):
+                # Skip anything under a `target/` build artefact directory
+                # — `Path.glob` happily follows them.
+                if any(p.name == "target" for p in path.parents):
+                    continue
                 print(path)
                 if not _is_version_file(path):
                     _check_file(path)

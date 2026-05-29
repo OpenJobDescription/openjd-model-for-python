@@ -2,6 +2,10 @@
 name = "openjd-python"
 version = "0.9.0"
 edition = "2021"
+license = "Apache-2.0"
+description = "PyO3 bindings exposing openjd-expr, openjd-model, and openjd-sessions to Python."
+repository = "https://github.com/OpenJobDescription/openjd-model-for-python"
+publish = false
 
 [lib]
 name = "_openjd_rs"

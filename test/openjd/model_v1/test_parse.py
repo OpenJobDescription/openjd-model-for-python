@@ -2,19 +2,15 @@
 
 from enum import Enum
 import json
-from typing import Any, Type
+from typing import Any, Type, Union
 
 import pytest
-import yaml
 
 from openjd.model._v1 import (
-    OpenJDModel,
     decode_environment_template,
     decode_environment_template_str,
     decode_job_template,
     decode_job_template_str,
-    decode_template,
-    document_string_to_object,
 )
 from openjd.model._v1.types import (
     DocumentType,
@@ -24,59 +20,6 @@ from openjd.model._v1.errors import (
     ModelValidationError,
 )
 from openjd.model._v1.template import JobTemplate, EnvironmentTemplate
-
-
-class TestDocStringToObject:
-    @pytest.mark.parametrize(
-        "document,doctype,expected",
-        [
-            pytest.param(
-                json.dumps({"key": "value"}), DocumentType.JSON, {"key": "value"}, id="json doc"
-            ),
-            pytest.param(
-                yaml.safe_dump({"key": "value"}), DocumentType.YAML, {"key": "value"}, id="yaml doc"
-            ),
-        ],
-    )
-    def test_success(self, document: str, doctype: DocumentType, expected: dict[str, Any]) -> None:
-        # WHEN
-        result = document_string_to_object(document=document, document_type=doctype)
-
-        # THEN
-        assert result == expected
-
-    @pytest.mark.parametrize(
-        "document,doctype",
-        [
-            pytest.param(json.dumps([1, 2, 3]), DocumentType.JSON, id="json doc"),
-            pytest.param(yaml.safe_dump([1, 2, 3]), DocumentType.YAML, id="yaml doc"),
-        ],
-    )
-    def test_not_a_dict(self, document: str, doctype: DocumentType) -> None:
-        # THEN
-        with pytest.raises(DecodeValidationError):
-            document_string_to_object(document=document, document_type=doctype)
-
-    @pytest.mark.parametrize(
-        "document,doctype",
-        [
-            pytest.param("{", DocumentType.JSON, id="json doc"),
-            pytest.param("-", DocumentType.YAML, id="yaml doc"),
-        ],
-    )
-    def test_bad_parse(self, document: str, doctype: DocumentType) -> None:
-        # THEN
-        with pytest.raises(DecodeValidationError):
-            document_string_to_object(document=document, document_type=doctype)
-
-
-# `TestModelToObject` (and the `model_to_object` import) used to live
-# here. The function was a v0/pydantic-era helper that walked a
-# `BaseModel.model_dump()` result and converted nested `Decimal`
-# instances back to strings; the v1 Rust-backed model types do not
-# have an analogous "serialize whole model back to a JSON-shaped
-# dict" method, and the spec now explicitly states `model_to_object`
-# is a v0-only API. See `specs/python-model-interface.md`.
 
 
 class TestDecodeJobTemplate:
@@ -111,52 +54,33 @@ class TestDecodeJobTemplate:
             ),
         ],
     )
-    def test_success(self, template: dict[str, Any], expected_class: Type[OpenJDModel]) -> None:
+    def test_success(
+        self,
+        template: dict[str, Any],
+        expected_class: Union[Type[JobTemplate], Type[EnvironmentTemplate]],
+    ) -> None:
         # WHEN
         result = decode_job_template(template=template)
 
         # THEN
         assert isinstance(result, expected_class)
 
-
-class TestDecodeTemplate:
-    """``decode_template`` is a deprecated alias for ``decode_job_template``,
-    kept for parity with the v0 / pure-Python reference module which also
-    exports a deprecated ``decode_template``."""
-
-    def test_returns_job_template(self) -> None:
+    def test_empty_steps_raises_model_validation_error(self) -> None:
+        # ``steps: []`` is structurally well-formed (parses cleanly) but
+        # fails the model-level invariant that a job template must have
+        # at least one step. This is a model-validation concern, not a
+        # decode-validation concern, so v1 raises
+        # ``ModelValidationError`` rather than ``DecodeValidationError``
+        # (v0 raised the latter, which v1 deliberately corrects —
+        # ``DecodeValidationError`` is reserved for parse-stage failures
+        # like unknown specificationVersion or malformed YAML/JSON).
         template = {
             "specificationVersion": "jobtemplate-2023-09",
-            "name": "name",
-            "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+            "name": "T",
+            "steps": [],
         }
-        result = decode_template(template=template)
-        assert isinstance(result, JobTemplate)
-        assert result.name == "name"
-
-    def test_forwards_supported_extensions(self) -> None:
-        # An EXPR-extension expression in the template parses cleanly
-        # only when the EXPR extension is in the caller's allowlist.
-        template = {
-            "specificationVersion": "jobtemplate-2023-09",
-            "name": "name",
-            "extensions": ["EXPR"],
-            "steps": [{"name": "step", "script": {"actions": {"onRun": {"command": "echo"}}}}],
-        }
-        # Without EXPR in supported_extensions, the template fails decode
-        # with ModelValidationError (the template requested an extension
-        # the caller didn't allowlist).
         with pytest.raises(ModelValidationError):
-            decode_template(template=template)
-        # With EXPR allowed, the template decodes.
-        result = decode_template(template=template, supported_extensions=["EXPR"])
-        assert isinstance(result, JobTemplate)
-
-    def test_rejects_environment_template(self) -> None:
-        # Like ``decode_job_template``, the deprecated alias rejects
-        # environment templates with ``DecodeValidationError``.
-        with pytest.raises(DecodeValidationError):
-            decode_template(template={"specificationVersion": "environment-2023-09"})
+            decode_job_template(template=template)
 
 
 class TestDecodeEnvironmentTemplate:
@@ -195,7 +119,11 @@ class TestDecodeEnvironmentTemplate:
             ),
         ],
     )
-    def test_success(self, template: dict[str, Any], expected_class: Type[OpenJDModel]) -> None:
+    def test_success(
+        self,
+        template: dict[str, Any],
+        expected_class: Union[Type[JobTemplate], Type[EnvironmentTemplate]],
+    ) -> None:
         # WHEN
         result = decode_environment_template(template=template)
 

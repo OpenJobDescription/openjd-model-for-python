@@ -51,6 +51,7 @@ EXPECTED_MODULES: dict[str, str] = {
     "PathMappingRule": "openjd.expr",
     "RangeExpr": "openjd.expr",
     "IntRange": "openjd.expr",
+    "SerializedSymbolTable": "openjd.expr",
     "SymbolTable": "openjd.expr",
     "TypeCode": "openjd.expr",
     # openjd.model._v1.template

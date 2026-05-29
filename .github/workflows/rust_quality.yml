@@ -25,6 +25,19 @@ on:
         required: false
         type: string
 
+# Cancel in-progress runs on PR pushes to save CI minutes and avoid
+# cache-save races (two concurrent runs trying to save to the same key).
+# Matches the pattern used in openjd-rs.
+concurrency:
+  group: rust-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+  RUST_BACKTRACE: 1
+
 jobs:
   rust_quality:
     name: Rust (${{ matrix.os }})
@@ -47,16 +60,38 @@ jobs:
         with:
           components: clippy, rustfmt
 
+      # Include the rustc version in the cache key so that a toolchain
+      # upgrade automatically invalidates the target/ cache (stale rustc
+      # artifacts are one of the main reasons cache restore-key hits
+      # produce slow rebuilds).
+      - name: Compute rustc hash
+        id: rustc
+        shell: bash
+        run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
       - name: Cache Cargo registry and build artifacts
+        id: cache
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/registry
-            ~/.cargo/git
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
             target
-          key: cargo-${{ matrix.os }}-${{ hashFiles('Cargo.lock', 'rust-bindings/Cargo.toml') }}
+          key: cargo-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-${{ hashFiles('Cargo.lock', 'rust-bindings/Cargo.toml') }}
           restore-keys: |
+            cargo-${{ matrix.os }}-${{ steps.rustc.outputs.hash }}-
             cargo-${{ matrix.os }}-
+
+      # On a restore-key (non-exact) hit, target/ contains artifacts built
+      # against a different Cargo.lock. Cargo will spend a long time
+      # scanning fingerprints and discovering staleness, especially on
+      # Windows. Starting from an empty target/ with a warm registry cache
+      # is faster.
+      - name: Discard stale target/ on restore-key-only hit
+        if: steps.cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: rm -rf target
 
       - name: cargo fmt --check
         run: cargo fmt --manifest-path rust-bindings/Cargo.toml --check
@@ -75,3 +110,98 @@ jobs:
         # (e.g. a Python example rustdoc tries to compile as Rust) is
         # clearly visible in the CI log.
         run: cargo test --manifest-path rust-bindings/Cargo.toml --doc
+
+  cargo_doc:
+    name: cargo doc -D warnings
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout openjd-model-for-python
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Compute rustc hash
+        id: rustc
+        shell: bash
+        run: echo "hash=$(rustc --version --verbose | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+
+      # Restore-only: rust_quality(ubuntu) owns the cache write. Saving
+      # from here too would race with that job.
+      - name: Restore Cargo cache (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-ubuntu-latest-${{ steps.rustc.outputs.hash }}-${{ hashFiles('Cargo.lock', 'rust-bindings/Cargo.toml') }}
+          restore-keys: |
+            cargo-ubuntu-latest-${{ steps.rustc.outputs.hash }}-
+            cargo-ubuntu-latest-
+
+      # Catches docstring breakages (broken intra-doc links, stale code
+      # blocks, etc.) in pyclass `///` docs.
+      - name: cargo doc
+        run: cargo doc --manifest-path rust-bindings/Cargo.toml --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  cargo_deny:
+    name: cargo-deny (licenses, advisories, bans, sources)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout openjd-model-for-python
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --locked
+
+      # Licenses, bans, and sources apply to every crate we compile,
+      # including dev-dependencies, so scan the full graph. Advisories
+      # are scoped to the normal dep graph (what actually ships in the
+      # extension module).
+      - name: cargo deny check licenses, bans, sources
+        run: cargo deny --manifest-path rust-bindings/Cargo.toml check --config deny.toml licenses bans sources
+
+      - name: cargo deny check advisories
+        run: cargo deny --manifest-path rust-bindings/Cargo.toml check --config deny.toml advisories --exclude-dev
+
+  third_party_licenses:
+    name: THIRD-PARTY-LICENSES check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout openjd-model-for-python
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || inputs.tag || github.ref }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # cargo-about renders `about.hbs` using the workspace's Cargo.lock
+      # and `about.toml`. The committed `THIRD-PARTY-LICENSES` is shipped
+      # with every release, so it must stay in sync with the dependency
+      # graph. The `cli` feature is required to actually build the
+      # cargo-about binary; without it `cargo install` compiles the crate
+      # but emits "none of the package's binaries are available" and
+      # installs nothing.
+      - name: Install cargo-about
+        run: cargo install cargo-about --locked --features cli
+
+      - name: Check THIRD-PARTY-LICENSES is up to date
+        run: bash scripts/check_third_party_licenses.sh

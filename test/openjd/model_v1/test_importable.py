@@ -9,30 +9,33 @@ def test_openjd_model_importable():
     import openjd.model._v1  # noqa: F401
 
 
-def test_top_level_error_classes_re_exported():
+def test_top_level_error_classes_not_re_exported():
     """``DecodeValidationError``, ``ModelValidationError``, and
-    ``UnsupportedSchema`` are all importable from the top level
-    (in addition to their canonical home under
-    ``openjd.model._v1.errors``). The three classes are re-exported
-    as a convenience because they appear directly in user code that
-    catches decode/validation failures."""
-    from openjd.model._v1 import (
-        DecodeValidationError,
-        ModelValidationError,
-        UnsupportedSchema,
-    )
-    from openjd.model._v1 import errors
-
-    # Identity: the top-level re-exports must be the same class
-    # objects as those in the .errors submodule. Catching the
-    # top-level form must catch the .errors form (and vice versa).
-    assert DecodeValidationError is errors.DecodeValidationError
-    assert ModelValidationError is errors.ModelValidationError
-    assert UnsupportedSchema is errors.UnsupportedSchema
-
-    # All three appear in __all__.
+    ``UnsupportedSchema`` are deliberately *not* re-exported at the
+    top of ``openjd.model._v1`` — their canonical home is
+    ``openjd.model._v1.errors``. (See the v1-surface cleanup commit:
+    structural and exception types live in their submodules; the
+    top-level package re-exports only entry points and the
+    ``SpecificationRevision`` / ``TemplateSpecificationVersion``
+    pyclass enums.)"""
     import openjd.model._v1 as v1
 
-    assert "DecodeValidationError" in v1.__all__
-    assert "ModelValidationError" in v1.__all__
-    assert "UnsupportedSchema" in v1.__all__
+    # None of the three appear in __all__.
+    assert "DecodeValidationError" not in v1.__all__
+    assert "ModelValidationError" not in v1.__all__
+    assert "UnsupportedSchema" not in v1.__all__
+
+    # Canonical location resolves; identity check ensures we're
+    # talking about the Rust-pyclass classes (re-exported from
+    # ``openjd._openjd_rs``) rather than name-shadowed Python
+    # placeholders.
+    from openjd.model._v1 import errors
+    from openjd._openjd_rs import (
+        DecodeValidationError as _RsDecodeValidationError,
+        ModelValidationError as _RsModelValidationError,
+        UnsupportedSchema as _RsUnsupportedSchema,
+    )
+
+    assert errors.DecodeValidationError is _RsDecodeValidationError
+    assert errors.ModelValidationError is _RsModelValidationError
+    assert errors.UnsupportedSchema is _RsUnsupportedSchema

@@ -366,35 +366,44 @@ class TestFormatMismatch:
     """Tests that constructor rejects wrong path types for the format."""
 
     def test_posix_rejects_windows_path(self) -> None:
-        with pytest.raises(TypeError) as excinfo:
+        with pytest.raises(ValueError) as excinfo:
             PathMappingRule(
                 source_path_format=PathFormat.POSIX,
                 source_path=PureWindowsPath("C:\\path"),
                 destination_path="/dest",
             )
+        # The message contains the pure-Python reference's canonical
+        # phrase (so v0 callers' message-substring checks still match)
+        # plus the actionable detail (which format was expected, what
+        # type was supplied) to help the caller fix their call.
         assert str(excinfo.value) == (
+            "Path mapping rule source_path_format does not match source_path type: "
             "source_path must be str or PurePosixPath for POSIX format, got PureWindowsPath"
         )
 
     def test_windows_rejects_posix_path(self) -> None:
-        with pytest.raises(TypeError) as excinfo:
+        with pytest.raises(ValueError) as excinfo:
             PathMappingRule(
                 source_path_format=PathFormat.WINDOWS,
                 source_path=PurePosixPath("/posix/path"),
                 destination_path="/dest",
             )
         assert str(excinfo.value) == (
+            "Path mapping rule source_path_format does not match source_path type: "
             "source_path must be str or PureWindowsPath for WINDOWS format, got PurePosixPath"
         )
 
     def test_uri_rejects_purepath(self) -> None:
-        with pytest.raises(TypeError) as excinfo:
+        with pytest.raises(ValueError) as excinfo:
             PathMappingRule(
                 source_path_format=PathFormat.URI,
                 source_path=PurePosixPath("/mnt/shared"),
                 destination_path="/dest",
             )
-        assert str(excinfo.value) == ("source_path must be str for URI format, got PurePosixPath")
+        assert str(excinfo.value) == (
+            "Path mapping rule source_path_format does not match source_path type: "
+            "source_path must be str for URI format, got PurePosixPath"
+        )
 
 
 class TestUriValidation:

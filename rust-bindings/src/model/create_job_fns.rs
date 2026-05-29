@@ -25,10 +25,19 @@ fn extract_input_values(py_dict: &Bound<'_, PyDict>) -> PyResult<JobParameterInp
             if let Some(v) = inner_dict.get_item("value")? {
                 result.insert(name, py_to_expr_value(&v)?);
             }
+        } else if let Ok(jpv) = val.extract::<crate::model::types::PyJobParameterValue>() {
+            // ``JobParameterValue``-shaped pyclass: use its inner
+            // ExprValue directly. ``preprocess_job_parameters`` will
+            // infer the target type from the parameter definition
+            // and coerce. Going through ``inner.value`` (an
+            // ``ExprValue``) preserves type fidelity — going through
+            // ``.value`` (a string) would lose typing for list types
+            // whose elements need re-parsing.
+            result.insert(name, jpv.inner.value);
         } else if let (Ok(_), Ok(value_attr)) = (val.getattr("type"), val.getattr("value")) {
-            // ``ParameterValue``-shaped object with ``.type`` / ``.value``
-            // attributes. Drop the type — preprocess will infer the
-            // target type from the parameter definition and coerce.
+            // Other ``ParameterValue``-shaped object with ``.type`` /
+            // ``.value`` attributes (e.g. mock objects in tests).
+            // Drop the type — preprocess will infer + coerce.
             result.insert(name, py_to_expr_value(&value_attr)?);
         } else {
             // Bare scalar (e.g. ``{"Frame": 5}``). Pass straight through.
@@ -158,10 +167,7 @@ pub(crate) fn py_preprocess_job_parameters(
     use pyo3::IntoPyObjectExt;
     let out = PyDict::new(py);
     for (name, jpv) in &result {
-        let pv = super::types::PyJobParameterValue {
-            param_type: jpv.param_type.into(),
-            value: jpv.value.to_display_string(),
-        };
+        let pv = super::types::PyJobParameterValue { inner: jpv.clone() };
         out.set_item(name, pv.into_py_any(py)?)?;
     }
     Ok(out.unbind())

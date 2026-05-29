@@ -7,8 +7,12 @@ use pyo3::types::{PyDict, PyType};
 use pyo3_stub_gen::derive::*;
 
 use openjd_model::template::parse::DocumentType;
+use openjd_model::types::TaskParameterType;
 use openjd_model::JobParameterType;
 use openjd_model::TemplateSpecificationVersion;
+use openjd_model::{JobParameterValue, TaskParameterValue};
+
+use crate::expr::expr_value::{expr_value_to_py, py_to_expr_value};
 
 #[cfg_attr(
     feature = "stub-gen",
@@ -408,6 +412,34 @@ impl PyTaskParameterType {
     }
 }
 
+impl From<PyTaskParameterType> for TaskParameterType {
+    fn from(v: PyTaskParameterType) -> Self {
+        match v {
+            PyTaskParameterType::INT => TaskParameterType::Int,
+            PyTaskParameterType::FLOAT => TaskParameterType::Float,
+            PyTaskParameterType::STRING => TaskParameterType::String,
+            PyTaskParameterType::PATH => TaskParameterType::Path,
+            PyTaskParameterType::CHUNK_INT => TaskParameterType::ChunkInt,
+        }
+    }
+}
+
+impl From<TaskParameterType> for PyTaskParameterType {
+    fn from(v: TaskParameterType) -> Self {
+        // ``TaskParameterType`` is ``#[non_exhaustive]`` so the
+        // wildcard arm covers any future variant. Today the enum
+        // has exactly five variants, all listed explicitly below.
+        match v {
+            TaskParameterType::Int => PyTaskParameterType::INT,
+            TaskParameterType::Float => PyTaskParameterType::FLOAT,
+            TaskParameterType::String => PyTaskParameterType::STRING,
+            TaskParameterType::Path => PyTaskParameterType::PATH,
+            TaskParameterType::ChunkInt => PyTaskParameterType::CHUNK_INT,
+            _ => unreachable!("Unknown TaskParameterType variant — bindings need updating"),
+        }
+    }
+}
+
 // ── TaskParameterValue ──
 
 #[cfg_attr(feature = "stub-gen", gen_stub_pyclass(module = "openjd._openjd_rs"))]
@@ -419,57 +451,89 @@ impl PyTaskParameterType {
 )]
 #[derive(Clone)]
 pub(crate) struct PyTaskParameterValue {
-    #[pyo3(get)]
-    pub(crate) param_type: PyTaskParameterType,
-    #[pyo3(get)]
-    pub(crate) value: String,
+    pub(crate) inner: TaskParameterValue,
 }
 
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyTaskParameterValue {
+    /// Construct a ``TaskParameterValue``.
+    ///
+    /// ``value`` accepts any Python type that ``ExprValue`` accepts:
+    /// ``str``, ``int``, ``float``, ``bool``, ``Decimal``, ``list``,
+    /// ``ExprValue``, ``RangeExpr``. The ``param_type`` is recorded
+    /// as-is — coercion to the target type happens later when the
+    /// value flows into ``Session`` / ``create_job``. To match the
+    /// pre-binding behaviour, no validation against ``param_type``
+    /// is done here.
     #[new]
     #[pyo3(signature = (*, r#type, value))]
-    fn new(r#type: PyTaskParameterType, value: String) -> Self {
-        Self {
-            param_type: r#type,
-            value,
-        }
+    fn new(r#type: PyTaskParameterType, value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let expr_value = py_to_expr_value(value)?;
+        Ok(Self {
+            inner: TaskParameterValue {
+                param_type: r#type.into(),
+                value: expr_value,
+            },
+        })
     }
 
     #[getter(r#type)]
     fn get_type(&self) -> PyTaskParameterType {
-        self.param_type
+        self.inner.param_type.into()
     }
 
-    fn as_str(&self) -> &str {
-        self.param_type.as_str()
+    /// Canonical string form of the value. Matches the v0 reference's
+    /// dataclass-of-strings shape (``"42"``, ``"true"``, ``"[1, 2, 3]"``)
+    /// and pre-reshape binding behaviour. For the native Python value,
+    /// use ``item()``.
+    #[getter]
+    fn value(&self) -> String {
+        self.inner.value.to_display_string()
+    }
+
+    /// Native Python value backing this ``TaskParameterValue``.
+    /// Mirrors ``ExprValue.item()`` — returns ``int`` for INT,
+    /// ``list`` for LIST_*, etc.
+    fn item(&self, py: Python<'_>) -> PyResult<Py<pyo3::PyAny>> {
+        expr_value_to_py(py, &self.inner.value)
+    }
+
+    fn as_str(&self) -> &'static str {
+        let pt: PyTaskParameterType = self.inner.param_type.into();
+        pt.as_str()
     }
 
     fn __eq__(&self, other: &Bound<'_, pyo3::PyAny>) -> PyResult<bool> {
         let other_type = other.getattr("type")?;
         let other_type_str: String = other_type.call_method0("as_str")?.extract()?;
         let other_value: String = other.getattr("value")?.extract()?;
-        Ok(self.param_type.as_str() == other_type_str && self.value == other_value)
+        let self_type: PyTaskParameterType = self.inner.param_type.into();
+        Ok(self_type.as_str() == other_type_str
+            && self.inner.value.to_display_string() == other_value)
     }
 
     fn __repr__(&self) -> String {
+        let pt: PyTaskParameterType = self.inner.param_type.into();
         format!(
             "TaskParameterValue(type={}, value={:?})",
-            self.param_type.as_str(),
-            self.value
+            pt.as_str(),
+            self.inner.value.to_display_string()
         )
     }
 
     fn __hash__(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.param_type.as_str().hash(&mut h);
-        self.value.hash(&mut h);
+        let pt: PyTaskParameterType = self.inner.param_type.into();
+        pt.as_str().hash(&mut h);
+        self.inner.value.to_display_string().hash(&mut h);
         h.finish()
     }
 
-    /// Pickle support — round-trips through `__init__(*, type, value)`.
+    /// Pickle support — round-trips through ``__init__(*, type, value)``
+    /// using the native Python value (``item()``) so the inner
+    /// ``ExprValue`` type is preserved across pickle.
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
@@ -480,8 +544,9 @@ impl PyTaskParameterValue {
             .getattr("_reconstruct_kwargs")?;
         let cls = py.get_type::<Self>();
         let kwargs = PyDict::new(py);
-        kwargs.set_item("type", self.param_type)?;
-        kwargs.set_item("value", &self.value)?;
+        let pt: PyTaskParameterType = self.inner.param_type.into();
+        kwargs.set_item("type", pt)?;
+        kwargs.set_item("value", expr_value_to_py(py, &self.inner.value)?)?;
         let args = PyTuple::new(py, [cls.into_any(), kwargs.into_any()])?;
         Ok((helper, args.into()))
     }
@@ -498,57 +563,89 @@ impl PyTaskParameterValue {
 )]
 #[derive(Clone)]
 pub(crate) struct PyJobParameterValue {
-    #[pyo3(get)]
-    pub(crate) param_type: PyJobParameterType,
-    #[pyo3(get)]
-    pub(crate) value: String,
+    pub(crate) inner: JobParameterValue,
 }
 
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyJobParameterValue {
+    /// Construct a ``JobParameterValue``.
+    ///
+    /// ``value`` accepts any Python type that ``ExprValue`` accepts:
+    /// ``str``, ``int``, ``float``, ``bool``, ``Decimal``, ``list``,
+    /// ``ExprValue``, ``RangeExpr``. The ``param_type`` is recorded
+    /// as-is — coercion to the target type happens later when the
+    /// value flows into ``Session`` / ``create_job``. To match the
+    /// pre-binding behaviour, no validation against ``param_type``
+    /// is done here.
     #[new]
     #[pyo3(signature = (*, r#type, value))]
-    fn new(r#type: PyJobParameterType, value: String) -> Self {
-        Self {
-            param_type: r#type,
-            value,
-        }
+    fn new(r#type: PyJobParameterType, value: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let expr_value = py_to_expr_value(value)?;
+        Ok(Self {
+            inner: JobParameterValue {
+                param_type: r#type.into(),
+                value: expr_value,
+            },
+        })
     }
 
     #[getter(r#type)]
     fn get_type(&self) -> PyJobParameterType {
-        self.param_type
+        self.inner.param_type.into()
     }
 
-    fn as_str(&self) -> &str {
-        self.param_type.as_str()
+    /// Canonical string form of the value. Matches the v0 reference's
+    /// dataclass-of-strings shape (``"42"``, ``"true"``, ``"[1, 2, 3]"``)
+    /// and pre-reshape binding behaviour. For the native Python value,
+    /// use ``item()``.
+    #[getter]
+    fn value(&self) -> String {
+        self.inner.value.to_display_string()
+    }
+
+    /// Native Python value backing this ``JobParameterValue``.
+    /// Mirrors ``ExprValue.item()`` — returns ``int`` for INT,
+    /// ``list`` for LIST_*, etc.
+    fn item(&self, py: Python<'_>) -> PyResult<Py<pyo3::PyAny>> {
+        expr_value_to_py(py, &self.inner.value)
+    }
+
+    fn as_str(&self) -> &'static str {
+        let pt: PyJobParameterType = self.inner.param_type.into();
+        pt.as_str()
     }
 
     fn __eq__(&self, other: &Bound<'_, pyo3::PyAny>) -> PyResult<bool> {
         let other_type = other.getattr("type")?;
         let other_type_str: String = other_type.call_method0("as_str")?.extract()?;
         let other_value: String = other.getattr("value")?.extract()?;
-        Ok(self.param_type.as_str() == other_type_str && self.value == other_value)
+        let self_type: PyJobParameterType = self.inner.param_type.into();
+        Ok(self_type.as_str() == other_type_str
+            && self.inner.value.to_display_string() == other_value)
     }
 
     fn __repr__(&self) -> String {
+        let pt: PyJobParameterType = self.inner.param_type.into();
         format!(
             "JobParameterValue(type={}, value={:?})",
-            self.param_type.as_str(),
-            self.value
+            pt.as_str(),
+            self.inner.value.to_display_string()
         )
     }
 
     fn __hash__(&self) -> u64 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
-        self.param_type.as_str().hash(&mut h);
-        self.value.hash(&mut h);
+        let pt: PyJobParameterType = self.inner.param_type.into();
+        pt.as_str().hash(&mut h);
+        self.inner.value.to_display_string().hash(&mut h);
         h.finish()
     }
 
-    /// Pickle support — round-trips through `__init__(*, type, value)`.
+    /// Pickle support — round-trips through ``__init__(*, type, value)``
+    /// using the native Python value (``item()``) so the inner
+    /// ``ExprValue`` type is preserved across pickle.
     fn __reduce__<'py>(
         &self,
         py: Python<'py>,
@@ -559,8 +656,9 @@ impl PyJobParameterValue {
             .getattr("_reconstruct_kwargs")?;
         let cls = py.get_type::<Self>();
         let kwargs = PyDict::new(py);
-        kwargs.set_item("type", self.param_type)?;
-        kwargs.set_item("value", &self.value)?;
+        let pt: PyJobParameterType = self.inner.param_type.into();
+        kwargs.set_item("type", pt)?;
+        kwargs.set_item("value", expr_value_to_py(py, &self.inner.value)?)?;
         let args = PyTuple::new(py, [cls.into_any(), kwargs.into_any()])?;
         Ok((helper, args.into()))
     }

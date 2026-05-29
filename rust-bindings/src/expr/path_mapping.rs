@@ -25,20 +25,30 @@ fn extract_path_arg(
             if type_name == "PurePosixPath" || type_name == "PosixPath" {
                 return Ok(obj.str()?.to_string());
             }
-            Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "{name} must be str or PurePosixPath for POSIX format, got {type_name}"
+            // The pure-Python reference (`PathMappingRule.__init__`)
+            // raises `ValueError` with the exact phrase
+            // `"source_path_format does not match source_path type"`.
+            // We keep that phrase verbatim so callers porting from v0
+            // continue to match it, then append the actionable detail
+            // (which format was expected, what type was supplied) so
+            // the message tells the user how to fix their call.
+            Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Path mapping rule source_path_format does not match source_path type: \
+                 {name} must be str or PurePosixPath for POSIX format, got {type_name}"
             )))
         }
         PyPathFormat::WINDOWS => {
             if type_name == "PureWindowsPath" || type_name == "WindowsPath" {
                 return Ok(obj.str()?.to_string());
             }
-            Err(pyo3::exceptions::PyTypeError::new_err(format!(
-                "{name} must be str or PureWindowsPath for WINDOWS format, got {type_name}"
+            Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "Path mapping rule source_path_format does not match source_path type: \
+                 {name} must be str or PureWindowsPath for WINDOWS format, got {type_name}"
             )))
         }
-        PyPathFormat::URI => Err(pyo3::exceptions::PyTypeError::new_err(format!(
-            "{name} must be str for URI format, got {type_name}"
+        PyPathFormat::URI => Err(pyo3::exceptions::PyValueError::new_err(format!(
+            "Path mapping rule source_path_format does not match source_path type: \
+             {name} must be str for URI format, got {type_name}"
         ))),
     }
 }

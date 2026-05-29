@@ -145,15 +145,11 @@ impl PyStep {
     }
 
     #[getter]
-    fn resolved_symtab(&self) -> Option<crate::expr::PySymbolTable> {
+    fn resolved_symtab(&self) -> Option<crate::expr::PySerializedSymbolTable> {
         self.inner
             .resolved_symtab
             .as_ref()
-            .and_then(|st| {
-                st.to_symtab(openjd_expr::path_mapping::PathFormat::host())
-                    .ok()
-            })
-            .map(|st| crate::expr::PySymbolTable { inner: st })
+            .map(|st| crate::expr::PySerializedSymbolTable { inner: st.clone() })
     }
 
     #[getter]
@@ -219,18 +215,26 @@ pub(crate) struct PyStepScript {
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyStepScript {
+    /// Construct a ``StepScript``. ``embedded_files`` may be passed
+    /// as either snake-case or the camelCase alias ``embeddedFiles``;
+    /// if both are given the snake-case form wins. The let-bindings
+    /// list may be passed as ``let_bindings`` or its alias ``let``.
     #[new]
-    #[pyo3(signature = (*, actions, embeddedFiles=None, let_=None))]
+    #[pyo3(signature = (*, actions, embedded_files=None, embeddedFiles=None, let_bindings=None, r#let=None))]
     fn new(
         actions: PyStepActions,
+        embedded_files: Option<Vec<PyEmbeddedFile>>,
         #[allow(non_snake_case)] embeddedFiles: Option<Vec<PyEmbeddedFile>>,
-        let_: Option<Vec<String>>,
+        let_bindings: Option<Vec<String>>,
+        r#let: Option<Vec<String>>,
     ) -> Self {
+        let embedded_files = embedded_files.or(embeddedFiles);
+        let let_bindings = let_bindings.or(r#let);
         PyStepScript {
             inner: job::StepScript {
-                let_bindings: let_,
+                let_bindings,
                 actions: actions.inner,
-                embedded_files: embeddedFiles.map(|v| v.into_iter().map(|e| e.inner).collect()),
+                embedded_files: embedded_files.map(|v| v.into_iter().map(|e| e.inner).collect()),
             },
         }
     }
@@ -248,9 +252,16 @@ impl PyStepScript {
     }
 
     #[getter]
-    #[pyo3(name = "let")]
     fn let_bindings(&self) -> Option<Vec<String>> {
         self.inner.let_bindings.clone()
+    }
+
+    /// camelCase alias for ``let_bindings``. Mirrors the JSON
+    /// template schema's ``let`` keyword.
+    #[getter]
+    #[pyo3(name = "let")]
+    fn let_alias(&self) -> Option<Vec<String>> {
+        self.let_bindings()
     }
 
     #[getter]
@@ -282,14 +293,26 @@ pub(crate) struct PyStepActions {
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyStepActions {
+    /// Construct a ``StepActions``. Accepts either the snake-case
+    /// ``on_run`` kwarg or the camelCase ``onRun`` alias used by v0
+    /// (Pydantic) and the JSON template schema. If both are passed,
+    /// the snake-case form wins.
     #[new]
-    #[pyo3(signature = (*, onRun))]
-    fn new(#[allow(non_snake_case)] onRun: PyAction) -> Self {
-        PyStepActions {
+    #[pyo3(signature = (*, on_run=None, onRun=None))]
+    fn new(
+        on_run: Option<PyAction>,
+        #[allow(non_snake_case)] onRun: Option<PyAction>,
+    ) -> PyResult<Self> {
+        let on_run = on_run.or(onRun).ok_or_else(|| {
+            pyo3::exceptions::PyTypeError::new_err(
+                "StepActions() missing required keyword argument: 'on_run' (or 'onRun')",
+            )
+        })?;
+        Ok(PyStepActions {
             inner: job::StepActions {
-                on_run: onRun.inner,
+                on_run: on_run.inner,
             },
-        }
+        })
     }
 
     #[getter]

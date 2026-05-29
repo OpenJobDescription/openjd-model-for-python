@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from openjd.model._v1 import (
-    JobParameterInputValues,
     create_job,
     decode_environment_template,
     decode_job_template,
@@ -86,7 +85,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we can process all known kinds of parameters
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {"Foo": "12"}
+        job_parameter_values: dict[str, str] = {"Foo": "12"}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -125,7 +124,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we can process all known kinds of parameters
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {"Foo": "12"}
+        job_parameter_values: dict[str, str] = {"Foo": "12"}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -187,7 +186,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that defaults provided for path parameters are not permitted to escape the job template directory
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {}
+        job_parameter_values: dict[str, str] = {}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -213,7 +212,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that the provided job template dir must be absolute (by default)
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {}
+        job_parameter_values: dict[str, str] = {}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -340,7 +339,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that when path parameters are permitted to escape, the result is a normalized path join.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {}
+        job_parameter_values: dict[str, str] = {}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -382,7 +381,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # for the template dir and cwd, the result is to leave the input as-is.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {}
+        job_parameter_values: dict[str, str] = {}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -409,7 +408,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we get errors if we have extra job parameters defined.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {"ThisIsUnknown": "value"}
+        job_parameter_values: dict[str, str] = {"ThisIsUnknown": "value"}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -437,7 +436,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we get errors if we have extra job parameters defined.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {
+        job_parameter_values: dict[str, str] = {
             "ThisIsUnknown": "value",
             "ThisIsKnown": "value",
         }
@@ -476,7 +475,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we get errors if we have missed defining job parameters
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = dict()
+        job_parameter_values: dict[str, str] = dict()
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -502,7 +501,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we get errors if we have missed defining job parameters
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = dict()
+        job_parameter_values: dict[str, str] = dict()
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -540,7 +539,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # defaults defined.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {}
+        job_parameter_values: dict[str, str] = {}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -576,7 +575,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # passed through instead of being treated as the directory "."
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {"Bar": ""}
+        job_parameter_values: dict[str, str] = {"Bar": ""}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -608,7 +607,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # defaults defined.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {}
+        job_parameter_values: dict[str, str] = {}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -651,7 +650,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # defaults defined, but that we've already defined.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {"Foo": "FooValue"}
+        job_parameter_values: dict[str, str] = {"Foo": "FooValue"}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -677,7 +676,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we see errors if a constraint is violated.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {"Foo": "two"}
+        job_parameter_values: dict[str, str] = {"Foo": "two"}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -703,7 +702,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that we see errors if a constraint is violated.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {"Foo": "two", "Bar": "one"}
+        job_parameter_values: dict[str, str] = {"Foo": "two", "Bar": "one"}
         job_template = decode_job_template(
             template=dict(
                 specificationVersion="jobtemplate-2023-09",
@@ -742,7 +741,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         # Test that see all errors if we have multiple in the same run.
 
         # GIVEN
-        job_parameter_values: JobParameterInputValues = {
+        job_parameter_values: dict[str, str] = {
             "Foo": "two",  # Too long of a value
             "Bar": "three",  # An extra parameter
             # missing buz

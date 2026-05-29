@@ -78,6 +78,7 @@ __all__ = [
     "RangeExpr",
     "RangeExprUserInterface",
     "ScriptRunnerState",
+    "SerializedSymbolTable",
     "Session",
     "SessionState",
     "SimpleAction",
@@ -118,9 +119,9 @@ __all__ = [
     "WindowsSessionUser",
     "create_environment",
     "create_job",
-    "decode_environment_template_dict",
+    "decode_environment_template",
     "decode_environment_template_str",
-    "decode_job_template_dict",
+    "decode_job_template",
     "decode_job_template_str",
     "deserialize_step",
     "escape_format_string",
@@ -129,6 +130,11 @@ __all__ = [
     "merge_job_parameter_definitions",
     "parse_expression",
     "preprocess_job_parameters",
+    "standard_amount_capability_names",
+    "standard_attribute_capabilities",
+    "standard_attribute_capability_names",
+    "validate_amount_capability_name",
+    "validate_attribute_capability_name",
 ]
 
 @typing.final
@@ -218,6 +224,16 @@ class ActionStatus:
         exit_code: typing.Optional[builtins.int] = None,
     ) -> ActionStatus: ...
     def __repr__(self) -> builtins.str: ...
+    def __eq__(self, other: ActionStatus) -> builtins.bool:
+        r"""
+        Field-wise structural equality. Two ``ActionStatus`` instances
+        compare equal when every field matches. Without this, the
+        pyclass falls back to identity comparison, which breaks
+        ``mock.assert_called_with`` and dataclass ``__eq__`` for
+        dataclasses that hold an ``ActionStatus``.
+        """
+
+    def __ne__(self, other: ActionStatus) -> builtins.bool: ...
     @classmethod
     def _from_state(
         cls,
@@ -1396,19 +1412,45 @@ class JobParameter:
 @typing.final
 class JobParameterValue:
     @property
-    def param_type(self) -> JobParameterType: ...
-    @property
-    def value(self) -> builtins.str: ...
-    @property
     def type(self) -> JobParameterType: ...
-    def __new__(cls, *, type: JobParameterType, value: builtins.str) -> JobParameterValue: ...
+    @property
+    def value(self) -> builtins.str:
+        r"""
+        Canonical string form of the value. Matches the v0 reference's
+        dataclass-of-strings shape (``"42"``, ``"true"``, ``"[1, 2, 3]"``)
+        and pre-reshape binding behaviour. For the native Python value,
+        use ``item()``.
+        """
+
+    def __new__(cls, *, type: JobParameterType, value: typing.Any) -> JobParameterValue:
+        r"""
+        Construct a ``JobParameterValue``.
+
+        ``value`` accepts any Python type that ``ExprValue`` accepts:
+        ``str``, ``int``, ``float``, ``bool``, ``Decimal``, ``list``,
+        ``ExprValue``, ``RangeExpr``. The ``param_type`` is recorded
+        as-is — coercion to the target type happens later when the
+        value flows into ``Session`` / ``create_job``. To match the
+        pre-binding behaviour, no validation against ``param_type``
+        is done here.
+        """
+
+    def item(self) -> typing.Any:
+        r"""
+        Native Python value backing this ``JobParameterValue``.
+        Mirrors ``ExprValue.item()`` — returns ``int`` for INT,
+        ``list`` for LIST_*, etc.
+        """
+
     def as_str(self) -> builtins.str: ...
     def __eq__(self, other: typing.Any) -> builtins.bool: ...
     def __repr__(self) -> builtins.str: ...
     def __hash__(self) -> builtins.int: ...
     def __reduce__(self) -> tuple[typing.Any, tuple]:
         r"""
-        Pickle support — round-trips through `__init__(*, type, value)`.
+        Pickle support — round-trips through ``__init__(*, type, value)``
+        using the native Python value (``item()``) so the inner
+        ``ExprValue`` type is preserved across pickle.
         """
 
 @typing.final
@@ -1972,6 +2014,36 @@ class RangeExprUserInterface:
     def __repr__(self) -> builtins.str: ...
 
 @typing.final
+class SerializedSymbolTable:
+    @classmethod
+    def from_symtab(cls, symtab: SymbolTable) -> SerializedSymbolTable:
+        r"""
+        Build a ``SerializedSymbolTable`` from an in-memory
+        ``SymbolTable``. The serialized form is the canonical
+        transport between ``create_job`` (which produces it as
+        ``Step.resolved_symtab``) and ``Session.run_task`` (which
+        consumes it). Callers that build their own symbol tables can
+        use this classmethod to convert.
+        """
+
+    def to_symtab(self, *, path_format: typing.Optional[PathFormat] = None) -> SymbolTable:
+        r"""
+        Deserialize this serialized symbol table into a full
+        ``SymbolTable`` suitable for inspection or modification.
+        ``path_format`` controls how PATH-typed values are
+        reconstructed: ``PathFormat.POSIX`` (the default) uses
+        forward slashes, ``PathFormat.WINDOWS`` uses backslashes.
+        Most callers should pass the ``PathFormat`` matching the
+        session's host OS.
+        """
+
+    def __repr__(self) -> builtins.str: ...
+    def __reduce__(self) -> tuple[typing.Any, tuple[builtins.str]]:
+        r"""
+        Pickle support — round-trips through the JSON string form.
+        """
+
+@typing.final
 class Session:
     @property
     def session_id(self) -> builtins.str: ...
@@ -1995,6 +2067,7 @@ class Session:
         os_env_vars: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None,
         session_root_directory: typing.Optional[builtins.str | os.PathLike | pathlib.Path] = None,
         user: typing.Optional[typing.Any] = None,
+        profile: typing.Optional[ModelProfile] = None,
     ) -> Session: ...
     def extend_path_mapping_rules(self, additional: typing.Sequence[PathMappingRule]) -> None:
         r"""
@@ -2017,6 +2090,7 @@ class Session:
         *,
         environment: Environment,
         identifier: typing.Optional[builtins.str] = None,
+        resolved_symtab: typing.Optional[SerializedSymbolTable] = None,
         os_env_vars: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None,
     ) -> builtins.str:
         r"""
@@ -2028,6 +2102,7 @@ class Session:
         self,
         *,
         identifier: builtins.str,
+        resolved_symtab: typing.Optional[SerializedSymbolTable] = None,
         keep_session_running: builtins.bool = True,
         os_env_vars: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None,
     ) -> None:
@@ -2041,6 +2116,7 @@ class Session:
         *,
         step_script: StepScript,
         task_parameter_values: typing.Optional[dict] = None,
+        resolved_symtab: typing.Optional[SerializedSymbolTable] = None,
         os_env_vars: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None,
     ) -> None:
         r"""
@@ -2112,7 +2188,7 @@ class Step:
     @property
     def resolvedBindings(self) -> typing.Optional[builtins.list[builtins.str]]: ...
     @property
-    def resolved_symtab(self) -> typing.Optional[SymbolTable]: ...
+    def resolved_symtab(self) -> typing.Optional[SerializedSymbolTable]: ...
     @property
     def parameterSpace(self) -> typing.Optional[StepParameterSpace]: ...
     @property
@@ -2143,7 +2219,15 @@ class StepActions:
     def on_run(self) -> Action: ...
     @property
     def onRun(self) -> Action: ...
-    def __new__(cls, *, onRun: Action) -> StepActions: ...
+    def __new__(
+        cls, *, on_run: typing.Optional[Action] = None, onRun: typing.Optional[Action] = None
+    ) -> StepActions:
+        r"""
+        Construct a ``StepActions``. Accepts either the snake-case
+        ``on_run`` kwarg or the camelCase ``onRun`` alias used by v0
+        (Pydantic) and the JSON template schema. If both are passed,
+        the snake-case form wins.
+        """
 
 @typing.final
 class StepDependency:
@@ -2294,7 +2378,14 @@ class StepScript:
     @property
     def actions(self) -> StepActions: ...
     @property
-    def let(self) -> typing.Optional[builtins.list[builtins.str]]: ...
+    def let_bindings(self) -> typing.Optional[builtins.list[builtins.str]]: ...
+    @property
+    def let(self) -> typing.Optional[builtins.list[builtins.str]]:
+        r"""
+        camelCase alias for ``let_bindings``. Mirrors the JSON
+        template schema's ``let`` keyword.
+        """
+
     @property
     def embedded_files(self) -> typing.Optional[builtins.list[EmbeddedFile]]: ...
     @property
@@ -2303,9 +2394,17 @@ class StepScript:
         cls,
         *,
         actions: StepActions,
+        embedded_files: typing.Optional[typing.Sequence[EmbeddedFile]] = None,
         embeddedFiles: typing.Optional[typing.Sequence[EmbeddedFile]] = None,
-        let_: typing.Optional[typing.Sequence[builtins.str]] = None,
-    ) -> StepScript: ...
+        let_bindings: typing.Optional[typing.Sequence[builtins.str]] = None,
+        let: typing.Optional[typing.Sequence[builtins.str]] = None,
+    ) -> StepScript:
+        r"""
+        Construct a ``StepScript``. ``embedded_files`` may be passed
+        as either snake-case or the camelCase alias ``embeddedFiles``;
+        if both are given the snake-case form wins. The let-bindings
+        list may be passed as ``let_bindings`` or its alias ``let``.
+        """
 
 @typing.final
 class StepTemplate:
@@ -2487,19 +2586,45 @@ class TaskChunksDefinition:
 @typing.final
 class TaskParameterValue:
     @property
-    def param_type(self) -> TaskParameterType: ...
-    @property
-    def value(self) -> builtins.str: ...
-    @property
     def type(self) -> TaskParameterType: ...
-    def __new__(cls, *, type: TaskParameterType, value: builtins.str) -> TaskParameterValue: ...
+    @property
+    def value(self) -> builtins.str:
+        r"""
+        Canonical string form of the value. Matches the v0 reference's
+        dataclass-of-strings shape (``"42"``, ``"true"``, ``"[1, 2, 3]"``)
+        and pre-reshape binding behaviour. For the native Python value,
+        use ``item()``.
+        """
+
+    def __new__(cls, *, type: TaskParameterType, value: typing.Any) -> TaskParameterValue:
+        r"""
+        Construct a ``TaskParameterValue``.
+
+        ``value`` accepts any Python type that ``ExprValue`` accepts:
+        ``str``, ``int``, ``float``, ``bool``, ``Decimal``, ``list``,
+        ``ExprValue``, ``RangeExpr``. The ``param_type`` is recorded
+        as-is — coercion to the target type happens later when the
+        value flows into ``Session`` / ``create_job``. To match the
+        pre-binding behaviour, no validation against ``param_type``
+        is done here.
+        """
+
+    def item(self) -> typing.Any:
+        r"""
+        Native Python value backing this ``TaskParameterValue``.
+        Mirrors ``ExprValue.item()`` — returns ``int`` for INT,
+        ``list`` for LIST_*, etc.
+        """
+
     def as_str(self) -> builtins.str: ...
     def __eq__(self, other: typing.Any) -> builtins.bool: ...
     def __repr__(self) -> builtins.str: ...
     def __hash__(self) -> builtins.int: ...
     def __reduce__(self) -> tuple[typing.Any, tuple]:
         r"""
-        Pickle support — round-trips through `__init__(*, type, value)`.
+        Pickle support — round-trips through ``__init__(*, type, value)``
+        using the native Python value (``item()``) so the inner
+        ``ExprValue`` type is preserved across pickle.
         """
 
 @typing.final
@@ -2642,7 +2767,17 @@ class TemplateEnvironmentActions:
         *,
         on_enter: typing.Optional[TemplateAction] = None,
         on_exit: typing.Optional[TemplateAction] = None,
-    ) -> TemplateEnvironmentActions: ...
+        onEnter: typing.Optional[TemplateAction] = None,
+        onExit: typing.Optional[TemplateAction] = None,
+    ) -> TemplateEnvironmentActions:
+        r"""
+        Construct an ``EnvironmentActions``. Accepts either snake-case
+        (``on_enter`` / ``on_exit``) or the camelCase aliases
+        (``onEnter`` / ``onExit``) used by v0 and the JSON template
+        schema. If both flavours of the same field are passed, the
+        snake-case form wins.
+        """
+
     def __repr__(self) -> builtins.str: ...
     def __reduce__(self) -> tuple[typing.Any, tuple]: ...
 
@@ -2664,7 +2799,16 @@ class TemplateEnvironmentScript:
         actions: TemplateEnvironmentActions,
         let_bindings: typing.Optional[typing.Sequence[builtins.str]] = None,
         embedded_files: typing.Optional[typing.Sequence[TemplateEmbeddedFile]] = None,
-    ) -> TemplateEnvironmentScript: ...
+        embeddedFiles: typing.Optional[typing.Sequence[TemplateEmbeddedFile]] = None,
+        let: typing.Optional[typing.Sequence[builtins.str]] = None,
+    ) -> TemplateEnvironmentScript:
+        r"""
+        Construct an ``EnvironmentScript``. ``embedded_files`` may be
+        passed as either snake-case or its camelCase alias
+        ``embeddedFiles``; if both are given the snake-case form
+        wins. A ``let`` alias is also accepted for ``let_bindings``.
+        """
+
     def __repr__(self) -> builtins.str: ...
     def __reduce__(self) -> tuple[typing.Any, tuple]: ...
 
@@ -2689,7 +2833,19 @@ class TemplateStepActions:
     def on_run(self) -> TemplateAction: ...
     @property
     def onRun(self) -> TemplateAction: ...
-    def __new__(cls, *, on_run: TemplateAction) -> TemplateStepActions: ...
+    def __new__(
+        cls,
+        *,
+        on_run: typing.Optional[TemplateAction] = None,
+        onRun: typing.Optional[TemplateAction] = None,
+    ) -> TemplateStepActions:
+        r"""
+        Construct a ``StepActions``. Accepts either the snake-case
+        ``on_run`` kwarg or the camelCase ``onRun`` alias used by v0
+        (Pydantic) and the JSON template schema. If both are passed,
+        the snake-case form wins.
+        """
+
     def __repr__(self) -> builtins.str: ...
     def __reduce__(self) -> tuple[typing.Any, tuple]: ...
 
@@ -2721,7 +2877,16 @@ class TemplateStepScript:
         actions: TemplateStepActions,
         let_bindings: typing.Optional[typing.Sequence[builtins.str]] = None,
         embedded_files: typing.Optional[typing.Sequence[TemplateEmbeddedFile]] = None,
-    ) -> TemplateStepScript: ...
+        embeddedFiles: typing.Optional[typing.Sequence[TemplateEmbeddedFile]] = None,
+        let: typing.Optional[typing.Sequence[builtins.str]] = None,
+    ) -> TemplateStepScript:
+        r"""
+        Construct a ``StepScript``. ``embedded_files`` may be passed
+        as either snake-case or its camelCase alias ``embeddedFiles``;
+        if both are given the snake-case form wins. A ``let`` alias
+        is also accepted for ``let_bindings``.
+        """
+
     def __repr__(self) -> builtins.str: ...
     def __reduce__(self) -> tuple[typing.Any, tuple]: ...
 
@@ -3234,6 +3399,12 @@ class TypeCode(enum.Enum):
         Pickle support — round-trips through the variant name.
         """
 
+def _reconstruct_serialized_symtab(json: builtins.str) -> SerializedSymbolTable:
+    r"""
+    Pickle helper — module-level free function so pickled bytes
+    can be reconstructed across interpreter sessions.
+    """
+
 def create_environment(env_template: EnvironmentTemplate) -> Environment:
     r"""
     Convert a template `EnvironmentTemplate` into a job-side `Environment` with
@@ -3253,28 +3424,135 @@ def create_job(
     environment_templates: typing.Optional[typing.Sequence[EnvironmentTemplate]] = None,
     validation_context: typing.Optional[ValidationContext] = None,
 ) -> Job: ...
-def decode_environment_template_dict(
+def decode_environment_template(
     template: dict, *, supported_extensions: typing.Optional[typing.Sequence[builtins.str]] = None
-) -> EnvironmentTemplate: ...
+) -> EnvironmentTemplate:
+    r"""
+    Decode and validate an environment template from a Python dict.
+
+    Validates ``template`` against the OpenJD environment-template
+    schema. Use this entry point when the document has already been
+    parsed (e.g. from PyYAML or ``json.loads``); for parsing
+    directly from a string, use ``decode_environment_template_str``.
+
+    Args:
+        template: The decoded template mapping.
+        supported_extensions: The caller's allowlist of OpenJD
+            extension names. The template's ``extensions:`` field
+            is validated against this list — any name in the
+            template that is not both a recognized
+            ``ModelExtension`` AND in this list is rejected with
+            ``Unsupported extension names: ...``. Pass ``None``
+            (the default) for an empty allowlist (i.e., reject
+            every extension the template requests).
+
+    Returns:
+        The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
+        Environment templates do not accept ``caller_limits``.
+    """
+
 def decode_environment_template_str(
     document: builtins.str,
     format: DocumentType = DocumentType.YAML,
     *,
     supported_extensions: typing.Optional[typing.Sequence[builtins.str]] = None,
-) -> EnvironmentTemplate: ...
-def decode_job_template_dict(
+) -> EnvironmentTemplate:
+    r"""
+    Decode and validate an environment template from a YAML or JSON string.
+
+    Parses ``document`` (YAML by default; pass ``DocumentType.JSON``
+    to force JSON parsing instead of the YAML-superset default), then
+    validates the result against the OpenJD environment-template
+    schema.
+
+    Args:
+        document: The template source as a YAML or JSON string.
+        format: Document type. Defaults to ``DocumentType.YAML``
+            (which is also a superset of JSON).
+        supported_extensions: The caller's allowlist of OpenJD
+            extension names. The template's ``extensions:`` field
+            is validated against this list — any name in the
+            template that is not both a recognized
+            ``ModelExtension`` AND in this list is rejected with
+            ``Unsupported extension names: ...``. Pass ``None``
+            (the default) for an empty allowlist (i.e., reject
+            every extension the template requests).
+
+    Returns:
+        The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
+        Environment templates do not accept ``caller_limits``.
+    """
+
+def decode_job_template(
     template: dict,
     *,
     supported_extensions: typing.Optional[typing.Sequence[builtins.str]] = None,
     caller_limits: typing.Optional[CallerLimits] = None,
-) -> JobTemplate: ...
+) -> JobTemplate:
+    r"""
+    Decode and validate a job template from a Python dict.
+
+    Validates ``template`` against the OpenJD schema. Use this
+    entry point when the document has already been parsed (e.g.
+    from PyYAML or ``json.loads``); for parsing directly from a
+    string, use ``decode_job_template_str``.
+
+    Args:
+        template: The decoded template mapping.
+        supported_extensions: The caller's allowlist of OpenJD
+            extension names. The template's ``extensions:`` field
+            is validated against this list — any name in the
+            template that is not both a recognized
+            ``ModelExtension`` AND in this list is rejected with
+            ``Unsupported extension names: ...``. Pass ``None``
+            (the default) for an empty allowlist (i.e., reject
+            every extension the template requests).
+        caller_limits: Optional ``CallerLimits`` to tighten
+            spec-defined limits (e.g. maximum step count).
+
+    Returns:
+        The parsed ``openjd.model._v1.template.JobTemplate``. Use
+        ``template.profile`` to access the ``ModelProfile``
+        describing the template's declared revision and extensions
+        (a subset of ``supported_extensions``).
+    """
+
 def decode_job_template_str(
     document: builtins.str,
     format: DocumentType = DocumentType.YAML,
     *,
     supported_extensions: typing.Optional[typing.Sequence[builtins.str]] = None,
     caller_limits: typing.Optional[CallerLimits] = None,
-) -> JobTemplate: ...
+) -> JobTemplate:
+    r"""
+    Decode and validate a job template from a YAML or JSON string.
+
+    Parses ``document`` (YAML by default; pass ``DocumentType.JSON``
+    to force JSON parsing instead of the YAML-superset default), then
+    validates the result against the OpenJD schema.
+
+    Args:
+        document: The template source as a YAML or JSON string.
+        format: Document type. Defaults to ``DocumentType.YAML``
+            (which is also a superset of JSON).
+        supported_extensions: The caller's allowlist of OpenJD
+            extension names. The template's ``extensions:`` field
+            is validated against this list — any name in the
+            template that is not both a recognized
+            ``ModelExtension`` AND in this list is rejected with
+            ``Unsupported extension names: ...``. Pass ``None``
+            (the default) for an empty allowlist (i.e., reject
+            every extension the template requests).
+        caller_limits: Optional ``CallerLimits`` to tighten
+            spec-defined limits (e.g. maximum step count).
+
+    Returns:
+        The parsed ``openjd.model._v1.template.JobTemplate``. Use
+        ``template.profile`` to access the ``ModelProfile``
+        describing the template's declared revision and extensions
+        (a subset of ``supported_extensions``).
+    """
+
 def deserialize_step(step_dict: dict) -> Step:
     r"""
     Deserialize a job-side `Step` from a Python dict. This matches the
@@ -3320,6 +3598,113 @@ def preprocess_job_parameters(
     current_working_dir: builtins.str | os.PathLike | pathlib.Path,
     allow_job_template_dir_walk_up: builtins.bool = False,
 ) -> dict: ...
+def standard_amount_capability_names(
+    *, profile: typing.Optional[ModelProfile] = None
+) -> builtins.list[builtins.str]:
+    r"""
+    Return the names of the spec-defined amount capabilities for the
+    given profile.
+
+    Args:
+        profile: The model profile whose ``(revision, extensions)``
+            determine the standard-capability set. Defaults to a
+            profile equivalent to ``ModelProfile()``.
+
+    Returns:
+        A list of capability names like ``["amount.worker.vcpu", ...]``.
+    """
+
+def standard_attribute_capabilities(
+    *, profile: typing.Optional[ModelProfile] = None
+) -> builtins.list[tuple[builtins.str, builtins.list[builtins.str]]]:
+    r"""
+    Return the spec-defined attribute capabilities for the given
+    profile, including each capability's allowed values.
+
+    Args:
+        profile: The model profile whose ``(revision, extensions)``
+            determine the standard-capability set. Defaults to a
+            profile equivalent to ``ModelProfile()``.
+
+    Returns:
+        A list of ``(name, [allowed values])`` pairs. For example:
+        ``[("attr.worker.os.family", ["linux", "windows", "macos"]),
+           ("attr.worker.cpu.arch", ["x86_64", "arm64"])]``.
+    """
+
+def standard_attribute_capability_names(
+    *, profile: typing.Optional[ModelProfile] = None
+) -> builtins.list[builtins.str]:
+    r"""
+    Return the names of the spec-defined attribute capabilities for
+    the given profile.
+
+    Args:
+        profile: The model profile whose ``(revision, extensions)``
+            determine the standard-capability set. Defaults to a
+            profile equivalent to ``ModelProfile()``.
+
+    Returns:
+        A list of capability names like ``["attr.worker.os.family", ...]``.
+    """
+
+def validate_amount_capability_name(
+    name: builtins.str, *, profile: typing.Optional[ModelProfile] = None
+) -> None:
+    r"""
+    Validate that ``name`` is a well-formed amount-capability name.
+
+    Checks (in order):
+
+    1. Length must be at most 100 characters.
+    2. Must match the amount-capability regex
+       ``^([A-Za-z_][A-Za-z0-9_]*:)?amount\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$``.
+    3. Names without a vendor prefix that match a spec-defined
+       standard capability (e.g. ``amount.worker.vcpu``) are accepted.
+    4. Names whose second dot-segment is one of the reserved scopes
+       (``worker``, ``job``, ``step``, ``task``) are rejected unless
+       they appear in (3) — those scopes are reserved for OpenJD-defined
+       capabilities.
+
+    Args:
+        name: The capability name to validate.
+        profile: The model profile whose ``(revision, extensions)``
+            determine the standard-capability set used for the
+            reserved-scope short-circuit. Defaults to a profile equivalent to
+            ``ModelProfile()``.
+
+    Raises:
+        ValueError: if any of the checks above fail.
+    """
+
+def validate_attribute_capability_name(
+    name: builtins.str, *, profile: typing.Optional[ModelProfile] = None
+) -> None:
+    r"""
+    Validate that ``name`` is a well-formed attribute-capability name.
+
+    Checks (in order):
+
+    1. Length must be at most 100 characters.
+    2. Must match the attribute-capability regex
+       ``^([A-Za-z_][A-Za-z0-9_]*:)?attr\.[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$``.
+    3. Names without a vendor prefix that match a spec-defined
+       standard capability (e.g. ``attr.worker.os.family``) are accepted.
+    4. Names whose second dot-segment is one of the reserved scopes
+       (``worker``, ``job``, ``step``, ``task``) are rejected unless
+       they appear in (3) — those scopes are reserved for OpenJD-defined
+       capabilities.
+
+    Args:
+        name: The capability name to validate.
+        profile: The model profile whose ``(revision, extensions)``
+            determine the standard-capability set used for the
+            reserved-scope short-circuit. Defaults to a profile equivalent to
+            ``ModelProfile()``.
+
+    Raises:
+        ValueError: if any of the checks above fail.
+    """
 
 # ── Manually-tracked declarations ───────────────────────────────────
 # Items below are not emitted by pyo3-stub-gen. They live behind

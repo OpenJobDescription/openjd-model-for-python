@@ -8,9 +8,9 @@ import pytest
 
 from openjd._openjd_rs import (
     decode_job_template_str,
-    decode_job_template_dict,
+    decode_job_template,
     decode_environment_template_str,
-    decode_environment_template_dict,
+    decode_environment_template,
     create_job,
     DocumentType,
     DecodeValidationError,
@@ -60,7 +60,7 @@ class TestDecodeJobTemplate:
     def test_specification_version_camelcase_alias(self) -> None:
         """``specificationVersion`` is exposed as a camelCase alias for
         ``specification_version`` (mirrors the JSON/YAML field name)."""
-        template = decode_job_template_dict(MINIMAL_JOB)
+        template = decode_job_template(MINIMAL_JOB)
         assert template.specificationVersion is not None
         assert template.specificationVersion == template.specification_version
 
@@ -79,7 +79,7 @@ steps:
         assert template.name == "YAMLTest"
 
     def test_decode_from_dict(self) -> None:
-        template = decode_job_template_dict(MINIMAL_JOB)
+        template = decode_job_template(MINIMAL_JOB)
         assert template.name == "Test"
 
     def test_missing_spec_version_raises(self) -> None:
@@ -105,12 +105,12 @@ steps:
             ],
         }
         with pytest.raises((DecodeValidationError, ModelValidationError)):
-            decode_job_template_dict(bad)
+            decode_job_template(bad)
 
     def test_no_steps_raises(self) -> None:
         bad = {"specificationVersion": "jobtemplate-2023-09", "name": "Test", "steps": []}
         with pytest.raises((DecodeValidationError, ModelValidationError)):
-            decode_job_template_dict(bad)
+            decode_job_template(bad)
 
 
 class TestDecodeEnvironmentTemplate:
@@ -119,27 +119,27 @@ class TestDecodeEnvironmentTemplate:
         assert isinstance(template, EnvironmentTemplate)
 
     def test_decode_from_dict(self) -> None:
-        template = decode_environment_template_dict(MINIMAL_ENV)
+        template = decode_environment_template(MINIMAL_ENV)
         assert isinstance(template, EnvironmentTemplate)
 
     def test_specification_version_camelcase_alias(self) -> None:
         """``specificationVersion`` is exposed as a camelCase alias for
         ``specification_version`` (mirrors the JSON/YAML field name)."""
-        template = decode_environment_template_dict(MINIMAL_ENV)
+        template = decode_environment_template(MINIMAL_ENV)
         assert template.specificationVersion is not None
         assert template.specificationVersion == template.specification_version
 
 
 class TestCreateJob:
     def test_basic_job(self) -> None:
-        template = decode_job_template_dict(MINIMAL_JOB)
+        template = decode_job_template(MINIMAL_JOB)
         job = create_job(job_template=template, job_parameter_values={})
         assert isinstance(job, Job)
         assert job.name == "Test"
         assert len(job.steps) == 1
 
     def test_step_properties(self) -> None:
-        template = decode_job_template_dict(MINIMAL_JOB)
+        template = decode_job_template(MINIMAL_JOB)
         job = create_job(job_template=template, job_parameter_values={})
         step = job.steps[0]
         assert step.name == "Step1"
@@ -161,7 +161,7 @@ class TestCreateJob:
                 }
             ],
         }
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         job = create_job(
             job_template=template,
             job_parameter_values={"Name": {"type": "STRING", "value": "MyJob"}},
@@ -173,12 +173,12 @@ class TestCreateJob:
 
     def test_job_with_description(self) -> None:
         tmpl = dict(MINIMAL_JOB, description="A test job")
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         job = create_job(job_template=template, job_parameter_values={})
         assert job.description == "A test job"
 
     def test_job_without_description(self) -> None:
-        template = decode_job_template_dict(MINIMAL_JOB)
+        template = decode_job_template(MINIMAL_JOB)
         job = create_job(job_template=template, job_parameter_values={})
         assert job.description is None
 
@@ -203,7 +203,7 @@ class TestJobEnvironments:
                 }
             ],
         }
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         job = create_job(job_template=template, job_parameter_values={})
         envs = job.steps[0].step_environments
         assert envs is not None
@@ -232,7 +232,7 @@ class TestStepParameterSpaceIterator:
                 }
             ],
         }
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         return create_job(job_template=template, job_parameter_values={})
 
     def test_len(self, job_with_params) -> None:
@@ -283,7 +283,7 @@ class TestStepParameterSpaceIterator:
             "name": "Test",
             "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
         }
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         job = create_job(job_template=template, job_parameter_values={})
         it = StepParameterSpaceIterator(step=job.steps[0])
         assert len(it) == 1
@@ -312,7 +312,7 @@ class TestStepDependencyGraph:
                 },
             ],
         }
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         job = create_job(job_template=template, job_parameter_values={})
         graph = StepDependencyGraph(job=job)
         order = [s.name for s in graph.topo_sorted()]
@@ -329,7 +329,7 @@ class TestStepDependencyGraph:
                 {"name": "Y", "script": {"actions": {"onRun": {"command": "y"}}}},
             ],
         }
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         job = create_job(job_template=template, job_parameter_values={})
         graph = StepDependencyGraph(job=job)
         assert set(graph.step_names()) == {"X", "Y"}
@@ -344,7 +344,7 @@ class TestStepDependencyGraph:
                 {"name": "A", "script": {"actions": {"onRun": {"command": "a"}}}},
             ],
         }
-        template = decode_job_template_dict(tmpl)
+        template = decode_job_template(tmpl)
         job = create_job(job_template=template, job_parameter_values={})
         graph = StepDependencyGraph(job=job)
         assert [s.name for s in graph.topo_sorted()] == ["A"]

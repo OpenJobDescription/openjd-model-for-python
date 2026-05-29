@@ -46,6 +46,32 @@ fn limits_or_default(c: Option<&PyCallerLimits>) -> CallerLimits {
     c.map(|c| c.inner.clone()).unwrap_or_default()
 }
 
+/// Decode and validate a job template from a YAML or JSON string.
+///
+/// Parses ``document`` (YAML by default; pass ``DocumentType.JSON``
+/// to force JSON parsing instead of the YAML-superset default), then
+/// validates the result against the OpenJD schema.
+///
+/// Args:
+///     document: The template source as a YAML or JSON string.
+///     format: Document type. Defaults to ``DocumentType.YAML``
+///         (which is also a superset of JSON).
+///     supported_extensions: The caller's allowlist of OpenJD
+///         extension names. The template's ``extensions:`` field
+///         is validated against this list — any name in the
+///         template that is not both a recognized
+///         ``ModelExtension`` AND in this list is rejected with
+///         ``Unsupported extension names: ...``. Pass ``None``
+///         (the default) for an empty allowlist (i.e., reject
+///         every extension the template requests).
+///     caller_limits: Optional ``CallerLimits`` to tighten
+///         spec-defined limits (e.g. maximum step count).
+///
+/// Returns:
+///     The parsed ``openjd.model._v1.template.JobTemplate``. Use
+///     ``template.profile`` to access the ``ModelProfile``
+///     describing the template's declared revision and extensions
+///     (a subset of ``supported_extensions``).
 #[cfg_attr(
     feature = "stub-gen",
     gen_stub_pyfunction(module = "openjd._openjd_rs")
@@ -66,13 +92,38 @@ pub(crate) fn decode_job_template_str(
     Ok(PyJobTemplate { inner: jt })
 }
 
+/// Decode and validate a job template from a Python dict.
+///
+/// Validates ``template`` against the OpenJD schema. Use this
+/// entry point when the document has already been parsed (e.g.
+/// from PyYAML or ``json.loads``); for parsing directly from a
+/// string, use ``decode_job_template_str``.
+///
+/// Args:
+///     template: The decoded template mapping.
+///     supported_extensions: The caller's allowlist of OpenJD
+///         extension names. The template's ``extensions:`` field
+///         is validated against this list — any name in the
+///         template that is not both a recognized
+///         ``ModelExtension`` AND in this list is rejected with
+///         ``Unsupported extension names: ...``. Pass ``None``
+///         (the default) for an empty allowlist (i.e., reject
+///         every extension the template requests).
+///     caller_limits: Optional ``CallerLimits`` to tighten
+///         spec-defined limits (e.g. maximum step count).
+///
+/// Returns:
+///     The parsed ``openjd.model._v1.template.JobTemplate``. Use
+///     ``template.profile`` to access the ``ModelProfile``
+///     describing the template's declared revision and extensions
+///     (a subset of ``supported_extensions``).
 #[cfg_attr(
     feature = "stub-gen",
     gen_stub_pyfunction(module = "openjd._openjd_rs")
 )]
 #[pyfunction]
 #[pyo3(signature = (template, *, supported_extensions=None, caller_limits=None))]
-pub(crate) fn decode_job_template_dict(
+pub(crate) fn decode_job_template(
     template: &Bound<'_, PyDict>,
     supported_extensions: Option<Vec<String>>,
     caller_limits: Option<&PyCallerLimits>,
@@ -85,6 +136,29 @@ pub(crate) fn decode_job_template_dict(
     Ok(PyJobTemplate { inner: jt })
 }
 
+/// Decode and validate an environment template from a YAML or JSON string.
+///
+/// Parses ``document`` (YAML by default; pass ``DocumentType.JSON``
+/// to force JSON parsing instead of the YAML-superset default), then
+/// validates the result against the OpenJD environment-template
+/// schema.
+///
+/// Args:
+///     document: The template source as a YAML or JSON string.
+///     format: Document type. Defaults to ``DocumentType.YAML``
+///         (which is also a superset of JSON).
+///     supported_extensions: The caller's allowlist of OpenJD
+///         extension names. The template's ``extensions:`` field
+///         is validated against this list — any name in the
+///         template that is not both a recognized
+///         ``ModelExtension`` AND in this list is rejected with
+///         ``Unsupported extension names: ...``. Pass ``None``
+///         (the default) for an empty allowlist (i.e., reject
+///         every extension the template requests).
+///
+/// Returns:
+///     The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
+///     Environment templates do not accept ``caller_limits``.
 #[cfg_attr(
     feature = "stub-gen",
     gen_stub_pyfunction(module = "openjd._openjd_rs")
@@ -103,13 +177,34 @@ pub(crate) fn decode_environment_template_str(
     Ok(PyEnvironmentTemplate { inner: et })
 }
 
+/// Decode and validate an environment template from a Python dict.
+///
+/// Validates ``template`` against the OpenJD environment-template
+/// schema. Use this entry point when the document has already been
+/// parsed (e.g. from PyYAML or ``json.loads``); for parsing
+/// directly from a string, use ``decode_environment_template_str``.
+///
+/// Args:
+///     template: The decoded template mapping.
+///     supported_extensions: The caller's allowlist of OpenJD
+///         extension names. The template's ``extensions:`` field
+///         is validated against this list — any name in the
+///         template that is not both a recognized
+///         ``ModelExtension`` AND in this list is rejected with
+///         ``Unsupported extension names: ...``. Pass ``None``
+///         (the default) for an empty allowlist (i.e., reject
+///         every extension the template requests).
+///
+/// Returns:
+///     The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
+///     Environment templates do not accept ``caller_limits``.
 #[cfg_attr(
     feature = "stub-gen",
     gen_stub_pyfunction(module = "openjd._openjd_rs")
 )]
 #[pyfunction]
 #[pyo3(signature = (template, *, supported_extensions=None))]
-pub(crate) fn decode_environment_template_dict(
+pub(crate) fn decode_environment_template(
     template: &Bound<'_, PyDict>,
     supported_extensions: Option<Vec<String>>,
 ) -> PyResult<PyEnvironmentTemplate> {

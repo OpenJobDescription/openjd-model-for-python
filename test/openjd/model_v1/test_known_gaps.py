@@ -26,86 +26,22 @@ from openjd.model._v1 import (
     decode_job_template,
     merge_job_parameter_definitions,
 )
-from openjd.model._v1.errors import DecodeValidationError
 
 
-# ── Empty-steps validation raises ModelValidationError, not DecodeValidationError ──
+# ── JobTemplate.specification_version is comparable to TemplateSpecificationVersion ──
 #
-# v0 raises ``DecodeValidationError`` for templates whose ``steps:`` list
-# is empty. v1 raises ``ModelValidationError``. The two classes are
-# siblings under ``ValueError`` (not parent-child), so callers that did
-#
-#     except DecodeValidationError:
-#         ...handle malformed template...
-#
-# in their v0 code stop catching this case under v1. ``except
-# ValueError`` covers both, but the spec promises both classes are
-# decode/validation paths and v0 / v1 should agree on which one fires
-# for a structurally invalid template.
-#
-# Fix path: ``rust-bindings/src/model/errors.rs::model_err_to_py``
-# already has both arms — ``ModelError::ModelValidation`` →
-# ``PyModelValidationError`` and ``ModelError::DecodeValidation`` →
-# ``PyDecodeValidationError``. The upstream Rust validator
-# (`openjd_model::template::validation::validate_job_template`) is
-# producing ``ModelError::ModelValidation`` for a structural-decode
-# failure that the v0 reference treated as a decode error. Either
-# remap the empty-steps case to ``DecodeValidation`` upstream, or
-# document the class change in
-# ``specs/python-model-interface.md``.
-#
-# Cross-reference: report Recommendation #1.
+# Resolved: ``rust-bindings/src/model/types.rs`` (PyTemplateSpecificationVersion)
+# was reshaped so the Rust pyclass exposes the v0 ``str``-Enum surface
+# directly: lowercase variant names (``JOBTEMPLATE_v2023_09`` /
+# ``ENVIRONMENT_v2023_09``), a ``.value`` getter, equality with the
+# spec-form string, and a constructor that accepts the spec form or the
+# variant name. There is now exactly one
+# ``TemplateSpecificationVersion`` class — the one in ``openjd._openjd_rs``
+# is also re-exported at ``openjd.model._v1`` and ``openjd.model._v1.types``
+# (identity-preserving). ``JobTemplate.specification_version`` returns
+# instances of the same class.
 
 
-@pytest.mark.xfail(
-    strict=True, reason="v1 raises ModelValidationError; v0 raised DecodeValidationError"
-)
-def test_empty_steps_raises_decode_validation_error_like_v0() -> None:
-    template = {
-        "specificationVersion": "jobtemplate-2023-09",
-        "name": "T",
-        "steps": [],
-    }
-    with pytest.raises(DecodeValidationError):
-        decode_job_template(template=template)
-
-
-# ── JobTemplate.specification_version is incomparable to TemplateSpecificationVersion ──
-#
-# Spec ("Output Types (from Rust, opaque)") and the
-# ``TemplateSpecificationVersion`` enum block both promise:
-#
-#     template.specification_version    # TemplateSpecificationVersion enum
-#     ...
-#     TSV.JOBTEMPLATE_v2023_09          # "jobtemplate-2023-09"
-#
-# i.e. the value off the template should be comparable to the public
-# str-Enum. In practice ``JobTemplate.specification_version`` is the
-# Rust pyclass enum (``openjd._openjd_rs.TemplateSpecificationVersion``,
-# variant ``JOBTEMPLATE_2023_09`` — note: no leading ``v``), while
-# ``v1.TemplateSpecificationVersion`` is the Python str-Enum shim
-# (variant ``JOBTEMPLATE_v2023_09``). The two are different classes
-# with different variant identities, so equality is always ``False``.
-#
-# v0 returned the Python str-Enum directly off the template, so
-# ``t.specificationVersion == TemplateSpecificationVersion.JOBTEMPLATE_v2023_09``
-# was True. v1 silently breaks this idiom.
-#
-# Fix path: have ``rust-bindings/src/model/template.rs::specification_version``
-# convert the underlying ``TemplateSpecificationVersion`` to the Python
-# str-Enum value using the shim (or expose a ``.matches()`` helper on
-# the Rust enum). Alternatively, drop the Python str-Enum shim entirely
-# and have ``v1.TemplateSpecificationVersion`` re-export the Rust class
-# (with renamed variants for parity), so there is only one
-# ``TemplateSpecificationVersion`` class.
-#
-# Cross-reference: report Recommendation #2.
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="v1 returns Rust enum, not the Python str-Enum that v1.TemplateSpecificationVersion exposes",
-)
 def test_template_specification_version_comparable_to_python_str_enum() -> None:
     t = decode_job_template(
         template={
@@ -227,91 +163,22 @@ def test_merge_includes_description() -> None:
     assert count_def.get("description") == "Number of frames"
 
 
-# ── Top-level package leaks typing imports ──
+# ── Top-level package no longer leaks typing imports ──
 #
-# ``openjd.model._v1.__init__.py`` imports ``Any``, ``Optional``,
-# ``Sequence``, ``Union`` from ``typing``, ``Enum`` from ``enum``, and
-# ``re`` for the capability-name regex. None of these are prefixed
-# with ``_`` and none are listed in ``__all__``, but plain attribute
-# access (``openjd.model._v1.Optional``) still resolves them. That's
-# a leak: tooling that walks the public attribute set of the module
-# (``inspect.getmembers``, ``hasattr``-based discovery, IDE
-# completion) treats them as part of the public surface.
-#
-# v0 had the same issue at one point and resolved it by aliasing
-# imports with ``_`` prefixes (``import re as _re``, ``from typing
-# import Any as _Any``, …). The v1 binding should follow the same
-# convention.
-#
-# Cross-reference: report Recommendation #5.
+# An earlier draft of ``openjd.model._v1`` imported ``Any``,
+# ``Optional``, ``Sequence``, ``Union`` from ``typing`` (and ``re``
+# from stdlib) without underscore-prefixing or listing them in
+# ``__all__``. They were leaking as plain attribute access
+# (``openjd.model._v1.Optional``), which tooling that walks the
+# public attribute set of the module treated as part of the public
+# surface. The v1 module no longer needs any of those imports — the
+# capability validators moved entirely to Rust and the document
+# parsing helper was removed — so this regression test verifies
+# none of them have been re-introduced.
 
 
-@pytest.mark.parametrize("name", ["Any", "Optional", "Sequence", "Union", "Enum", "re"])
-@pytest.mark.xfail(strict=True, reason="internal typing imports leak as public attributes")
+@pytest.mark.parametrize("name", ["Any", "Optional", "Sequence", "Union", "re", "Enum"])
 def test_no_internal_imports_leak_at_top_level(name: str) -> None:
     import openjd.model._v1 as v1
 
     assert not hasattr(v1, name), f"{name} leaks as a public attribute on openjd.model._v1"
-
-
-# ── StepDependencyGraph.topo_sorted() spec example mismatches reality ──
-#
-# Spec ("Iteration Types (from Rust)" → "StepDependencyGraph") shows:
-#
-#     graph.topo_sorted()         # ["Render", "Composite"] — dependency order
-#     graph.step_names()          # ["Render", "Composite"]
-#
-# implying both return strings. In reality ``topo_sorted()`` returns
-# a list of ``Step`` objects (matching the underlying Rust crate's
-# ``StepDependencyGraph::topo_sorted`` semantics), and only
-# ``step_names()`` returns strings.
-#
-# This is a spec-vs-binding mismatch in the spec, not a binding bug
-# — but it is the same kind of drift the eval-bindings skill is
-# designed to catch. Either the spec example needs to read
-# ``[Step(name="Render"), Step(name="Composite")]`` (or call
-# ``step_names()`` instead), or the binding needs to change to
-# return strings (which would be a regression vs the underlying Rust
-# semantics).
-#
-# Recommended resolution: update the spec, since downstream consumers
-# (worker agent, openjd-cli) need the ``Step`` objects to drive task
-# scheduling.
-#
-# Cross-reference: report Recommendation #7.
-
-
-@pytest.mark.xfail(
-    strict=True, reason="spec example shows strings but binding returns Step objects (spec doc bug)"
-)
-def test_topo_sorted_returns_strings_per_spec_example() -> None:
-    """The spec example for ``StepDependencyGraph.topo_sorted()``
-    suggests strings (``["Render", "Composite"]``). The actual
-    binding returns ``Step`` objects. Pin the spec's literal claim
-    so when this xfail flips to xpass the spec — or this assertion
-    — gets updated.
-    """
-    from openjd.model._v1 import create_job
-    from openjd.model._v1.job import StepDependencyGraph
-
-    t = decode_job_template(
-        template={
-            "specificationVersion": "jobtemplate-2023-09",
-            "name": "T",
-            "steps": [
-                {"name": "A", "script": {"actions": {"onRun": {"command": "echo"}}}},
-                {
-                    "name": "B",
-                    "script": {"actions": {"onRun": {"command": "ls"}}},
-                    "dependencies": [{"dependsOn": "A"}],
-                },
-            ],
-        }
-    )
-    job = create_job(job_template=t, job_parameter_values={})
-    graph = StepDependencyGraph(job=job)
-    result = graph.topo_sorted()
-    # Spec example claims a list of strings.
-    assert all(
-        isinstance(x, str) for x in result
-    ), f"spec promises strings; got {[type(x).__name__ for x in result]}"

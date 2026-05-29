@@ -14,7 +14,7 @@ use openjd_model::types::{TaskParameterSet, TaskParameterType, TaskParameterValu
 use openjd_model::StepParameterSpaceIterator;
 
 use super::job::{PyStep, PyStepParameterSpace};
-use super::types::{PyTaskParameterType, PyTaskParameterValue};
+use super::types::PyTaskParameterValue;
 use crate::expr::expr_value::py_to_expr_value;
 use crate::model::errors::model_err_to_py;
 
@@ -22,24 +22,10 @@ fn task_param_set_to_py(py: Python<'_>, params: &TaskParameterSet) -> PyResult<P
     use pyo3::IntoPyObjectExt;
     let dict = PyDict::new(py);
     for (name, tpv) in params {
-        let pv = PyTaskParameterValue {
-            param_type: task_param_type_to_py(tpv.param_type),
-            value: tpv.value.to_display_string(),
-        };
+        let pv = PyTaskParameterValue { inner: tpv.clone() };
         dict.set_item(name, pv.into_py_any(py)?)?;
     }
     Ok(dict.unbind())
-}
-
-fn task_param_type_to_py(tp: TaskParameterType) -> PyTaskParameterType {
-    match tp {
-        TaskParameterType::Int => PyTaskParameterType::INT,
-        TaskParameterType::Float => PyTaskParameterType::FLOAT,
-        TaskParameterType::String => PyTaskParameterType::STRING,
-        TaskParameterType::Path => PyTaskParameterType::PATH,
-        TaskParameterType::ChunkInt => PyTaskParameterType::CHUNK_INT,
-        _ => PyTaskParameterType::STRING, // future variants
-    }
 }
 
 fn extract_task_parameter_set(dict: &Bound<'_, PyDict>) -> PyResult<TaskParameterSet> {

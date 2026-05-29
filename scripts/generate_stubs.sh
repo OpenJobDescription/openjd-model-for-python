@@ -36,6 +36,10 @@ rm rust-bindings/pyproject.toml
 
 # Post-process: fix Rust raw identifiers and remove internal types
 sed -i 's/r#type/type/g' src/openjd/_openjd_rs.pyi
+# Also strip Rust raw-identifier prefix on `r#let` (used to take a `let`
+# kwarg in EnvironmentScript / StepScript constructors). Unlike
+# `r#type`, pyo3-stub-gen does not strip this one automatically.
+sed -i 's/r#let/let/g' src/openjd/_openjd_rs.pyi
 sed -i '/"PyExprValueIter"/d; /"PyRangeExprIter"/d; /"PyStepParamSpaceIter"/d' src/openjd/_openjd_rs.pyi
 
 # Tighten `__next__` return types: pyo3-stub-gen reflects the Rust

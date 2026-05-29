@@ -20,10 +20,6 @@ from typing import Optional
 from openjd.model._v1 import (
     decode_environment_template,
     decode_job_template,
-    document_string_to_object,
-)
-from openjd.model._v1.types import (
-    DocumentType,
 )
 from openjd.model._v1.errors import (
     DecodeValidationError,
@@ -233,29 +229,6 @@ def fuzz_environment_template():
     return random.choice(mutations)
 
 
-def fuzz_yaml_json_string():
-    return random.choice(
-        [
-            "{}",
-            "[]",
-            "{",
-            "[",
-            '{"key": "value"}',
-            '{"key": }',
-            "key: value",
-            "- item1\n- item2",
-            "---\n...",
-            "\x00",
-            "",
-            "null",
-            "true",
-            "123",
-            '"string"',
-            random_string(0, 100),
-        ]
-    )
-
-
 def run_fuzzer(num_tests: int, seed: Optional[int], verbose: bool) -> bool:
     if seed is not None:
         random.seed(seed)
@@ -270,21 +243,15 @@ def run_fuzzer(num_tests: int, seed: Optional[int], verbose: bool) -> bool:
     successes = 0
 
     for i in range(num_tests):
-        test_type = random.choice(["job", "env", "doc_json", "doc_yaml"])
+        test_type = random.choice(["job", "env"])
 
         try:
             if test_type == "job":
                 template = fuzz_job_template()
                 decode_job_template(template=template)
-            elif test_type == "env":
+            else:
                 template = fuzz_environment_template()
                 decode_environment_template(template=template)
-            elif test_type == "doc_json":
-                doc = fuzz_yaml_json_string()
-                document_string_to_object(document=doc, document_type=DocumentType.JSON)
-            else:
-                doc = fuzz_yaml_json_string()
-                document_string_to_object(document=doc, document_type=DocumentType.YAML)
 
             successes += 1
 
@@ -296,7 +263,7 @@ def run_fuzzer(num_tests: int, seed: Optional[int], verbose: bool) -> bool:
                 {
                     "test_num": i,
                     "test_type": test_type,
-                    "input": template if test_type in ("job", "env") else doc,
+                    "input": template,
                     "error": str(e),
                     "error_type": type(e).__name__,
                     "traceback": traceback.format_exc(),

@@ -278,6 +278,18 @@ pub(crate) struct PyModelProfile {
     pub(crate) inner: ModelProfile,
 }
 
+impl Default for PyModelProfile {
+    /// Same default as the Python-callable ``ModelProfile()``
+    /// constructor — the v2023_09 revision with no extensions.
+    /// Rust callers in the bindings should use this rather than
+    /// hardcoding the revision literal.
+    fn default() -> Self {
+        Self {
+            inner: ModelProfile::new(SpecificationRevision::V2023_09),
+        }
+    }
+}
+
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyModelProfile {

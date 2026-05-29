@@ -1,34 +1,31 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
 
 import pytest
 import string
 
-from openjd.model._v1 import validate_amount_capability_name, validate_attribute_capability_name
-
-TEST_BUILTIN_AMOUNTS: list[str] = [
-    "amount.worker.foo",
-    "amount.job.foo",
-    "amount.step.foo",
-    "amount.task.foo",
-]
-TEST_BUILTIN_ATTRIBUTES: list[str] = [
-    "attr.worker.foo",
-    "attr.job.foo",
-    "attr.step.foo",
-    "attr.task.foo",
-]
+from openjd.model._v1 import (
+    standard_amount_capability_names,
+    standard_attribute_capability_names,
+    validate_amount_capability_name,
+    validate_attribute_capability_name,
+)
 
 
-def _success_test_values(prefix: str) -> list:
+def _success_test_values(prefix: str, standard_names: list[str]) -> list:
+    """Common success cases for both amount and attr validators.
+
+    The validator accepts:
+    - any spec-defined standard name (passed in via ``standard_names``)
+    - any vendor-prefixed name with a valid regex shape
+    - any non-vendor-prefixed name whose second dot-segment is NOT a
+      reserved scope (worker/job/step/task)
+    """
     return (
-        [
-            pytest.param(f"{prefix}.worker.foo", id="builtin worker"),
-            pytest.param(f"{prefix}.job.foo", id="builtin job"),
-            pytest.param(f"{prefix}.step.foo", id="builtin step"),
-            pytest.param(f"{prefix}.task.foo", id="builtin task"),
-            pytest.param(f"{prefix}.custom", id="customer-defined"),
+        [pytest.param(name, id=f"standard {name}") for name in standard_names]
+        + [
+            pytest.param(f"{prefix}.custom", id="customer-defined non-reserved"),
             pytest.param(f"vendor:{prefix}.custom", id="vendor-defined"),
-            pytest.param(f"{prefix.upper()}.WORKER.FOO", id="caps"),
             pytest.param(f"VENDOR:{prefix.upper()}.CUSTOM", id="caps vendor"),
         ]
         + [  # Test the vendor regex
@@ -47,14 +44,14 @@ def _success_test_values(prefix: str) -> list:
 
 
 def _error_test_values(prefix: str, other_prefix: str) -> list:
+    """Common error cases for both amount and attr validators."""
     return (
         [
-            pytest.param(f"vendor:{prefix}.worker.foo", id="vendor scoped builtin"),
             pytest.param(f"{other_prefix}.worker.foo", id=f"must start with {prefix}"),
-            pytest.param(f"{prefix}.worker.notreserved", id="reserved worker scope"),
-            pytest.param(f"{prefix}.job.notreserved", id="reserved job scope"),
-            pytest.param(f"{prefix}.step.notreserved", id="reserved step scope"),
-            pytest.param(f"{prefix}.task.notreserved", id="reserved task scope"),
+            pytest.param(f"{prefix}.worker.notstandard", id="reserved worker scope"),
+            pytest.param(f"{prefix}.job.notstandard", id="reserved job scope"),
+            pytest.param(f"{prefix}.step.notstandard", id="reserved step scope"),
+            pytest.param(f"{prefix}.task.notstandard", id="reserved task scope"),
             pytest.param("foo.custom", id="bad prefix"),
             pytest.param(f"{prefix}.worker.foo\n", id="ends in newline"),
             pytest.param(f"{prefix}.worker.foo\n\n", id="ends in two newline"),
@@ -79,12 +76,12 @@ def _error_test_values(prefix: str, other_prefix: str) -> list:
 
 
 class TestValidateAmountCapabilityName:
-    @pytest.mark.parametrize("value", _success_test_values("amount"))
+    @pytest.mark.parametrize(
+        "value", _success_test_values("amount", standard_amount_capability_names())
+    )
     def test_success(self, value: str) -> None:
         # WHEN
-        validate_amount_capability_name(
-            capability_name=value, standard_capabilities=TEST_BUILTIN_AMOUNTS
-        )
+        validate_amount_capability_name(value)
 
         # THEN
         # does not raise
@@ -93,18 +90,22 @@ class TestValidateAmountCapabilityName:
     def test_errors(self, value: str) -> None:
         # THEN
         with pytest.raises(ValueError):
-            validate_amount_capability_name(
-                capability_name=value, standard_capabilities=TEST_BUILTIN_AMOUNTS
-            )
+            validate_amount_capability_name(value)
+
+    def test_too_long(self) -> None:
+        # 100-char cap is enforced
+        long_name = "amount.foo." + "x" * 100
+        with pytest.raises(ValueError, match="exceeds 100 characters"):
+            validate_amount_capability_name(long_name)
 
 
 class TestValidateAttributeCapabilityName:
-    @pytest.mark.parametrize("value", _success_test_values("attr"))
+    @pytest.mark.parametrize(
+        "value", _success_test_values("attr", standard_attribute_capability_names())
+    )
     def test_success(self, value: str) -> None:
         # WHEN
-        validate_attribute_capability_name(
-            capability_name=value, standard_capabilities=TEST_BUILTIN_ATTRIBUTES
-        )
+        validate_attribute_capability_name(value)
 
         # THEN
         # does not raise
@@ -113,6 +114,9 @@ class TestValidateAttributeCapabilityName:
     def test_errors(self, value: str) -> None:
         # THEN
         with pytest.raises(ValueError):
-            validate_attribute_capability_name(
-                capability_name=value, standard_capabilities=TEST_BUILTIN_ATTRIBUTES
-            )
+            validate_attribute_capability_name(value)
+
+    def test_too_long(self) -> None:
+        long_name = "attr.foo." + "x" * 100
+        with pytest.raises(ValueError, match="exceeds 100 characters"):
+            validate_attribute_capability_name(long_name)
