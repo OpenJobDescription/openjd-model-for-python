@@ -73,10 +73,10 @@ impl PySymbolTable {
         use pyo3::IntoPyObjectExt;
         match self.inner.get(key) {
             Some(openjd_expr::symbol_table::SymbolTableEntry::Value(v)) => {
-                Ok(PyExprValue { inner: v.clone() }.into_py_any(py).unwrap())
+                PyExprValue { inner: v.clone() }.into_py_any(py)
             }
             Some(openjd_expr::symbol_table::SymbolTableEntry::Table(t)) => {
-                Ok(PySymbolTable { inner: t.clone() }.into_py_any(py).unwrap())
+                PySymbolTable { inner: t.clone() }.into_py_any(py)
             }
             None => Err(pyo3::exceptions::PyKeyError::new_err(key.to_string())),
         }
@@ -85,12 +85,12 @@ impl PySymbolTable {
     fn get(&self, py: Python<'_>, name: &str) -> PyResult<Option<Py<pyo3::PyAny>>> {
         use pyo3::IntoPyObjectExt;
         match self.inner.get(name) {
-            Some(openjd_expr::symbol_table::SymbolTableEntry::Value(v)) => Ok(Some(
-                PyExprValue { inner: v.clone() }.into_py_any(py).unwrap(),
-            )),
-            Some(openjd_expr::symbol_table::SymbolTableEntry::Table(t)) => Ok(Some(
-                PySymbolTable { inner: t.clone() }.into_py_any(py).unwrap(),
-            )),
+            Some(openjd_expr::symbol_table::SymbolTableEntry::Value(v)) => {
+                Ok(Some(PyExprValue { inner: v.clone() }.into_py_any(py)?))
+            }
+            Some(openjd_expr::symbol_table::SymbolTableEntry::Table(t)) => {
+                Ok(Some(PySymbolTable { inner: t.clone() }.into_py_any(py)?))
+            }
             None => Ok(None),
         }
     }

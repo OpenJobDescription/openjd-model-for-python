@@ -70,6 +70,27 @@ pyo3::create_exception!(
 //      caret column shifted accordingly. Falls back to
 //      `str(self)` for context-free or multi-line errors.
 //
+// Rendering shape of `message_with_expr_prefix` (the "printing"
+// path). When `expr` is attached and single-line, it produces a
+// three-line, caret-annotated message:
+//
+//     <base message>
+//       <prefix><expr>
+//               ^
+//
+//   * line 1 is `self._base_message` (the original message text);
+//   * line 2 is the expression source, two-space-indented, with
+//     the caller-supplied `prefix` prepended
+//     (`"  " + prefix + expr`);
+//   * line 3 is emitted only when `col_offset is not None`: a
+//     caret under the offending column. The caret is shifted right
+//     by `len(prefix)` (`" " * (col_offset + len(prefix))`) so it
+//     stays aligned with the source character after the prefix
+//     pushes the expression text rightward.
+//
+// If `expr is None` or the expression is multi-line (`"\n" in
+// expr`), it returns plain `str(self)` with no caret annotation.
+//
 // Implementing these as `#[pyfunction]`s installed via `setattr`
 // would *almost* work, except that PyO3's `#[pyfunction]` builds
 // a `PyCFunction` (builtin function) which is not bound to its
