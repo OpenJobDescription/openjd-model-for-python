@@ -1,3 +1,17 @@
+## 0.10.0 (2026-06-17)
+
+
+### Features
+* Rust-backed openjd.model._v1, openjd.expr, openjd.sessions._v1 via PyO3 ([`3d853e5`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/3d853e542dbee4e4c707044fc145dad8bcd138b4))
+
+### Bug Fixes
+* make userInterface control field optional for all parameter types (#278) ([`5e10e2c`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/5e10e2c036d79bd5a0548600055d33107c0eaa04))
+* require attribute and amount names to be unique (#265) ([`c5ba60e`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/c5ba60e8c85abf1f0c1226df96830c042d5beff5))
+* require attribute and amount names to be unique ([`c5ba60e`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/c5ba60e8c85abf1f0c1226df96830c042d5beff5))
+* reject control characters in job names (#263) ([`0d428c4`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/0d428c4febde028ba49793e75ead12a398205f8d))
+* reject control characters in job names ([`0d428c4`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/0d428c4febde028ba49793e75ead12a398205f8d))
+
+
 ## 0.9.1 (2026-02-20)
 
 
