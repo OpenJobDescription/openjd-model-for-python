@@ -18,37 +18,45 @@ pub(crate) struct PyStepDependencyGraph {
 }
 
 impl PyStepDependencyGraph {
-    fn make_node(&self, node_index: usize) -> PyStepDependencyNode {
-        let node = self.inner.node(node_index).unwrap();
+    fn make_node(&self, node_index: usize) -> PyResult<PyStepDependencyNode> {
+        let node = self.inner.node(node_index).ok_or_else(|| {
+            pyo3::exceptions::PyIndexError::new_err(format!(
+                "step dependency graph has no node at index {node_index}"
+            ))
+        })?;
+        let step_for = |idx: usize| -> PyResult<openjd_model::job::Step> {
+            self.job_steps.get(idx).cloned().ok_or_else(|| {
+                pyo3::exceptions::PyIndexError::new_err(format!(
+                    "step dependency edge references out-of-range step index {idx}"
+                ))
+            })
+        };
+        let edge_for = |edge_idx| -> PyResult<Option<PyStepDependencyEdge>> {
+            match self.inner.edge(edge_idx) {
+                Some(edge) => Ok(Some(PyStepDependencyEdge {
+                    origin_step: step_for(edge.origin)?,
+                    dependent_step: step_for(edge.dependent)?,
+                })),
+                None => Ok(None),
+            }
+        };
         let in_edges: Vec<PyStepDependencyEdge> = node
             .in_edges
             .iter()
-            .filter_map(|&edge_idx| {
-                let edge = self.inner.edge(edge_idx)?;
-                Some(PyStepDependencyEdge {
-                    origin_step: self.job_steps[edge.origin].clone(),
-                    dependent_step: self.job_steps[edge.dependent].clone(),
-                })
-            })
-            .collect();
+            .filter_map(|&edge_idx| edge_for(edge_idx).transpose())
+            .collect::<PyResult<_>>()?;
         let out_edges: Vec<PyStepDependencyEdge> = node
             .out_edges
             .iter()
-            .filter_map(|&edge_idx| {
-                let edge = self.inner.edge(edge_idx)?;
-                Some(PyStepDependencyEdge {
-                    origin_step: self.job_steps[edge.origin].clone(),
-                    dependent_step: self.job_steps[edge.dependent].clone(),
-                })
-            })
-            .collect();
-        PyStepDependencyNode {
+            .filter_map(|&edge_idx| edge_for(edge_idx).transpose())
+            .collect::<PyResult<_>>()?;
+        Ok(PyStepDependencyNode {
             step: PyStep {
-                inner: self.job_steps[node.step_index].clone(),
+                inner: step_for(node.step_index)?,
             },
             in_edges,
             out_edges,
-        }
+        })
     }
 }
 
@@ -66,7 +74,7 @@ impl PyStepDependencyGraph {
     }
 
     #[getter]
-    fn _nodes(&self) -> Vec<PyStepDependencyNode> {
+    fn _nodes(&self) -> PyResult<Vec<PyStepDependencyNode>> {
         (0..self.inner.node_count())
             .map(|i| self.make_node(i))
             .collect()
@@ -76,17 +84,25 @@ impl PyStepDependencyGraph {
         let node = self.inner.step_node(stepname).ok_or_else(|| {
             pyo3::exceptions::PyKeyError::new_err(format!("No step named '{stepname}'"))
         })?;
-        Ok(self.make_node(node.step_index))
+        self.make_node(node.step_index)
     }
 
     fn topo_sorted(&self) -> PyResult<Vec<PyStep>> {
         let indices = self.inner.topo_sorted().map_err(model_err_to_py)?;
-        Ok(indices
+        indices
             .into_iter()
-            .map(|i| PyStep {
-                inner: self.job_steps[i].clone(),
+            .map(|i| {
+                self.job_steps
+                    .get(i)
+                    .cloned()
+                    .map(|inner| PyStep { inner })
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyIndexError::new_err(format!(
+                            "topo sort produced out-of-range step index {i}"
+                        ))
+                    })
             })
-            .collect())
+            .collect()
     }
 
     fn step_names(&self) -> PyResult<Vec<String>> {

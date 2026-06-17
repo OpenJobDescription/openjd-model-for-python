@@ -117,6 +117,147 @@ struct StateSnapshot {
     environments_entered: Vec<String>,
 }
 
+/// Lock a mutex, recovering the guard even if a previous holder panicked.
+///
+/// Action work runs on detached `std::thread::spawn` threads. A panic on
+/// one of those threads (e.g. inside async session code) would poison
+/// `session` / `snapshot`, after which every later `.lock().unwrap()` —
+/// including the read-only property getters invoked from the Python
+/// thread — would itself panic and surface as an uncatchable
+/// `PanicException`, permanently wedging the session object. Recovering
+/// the poisoned guard keeps the session readable so the failure can be
+/// reported through the normal `ActionStatus` channel instead of
+/// cascading.
+///
+/// Caveat: `into_inner()` recovers the lock but not the invariants — a
+/// thread that panicked mid-mutation may have left the data readable but
+/// not necessarily consistent. For the read-only snapshot getters that's
+/// harmless (worst case: stale fields). For the `session` slot, the
+/// panic-handling path in `run_action` forces a terminal FAILED
+/// `ActionStatus`, which closes the practical risk of re-dispatching an
+/// action onto a half-mutated session.
+fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Build a terminal FAILED `ActionStatus` carrying `message`.
+///
+/// Used when an action thread can't even start (e.g. the Tokio runtime
+/// fails to build) so the Python poller observes a terminal state and
+/// stops waiting on RUNNING rather than spinning forever.
+fn failed_action_status(message: &str) -> ActionStatus {
+    ActionStatus {
+        state: openjd_sessions::action::ActionState::Failed,
+        progress: None,
+        status_message: None,
+        fail_message: Some(message.to_string()),
+        exit_code: None,
+        started_at: None,
+        ended_at: None,
+    }
+}
+
+/// Body of a spawned action thread.
+///
+/// Builds a lightweight current-thread Tokio runtime, runs the action
+/// closure to completion while catching panics, then **always** returns
+/// the `Session` to the shared slot and refreshes the snapshot — even if
+/// the runtime failed to build or the future panicked. This guarantees:
+///
+/// * the session is never left permanently "taken" (which would wedge
+///   every later call into `"An action is already running"`), and
+/// * a panic in async session code can't escape the detached thread to
+///   poison shared state silently and tear down the interpreter's view
+///   of the session.
+///
+/// A runtime-build failure is surfaced as a terminal FAILED
+/// `ActionStatus` so the Python-side poller terminates cleanly. A panic
+/// inside the action is likewise converted into a terminal FAILED
+/// `ActionStatus` (rather than copying the possibly-still-Running real
+/// session state), so the poller never hangs on a panicked action.
+fn run_action<F>(
+    mut session: Session,
+    session_arc: Arc<Mutex<Option<Session>>>,
+    snapshot: Arc<Mutex<StateSnapshot>>,
+    action: F,
+) where
+    F: FnOnce(&tokio::runtime::Runtime, &mut Session),
+{
+    let rt = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => rt,
+        Err(e) => {
+            // Couldn't build a runtime (e.g. fd/thread exhaustion). Mark
+            // the action FAILED and drop out of RUNNING so the poller
+            // delivers a terminal callback instead of hanging.
+            {
+                let mut snap = lock_recover(&snapshot);
+                snap.state = SessionState::Ready;
+                snap.action_status = Some(failed_action_status(&format!(
+                    "failed to start action runtime: {e}"
+                )));
+            }
+            *lock_recover(&session_arc) = Some(session);
+            return;
+        }
+    };
+
+    // Catch panics so a panic inside async session code still restores
+    // the session below rather than leaking out of this detached thread.
+    let action_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        action(&rt, &mut session);
+    }));
+
+    // Restore the session BEFORE refreshing the snapshot, holding the guard
+    // across both so there's no window where a caller finds the slot empty.
+    // Python callers watch `state` via the snapshot and dispatch the next
+    // action the moment it transitions out of Running; if the snapshot
+    // updated first they could find the mutex still empty ("An action is
+    // already running").
+    let guard = {
+        let mut slot = lock_recover(&session_arc);
+        *slot = Some(session);
+        slot
+    };
+
+    match action_result {
+        Ok(()) => {
+            if let Some(s) = guard.as_ref() {
+                PySession::update_snapshot(s, &snapshot);
+            }
+        }
+        Err(payload) => {
+            // The action panicked mid-run. `catch_unwind` kept the session
+            // usable for future calls, but the real `session.state()` may
+            // still read Running with no terminal `ActionStatus` — which
+            // would leave the Python poller waiting forever. Force a
+            // terminal FAILED status and drop out of RUNNING, mirroring the
+            // runtime-build-failure branch above.
+            let mut snap = lock_recover(&snapshot);
+            snap.state = SessionState::Ready;
+            snap.action_status = Some(failed_action_status(&format!(
+                "action panicked during execution: {}",
+                panic_detail(payload.as_ref())
+            )));
+        }
+    }
+}
+
+/// Best-effort extraction of a human-readable message from a caught panic
+/// payload (`std::panic::catch_unwind`'s `Err` value), which is usually the
+/// `&str` or `String` passed to `panic!`.
+fn panic_detail(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
+}
+
 #[cfg_attr(feature = "stub-gen", gen_stub_pyclass(module = "openjd._openjd_rs"))]
 #[pyclass(module = "openjd.sessions._v1", name = "Session")]
 pub(crate) struct PySession {
@@ -128,7 +269,7 @@ pub(crate) struct PySession {
 
 impl PySession {
     fn update_snapshot(session: &Session, snapshot: &Arc<Mutex<StateSnapshot>>) {
-        let mut snap = snapshot.lock().unwrap();
+        let mut snap = lock_recover(snapshot);
         snap.state = session.state();
         snap.action_status = session.action_status();
         snap.environments_entered = session.environments_entered().to_vec();
@@ -213,7 +354,7 @@ impl PySession {
         };
         let session = Session::with_config(config).map_err(session_err_to_py)?;
         {
-            let mut snap = snapshot.lock().unwrap();
+            let mut snap = lock_recover(&snapshot);
             snap.state = session.state();
             snap.working_directory = session.working_directory().to_string_lossy().to_string();
             snap.files_directory = session.files_directory().to_string_lossy().to_string();
@@ -229,29 +370,27 @@ impl PySession {
 
     #[getter]
     fn session_id(&self) -> String {
-        self.snapshot.lock().unwrap().session_id.clone()
+        lock_recover(&self.snapshot).session_id.clone()
     }
 
     #[getter]
     fn state(&self) -> PySessionState {
-        self.snapshot.lock().unwrap().state.into()
+        lock_recover(&self.snapshot).state.into()
     }
 
     #[getter]
     fn working_directory(&self) -> String {
-        self.snapshot.lock().unwrap().working_directory.clone()
+        lock_recover(&self.snapshot).working_directory.clone()
     }
 
     #[getter]
     fn files_directory(&self) -> String {
-        self.snapshot.lock().unwrap().files_directory.clone()
+        lock_recover(&self.snapshot).files_directory.clone()
     }
 
     #[getter]
     fn action_status(&self) -> Option<PyActionStatus> {
-        self.snapshot
-            .lock()
-            .unwrap()
+        lock_recover(&self.snapshot)
             .action_status
             .clone()
             .map(PyActionStatus::from)
@@ -259,7 +398,7 @@ impl PySession {
 
     #[getter]
     fn environments_entered(&self) -> Vec<String> {
-        self.snapshot.lock().unwrap().environments_entered.clone()
+        lock_recover(&self.snapshot).environments_entered.clone()
     }
 
     /// Extend the session's path mapping rules with additional rules.
@@ -278,7 +417,7 @@ impl PySession {
         &self,
         additional: Vec<crate::expr::PyPathMappingRule>,
     ) -> PyResult<()> {
-        let mut guard = self.session.lock().unwrap();
+        let mut guard = lock_recover(&self.session);
         let session = guard.as_mut().ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err(
                 "cannot extend path mapping rules while an action is running",
@@ -306,7 +445,7 @@ impl PySession {
         let env_id = match &identifier {
             Some(id) => id.clone(),
             None => {
-                let snap = self.snapshot.lock().unwrap();
+                let snap = lock_recover(&self.snapshot);
                 format!("{}:{}", snap.session_id, uuid::Uuid::new_v4().simple())
             }
         };
@@ -321,8 +460,8 @@ impl PySession {
         let resolved = resolved_symtab.map(|st| st.inner.clone());
 
         // Take the session out of the mutex so the background thread owns it
-        let mut guard = self.session.lock().unwrap();
-        let mut session = guard.take().ok_or_else(|| {
+        let mut guard = lock_recover(&self.session);
+        let session = guard.take().ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
         })?;
         drop(guard);
@@ -334,7 +473,7 @@ impl PySession {
         // for the new action — causing the worker to think envEnter / run_task
         // finished in ~1ms with the previous action's SUCCEEDED result.
         {
-            let mut snap = self.snapshot.lock().unwrap();
+            let mut snap = lock_recover(&self.snapshot);
             snap.state = SessionState::Running;
             snap.action_status = None;
         }
@@ -343,24 +482,15 @@ impl PySession {
         let snapshot = self.snapshot.clone();
 
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let env_ref = os_env_vars.as_ref();
-            let _ = rt.block_on(session.enter_environment(
-                &env,
-                resolved.as_ref(),
-                Some(&env_id),
-                env_ref,
-            ));
-            // Put session back BEFORE updating the snapshot. Python callers
-            // watch `state` via the snapshot and dispatch the next action the
-            // moment it transitions out of Running. If we updated the snapshot
-            // first, a Python caller could call run_task / enter_environment
-            // and find the mutex still empty — "An action is already running".
-            *session_arc.lock().unwrap() = Some(session);
-            let guard = session_arc.lock().unwrap();
-            if let Some(s) = guard.as_ref() {
-                Self::update_snapshot(s, &snapshot);
-            }
+            run_action(session, session_arc, snapshot, move |rt, session| {
+                let env_ref = os_env_vars.as_ref();
+                let _ = rt.block_on(session.enter_environment(
+                    &env,
+                    resolved.as_ref(),
+                    Some(&env_id),
+                    env_ref,
+                ));
+            });
         });
 
         Ok(return_id)
@@ -378,14 +508,14 @@ impl PySession {
     ) -> PyResult<()> {
         let resolved = resolved_symtab.map(|st| st.inner.clone());
 
-        let mut guard = self.session.lock().unwrap();
-        let mut session = guard.take().ok_or_else(|| {
+        let mut guard = lock_recover(&self.session);
+        let session = guard.take().ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
         })?;
         drop(guard);
 
         {
-            let mut snap = self.snapshot.lock().unwrap();
+            let mut snap = lock_recover(&self.snapshot);
             snap.state = SessionState::Running;
             snap.action_status = None;
         }
@@ -394,19 +524,15 @@ impl PySession {
         let snapshot = self.snapshot.clone();
 
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let env_ref = os_env_vars.as_ref();
-            let _ = rt.block_on(session.exit_environment(
-                &identifier,
-                resolved.as_ref(),
-                keep_session_running,
-                env_ref,
-            ));
-            *session_arc.lock().unwrap() = Some(session);
-            let guard = session_arc.lock().unwrap();
-            if let Some(s) = guard.as_ref() {
-                Self::update_snapshot(s, &snapshot);
-            }
+            run_action(session, session_arc, snapshot, move |rt, session| {
+                let env_ref = os_env_vars.as_ref();
+                let _ = rt.block_on(session.exit_environment(
+                    &identifier,
+                    resolved.as_ref(),
+                    keep_session_running,
+                    env_ref,
+                ));
+            });
         });
 
         Ok(())
@@ -428,14 +554,14 @@ impl PySession {
         };
         let resolved = resolved_symtab.map(|st| st.inner.clone());
 
-        let mut guard = self.session.lock().unwrap();
-        let mut session = guard.take().ok_or_else(|| {
+        let mut guard = lock_recover(&self.session);
+        let session = guard.take().ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
         })?;
         drop(guard);
 
         {
-            let mut snap = self.snapshot.lock().unwrap();
+            let mut snap = lock_recover(&self.snapshot);
             snap.state = SessionState::Running;
             snap.action_status = None;
         }
@@ -444,15 +570,12 @@ impl PySession {
         let snapshot = self.snapshot.clone();
 
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let env_ref = os_env_vars.as_ref();
-            let task_ref = task_params.as_ref();
-            let _ = rt.block_on(session.run_task(&script, task_ref, resolved.as_ref(), env_ref));
-            *session_arc.lock().unwrap() = Some(session);
-            let guard = session_arc.lock().unwrap();
-            if let Some(s) = guard.as_ref() {
-                Self::update_snapshot(s, &snapshot);
-            }
+            run_action(session, session_arc, snapshot, move |rt, session| {
+                let env_ref = os_env_vars.as_ref();
+                let task_ref = task_params.as_ref();
+                let _ =
+                    rt.block_on(session.run_task(&script, task_ref, resolved.as_ref(), env_ref));
+            });
         });
 
         Ok(())
@@ -469,14 +592,14 @@ impl PySession {
         use_session_env_vars: bool,
         log_banner_message: Option<String>,
     ) -> PyResult<()> {
-        let mut guard = self.session.lock().unwrap();
-        let mut session = guard.take().ok_or_else(|| {
+        let mut guard = lock_recover(&self.session);
+        let session = guard.take().ok_or_else(|| {
             pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
         })?;
         drop(guard);
 
         {
-            let mut snap = self.snapshot.lock().unwrap();
+            let mut snap = lock_recover(&self.snapshot);
             snap.state = SessionState::Running;
             snap.action_status = None;
         }
@@ -485,24 +608,20 @@ impl PySession {
         let snapshot = self.snapshot.clone();
 
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            let duration = timeout.map(std::time::Duration::from_secs_f64);
-            let env_ref = os_env_vars.as_ref();
-            let args_ref = args.as_deref();
-            let banner_ref = log_banner_message.as_deref();
-            let _ = rt.block_on(session.run_subprocess(
-                &command,
-                args_ref,
-                duration,
-                env_ref,
-                use_session_env_vars,
-                banner_ref,
-            ));
-            *session_arc.lock().unwrap() = Some(session);
-            let guard = session_arc.lock().unwrap();
-            if let Some(s) = guard.as_ref() {
-                Self::update_snapshot(s, &snapshot);
-            }
+            run_action(session, session_arc, snapshot, move |rt, session| {
+                let duration = timeout.map(std::time::Duration::from_secs_f64);
+                let env_ref = os_env_vars.as_ref();
+                let args_ref = args.as_deref();
+                let banner_ref = log_banner_message.as_deref();
+                let _ = rt.block_on(session.run_subprocess(
+                    &command,
+                    args_ref,
+                    duration,
+                    env_ref,
+                    use_session_env_vars,
+                    banner_ref,
+                ));
+            });
         });
 
         Ok(())
@@ -518,7 +637,7 @@ impl PySession {
         // subprocess runner. But we don't have access to &mut Session here.
         // For now, this is a limitation — cancel requires the session to not be taken.
         let duration = time_limit.map(std::time::Duration::from_secs_f64);
-        let mut guard = self.session.lock().unwrap();
+        let mut guard = lock_recover(&self.session);
         match guard.as_mut() {
             Some(session) => session
                 .cancel_action(duration, mark_action_failed.unwrap_or(false))
@@ -530,7 +649,7 @@ impl PySession {
     }
 
     fn cleanup(&self) {
-        let mut guard = self.session.lock().unwrap();
+        let mut guard = lock_recover(&self.session);
         if let Some(session) = guard.as_mut() {
             session.cleanup();
             Self::update_snapshot(session, &self.snapshot);
@@ -538,7 +657,7 @@ impl PySession {
     }
 
     fn __repr__(&self) -> String {
-        let snap = self.snapshot.lock().unwrap();
+        let snap = lock_recover(&self.snapshot);
         format!("Session(id={:?}, state={:?})", snap.session_id, snap.state)
     }
 }

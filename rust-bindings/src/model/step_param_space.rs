@@ -91,6 +91,15 @@ fn param_type_to_expr_type(pt: TaskParameterType) -> openjd_expr::ExprType {
     }
 }
 
+/// Lock the iterator mutex, recovering the guard if a previous holder
+/// panicked. A panic inside `next()` / `contains()` / `validate_containment()`
+/// would otherwise poison the mutex, and every subsequent `.lock().unwrap()`
+/// would raise an uncatchable `PanicException` on the Python side — wedging
+/// the iterator object permanently. Recovering keeps it usable.
+fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 #[cfg_attr(feature = "stub-gen", gen_stub_pyclass(module = "openjd._openjd_rs"))]
 #[pyclass(module = "openjd.model._v1.job", name = "StepParameterSpaceIterator")]
 pub(crate) struct PyStepParameterSpaceIterator {
@@ -154,7 +163,7 @@ impl PyStepParameterSpaceIterator {
         // Match the pure-Python reference: adaptive-chunked spaces
         // cannot answer `len()` because the count depends on the
         // dynamic chunk size that may change during execution.
-        let iter = self.iter.lock().unwrap();
+        let iter = lock_recover(&self.iter);
         if iter.chunks_adaptive() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "Length is not available because the parameter space uses adaptive chunking.",
@@ -195,7 +204,7 @@ impl PyStepParameterSpaceIterator {
     }
 
     fn __next__(&self, py: Python<'_>) -> PyResult<Option<Py<PyDict>>> {
-        let mut iter = self.iter.lock().unwrap();
+        let mut iter = lock_recover(&self.iter);
         match iter.next() {
             Some(params) => Ok(Some(task_param_set_to_py(py, &params)?)),
             None => Ok(None),
@@ -204,7 +213,7 @@ impl PyStepParameterSpaceIterator {
 
     fn __contains__(&self, item: &Bound<'_, PyDict>) -> PyResult<bool> {
         let params = extract_task_parameter_set(item)?;
-        let iter = self.iter.lock().unwrap();
+        let iter = lock_recover(&self.iter);
         Ok(iter.contains(&params))
     }
 
@@ -217,13 +226,13 @@ impl PyStepParameterSpaceIterator {
     /// crate's ``StepParameterSpaceIterator::validate_containment``.
     fn validate_containment(&self, params: &Bound<'_, PyDict>) -> PyResult<()> {
         let params = extract_task_parameter_set(params)?;
-        let iter = self.iter.lock().unwrap();
+        let iter = lock_recover(&self.iter);
         iter.validate_containment(&params)
             .map_err(pyo3::exceptions::PyValueError::new_err)
     }
 
     fn reset_iter(&self) {
-        let mut iter = self.iter.lock().unwrap();
+        let mut iter = lock_recover(&self.iter);
         iter.reset();
     }
 
@@ -234,19 +243,19 @@ impl PyStepParameterSpaceIterator {
 
     #[getter]
     fn chunks_adaptive(&self) -> bool {
-        let iter = self.iter.lock().unwrap();
+        let iter = lock_recover(&self.iter);
         iter.chunks_adaptive()
     }
 
     #[getter]
     fn chunks_parameter_name(&self) -> Option<String> {
-        let iter = self.iter.lock().unwrap();
+        let iter = lock_recover(&self.iter);
         iter.chunks_parameter_name().map(|s| s.to_string())
     }
 
     #[getter]
     fn chunks_default_task_count(&self) -> Option<usize> {
-        let iter = self.iter.lock().unwrap();
+        let iter = lock_recover(&self.iter);
         iter.chunks_default_task_count()
     }
 
@@ -257,7 +266,7 @@ impl PyStepParameterSpaceIterator {
                 "chunks_default_task_count must be a positive integer.",
             ));
         }
-        let mut iter = self.iter.lock().unwrap();
+        let mut iter = lock_recover(&self.iter);
         if !iter.chunks_adaptive() {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "The parameter space does not use adaptive chunking, so cannot modify chunks_default_task_count.",
