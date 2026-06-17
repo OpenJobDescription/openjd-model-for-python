@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import numbers
-from typing import Union
+from typing import Any, Optional, Union
 
 from .._errors import ExpressionError
 from .._symbol_table import SymbolTable
@@ -40,23 +40,33 @@ class InterpolationExpression:
         """
         self._expresion_tree.validate_symbol_refs(symbols=symbols)
 
-    def evaluate(self, *, symtab: SymbolTable) -> Union[numbers.Real, str]:
+    def evaluate(
+        self, *, symtab: SymbolTable, path_format: Optional[Any] = None
+    ) -> Union[numbers.Real, str, Any]:
         """Evaluate the expression given a SymbolTable.
 
         Args:
             symtab (SymbolTable): A symbol table containing values to use in the evaluation.
+            path_format (Any): Optional EXPR PathFormat for PATH-typed values.
 
         Raises:
             ExpressionError: If the expression could not be evaluated.
 
         Returns:
-            Union[numbers.Real, str]: Resulting value.
+            The resulting value. For legacy (non-EXPR) expressions this is a
+            ``numbers.Real`` or ``str``; EXPR expressions may also yield
+            ``bool``, ``list``, or ``None``.
         """
         try:
-            result = self._expresion_tree.evaluate(symtab=symtab)
+            result = self._expresion_tree.evaluate(symtab=symtab, path_format=path_format)
         except ValueError as exc:
             raise ExpressionError(f"Expression failed validation: {str(exc)}")
 
+        # EXPR-backed nodes may legitimately return non-scalar values; the
+        # legacy name path is still restricted to Real/str to preserve its
+        # exact behavior.
+        if getattr(self._expresion_tree, "allows_nonscalar", False):
+            return result
         if isinstance(result, (numbers.Real, str)):
             return result
 

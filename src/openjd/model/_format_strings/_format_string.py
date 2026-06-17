@@ -75,7 +75,7 @@ class FormatString(DynamicConstrainedStr):
         """
         return [expr for expr in self._processed_list if isinstance(expr, ExpressionInfo)]
 
-    def resolve(self, *, symtab: SymbolTable) -> str:
+    def resolve(self, *, symtab: SymbolTable, path_format: Optional[object] = None) -> str:
         """
         Uses a given symbol table to resolve an interpolated string.
         Each interpolation expression in the original string is replaced
@@ -108,7 +108,9 @@ class FormatString(DynamicConstrainedStr):
 
             assert element.expression is not None
             try:
-                element.resolved_value = element.expression.evaluate(symtab=symtab)
+                element.resolved_value = element.expression.evaluate(
+                    symtab=symtab, path_format=path_format
+                )
             except ExpressionError as exc:
                 raise FormatStringError(
                     string=self.original_value,

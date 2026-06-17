@@ -4,15 +4,21 @@ from typing import Type, cast
 
 from .._errors import ExpressionError, TokenError
 from .._tokenstream import Token, TokenStream, TokenType
-from ._nodes import FullNameNode, Node
+from ._nodes import ExprNode, FullNameNode, Node
 from ._tokens import DotToken, NameToken
 from .._types import ModelParsingContextInterface
+from ._expr_support import EXPR_EXTENSION
 
 _tokens: dict[TokenType, Type[Token]] = {TokenType.NAME: NameToken, TokenType.DOT: DotToken}
 
 
 def parse_format_string_expr(expr: str, *, context: ModelParsingContextInterface) -> Node:
     """Generate an expression tree for the given string interpolation expression.
+
+    When the template declares the ``EXPR`` extension, parsing is delegated to
+    the Rust ``openjd-expr`` engine (via :class:`ExprNode`); otherwise the
+    legacy ``Name.Dot.Name`` parser is used. Templates that do not declare
+    ``EXPR`` are byte-for-byte unaffected.
 
     Args:
         expr (str): A string interpolation expression
@@ -24,6 +30,9 @@ def parse_format_string_expr(expr: str, *, context: ModelParsingContextInterface
     Returns:
         Node: Root of the expression tree.
     """
+    if EXPR_EXTENSION in context.extensions:
+        # Raises: model ExpressionError on parse failure.
+        return ExprNode(expr)
     return FormatStringExprParser_v2023_09().parse(expr)
 
 

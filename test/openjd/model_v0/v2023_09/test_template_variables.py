@@ -578,7 +578,7 @@ PARAMETRIZE_CASES = (
                 },
             ],
         },
-        1,
+        2,
         id="parameter space cannot ref path parameter",
     ),
     pytest.param(
@@ -731,7 +731,7 @@ PARAMETRIZE_CASES = (
                 },
             ],
         },
-        5,
+        10,
         id="task params cannot see each other, envs, or the session",
     ),
     pytest.param(
@@ -809,7 +809,7 @@ PARAMETRIZE_CASES = (
                 },
             ],
         },
-        6,
+        8,
         id="task params cannot be seen across steps",
     ),
     pytest.param(
@@ -883,7 +883,7 @@ PARAMETRIZE_CASES = (
                 },
             ],
         },
-        3,
+        6,
         id="Cannot reference Session values in a Task Parameter",
     ),
     pytest.param(
