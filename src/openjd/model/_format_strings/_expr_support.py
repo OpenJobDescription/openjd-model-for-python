@@ -174,3 +174,64 @@ def static_validate_symbol_free(expr: str) -> None:
 def map_eval_error(exc: BaseException) -> _ModelExpressionError:
     """Wrap a Rust evaluation error as the model's ``ExpressionError``."""
     return _ModelExpressionError(str(exc))
+
+
+def expr_type_for_openjd_type(openjd_type: str) -> Optional[str]:
+    """Map an OpenJD parameter type name (e.g. ``PATH``, ``LIST[INT]``) to the
+    EXPR engine's spec-form type string (``path``, ``list[int]``), or ``None``
+    if there is no confident mapping (so callers fall back to name-only
+    validation rather than risk a wrong type).
+    """
+    t = openjd_type.strip().upper()
+    scalar = _OPENJD_TYPE_TO_EXPR_TYPE.get(t)
+    if scalar is not None:
+        return scalar
+    if t.startswith("LIST[") and t.endswith("]"):
+        inner = expr_type_for_openjd_type(t[len("LIST[") : -1])
+        if inner is not None:
+            return f"list[{inner}]"
+    return None
+
+
+def longest_defined_prefix(name: str, defined: set) -> Optional[str]:
+    """Return the longest dotted prefix of ``name`` that is a defined symbol,
+    treating any remaining segments as method/property access. E.g. for
+    ``"Param.File.name"`` with ``Param.File`` defined, returns ``"Param.File"``.
+    """
+    segments = name.split(".")
+    for end in range(len(segments), 0, -1):
+        prefix = ".".join(segments[:end])
+        if prefix in defined:
+            return prefix
+    return None
+
+
+def validate_typed_expression(parsed: Any, *, typed_symbols: dict[str, str]) -> None:
+    """Statically validate a parsed expression against symbols of known EXPR
+    type (provided as ``{dotted_name: expr_type_string}``). Catches type
+    mismatches and invalid method/property access. Raises the model's
+    ``ExpressionError`` on failure.
+
+    Symbols are supplied as ``ExprValue.unresolved(<type>)`` placeholders so the
+    engine type-checks without concrete values.
+    """
+    values: dict[str, Any] = {}
+    for dotted, type_str in typed_symbols.items():
+        ev = ExprValue.unresolved(ExprType(type_str))
+        cursor = values
+        segs = dotted.split(".")
+        for seg in segs[:-1]:
+            cursor = cursor.setdefault(seg, {})
+        cursor[segs[-1]] = ev
+    try:
+        parsed.evaluate(
+            values=values,
+            profile=ExprProfile.current().with_host_context(HostContext.unresolved()),
+        )
+    except _RUST_EXPR_ERRORS as exc:
+        msg = str(exc)
+        # A valid expression that merely depends on a runtime value surfaces as
+        # an "unresolved" extraction error — that is success, not a failure.
+        if "unresolved" in msg and "Cannot extract value" in msg:
+            return
+        raise _ModelExpressionError(msg)

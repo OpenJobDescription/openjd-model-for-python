@@ -16,7 +16,9 @@ class Node(ABC):
     """
 
     @abstractmethod
-    def validate_symbol_refs(self, *, symbols: set[str]) -> None:  # pragma: no cover
+    def validate_symbol_refs(
+        self, *, symbols: set[str], symbol_types: Any = None
+    ) -> None:  # pragma: no cover
         """Verifies that the expression rooted at this node is valid
         given the definitions of symbols in a symbol table.
 
@@ -74,7 +76,7 @@ class FullNameNode(Node):
 
     name: str
 
-    def validate_symbol_refs(self, *, symbols: set[str]) -> None:
+    def validate_symbol_refs(self, *, symbols: set[str], symbol_types: Any = None) -> None:
         if self.name not in symbols:
             msg = f"Variable {self.name} does not exist at this location."
             distance, closest_matches = closest(symbols, self.name)
@@ -120,11 +122,45 @@ class ExprNode(Node):
         if not self._parsed.accessed_symbols:
             static_validate_symbol_free(expr)
 
-    def validate_symbol_refs(self, *, symbols: set[str]) -> None:
+    @property
+    def called_functions(self) -> set:
+        """Names of functions invoked by this expression."""
+        return set(self._parsed.called_functions)
+
+    def validate_symbol_refs(self, *, symbols: set[str], symbol_types: Any = None) -> None:
+        accessed = set(self._parsed.accessed_symbols)
+
+        # Typed validation: if every accessed symbol resolves to a defined
+        # symbol prefix whose EXPR type is known (e.g. job parameters), validate
+        # the whole expression against those types. This catches type mismatches
+        # and resolves method/property access (e.g. Param.File.name on a PATH).
+        # Only attempted when ALL accessed prefixes are typed-known, so an
+        # unknown-typed symbol (e.g. a `let` name) safely falls back to the
+        # name-only check below rather than risking a wrong-type rejection.
+        if symbol_types and accessed:
+            from ._expr_support import (
+                longest_defined_prefix,
+                validate_typed_expression,
+            )
+
+            prefix_types: dict = {}
+            fully_typed = True
+            for name in accessed:
+                prefix = longest_defined_prefix(name, symbols)
+                if prefix is None or prefix not in symbol_types:
+                    fully_typed = False
+                    break
+                prefix_types[prefix] = symbol_types[prefix]
+            if fully_typed:
+                # Raises model ExpressionError on a type/method error.
+                validate_typed_expression(self._parsed, typed_symbols=prefix_types)
+                self._check_comprehension_shadowing(symbols)
+                return
+
         # accessed_symbols are the free variable references in full dotted
         # spelling (e.g. "Param.X"); local let-bound names are excluded by the
         # engine. Compare against the set of symbols visible at this location.
-        missing = set(self._parsed.accessed_symbols) - symbols
+        missing = accessed - symbols
         if missing:
             from ._edit_distance import closest
 
@@ -137,6 +173,18 @@ class ExprNode(Node):
                 elif len(closest_matches) > 1:
                     msg += f" Did you mean one of: {', '.join(sorted(closest_matches))}"
             raise ValueError(msg)
+        self._check_comprehension_shadowing(symbols)
+
+    def _check_comprehension_shadowing(self, symbols: set) -> None:
+        # Comprehension/local-binding variables may not shadow a variable that
+        # is in scope (RFC 0007 §3.6). `local_bindings` are the names bound by
+        # comprehensions/let-expressions inside this expression.
+        shadowed = set(self._parsed.local_bindings) & symbols
+        if shadowed:
+            raise ValueError(
+                f"Variable {sorted(shadowed)[0]!r} bound by a comprehension shadows "
+                "a variable that already exists at this location."
+            )
 
     def evaluate(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
         from ._expr_support import (

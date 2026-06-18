@@ -607,6 +607,59 @@ class ScriptInterpreter(str, Enum):
     NODE = "node"
 
 
+LET_MAX_BINDINGS = 50
+_LET_NAME_RE = re.compile(r"^[a-z_][A-Za-z0-9_]*$")
+
+
+def parse_let_bindings(value: Any) -> list[tuple[str, str]]:
+    """Parse a ``let`` field value (list of ``"name = expression"`` strings)
+    into ``(name, expression)`` pairs. Raises ValueError on malformed input.
+    """
+    if not isinstance(value, list):
+        raise ValueError("'let' must be a list of 'name = expression' bindings.")
+    result: list[tuple[str, str]] = []
+    for binding in value:
+        if not isinstance(binding, str):
+            raise ValueError("Each 'let' binding must be a 'name = expression' string.")
+        name, sep, expr = binding.partition("=")
+        if not sep:
+            raise ValueError(
+                f"A 'let' binding must be of the form 'name = expression': {binding!r}"
+            )
+        name = name.strip()
+        expr = expr.strip()
+        if not _LET_NAME_RE.match(name):
+            raise ValueError(f"A 'let' binding name must be a valid identifier: {name!r}")
+        if not expr:
+            raise ValueError(f"A 'let' binding must define an expression: {binding!r}")
+        result.append((name, expr))
+    return result
+
+
+def validate_let_field(value: Any, info: ValidationInfo, *, simple_action: bool = False) -> Any:
+    """Validate a ``let`` field: EXPR (and FEATURE_BUNDLE_1 for SimpleAction)
+    gating, non-empty, at most ``LET_MAX_BINDINGS``, each binding parses, and
+    unique names. Symbol-reference and shadow rules are validated separately by
+    the variable-reference prevalidator.
+    """
+    if value is None:
+        return value
+    context = cast(Optional[ModelParsingContext], info.context)
+    if context and "EXPR" not in context.extensions:
+        raise ValueError("The 'let' field requires the EXPR extension.")
+    if simple_action and context and "FEATURE_BUNDLE_1" not in context.extensions:
+        raise ValueError("A SimpleAction 'let' requires the FEATURE_BUNDLE_1 extension.")
+    if isinstance(value, list) and len(value) == 0:
+        raise ValueError("'let' must define at least one binding.")
+    if isinstance(value, list) and len(value) > LET_MAX_BINDINGS:
+        raise ValueError(f"'let' must define at most {LET_MAX_BINDINGS} bindings.")
+    bindings = parse_let_bindings(value)
+    names = [name for name, _ in bindings]
+    if len(names) != len(set(names)):
+        raise ValueError("'let' binding names must be unique.")
+    return value
+
+
 class SimpleAction(OpenJDModel_v2023_09):
     """Syntax sugar for a script action with a specific interpreter.
 
@@ -626,6 +679,28 @@ class SimpleAction(OpenJDModel_v2023_09):
     cancelation: Optional[
         Union[CancelationMethodNotifyThenTerminate, CancelationMethodTerminate]
     ] = Field(None, discriminator="mode")
+    let: Optional[list[str]] = None
+
+    # SimpleAction is syntax sugar that resolves to a StepScript (TASK scope),
+    # so it sees the same session-scope variables, and its `let` names (in
+    # __self__) are visible to its script and args.
+    _template_variable_scope = ResolutionScope.TASK
+    _template_variable_definitions = DefinesTemplateVariables(
+        inject={
+            f"|{ValueReferenceConstants.WORKING_DIRECTORY.value}",
+            f"|{ValueReferenceConstants.HAS_PATH_MAPPING_RULES.value}",
+            f"|{ValueReferenceConstants.PATH_MAPPING_RULES_FILE.value}",
+        },
+    )
+    _template_variable_sources = {
+        "script": {"__self__"},
+        "args": {"__self__"},
+    }
+
+    @field_validator("let")
+    @classmethod
+    def _validate_let(cls, v: Any, info: ValidationInfo) -> Any:
+        return validate_let_field(v, info, simple_action=True)
 
     @field_validator("timeout", mode="before")
     @classmethod
@@ -656,6 +731,7 @@ class StepScript(OpenJDModel_v2023_09):
 
     actions: StepActions
     embeddedFiles: Optional[EmbeddedFiles] = None  # noqa: N815
+    let: Optional[list[str]] = None
 
     _template_variable_scope = ResolutionScope.TASK
     _template_variable_definitions = DefinesTemplateVariables(
@@ -670,6 +746,11 @@ class StepScript(OpenJDModel_v2023_09):
         "actions": {"embeddedFiles", "__self__"},
         "embeddedFiles": {"embeddedFiles", "__self__"},
     }
+
+    @field_validator("let")
+    @classmethod
+    def _validate_let(cls, v: Any, info: ValidationInfo) -> Any:
+        return validate_let_field(v, info)
 
     @field_validator("embeddedFiles")
     @classmethod
@@ -693,6 +774,7 @@ class EnvironmentScript(OpenJDModel_v2023_09):
 
     actions: EnvironmentActions
     embeddedFiles: Optional[EmbeddedFiles] = None  # noqa: N815
+    let: Optional[list[str]] = None
 
     _template_variable_definitions = DefinesTemplateVariables(
         symbol_prefix="|Env.",
@@ -719,6 +801,11 @@ class EnvironmentScript(OpenJDModel_v2023_09):
         "actions": {"embeddedFiles", "__self__"},
         "embeddedFiles": {"embeddedFiles", "__self__"},
     }
+
+    @field_validator("let")
+    @classmethod
+    def _validate_let(cls, v: Any, info: ValidationInfo) -> Any:
+        return validate_let_field(v, info)
 
     @field_validator("embeddedFiles")
     @classmethod
@@ -2794,6 +2881,16 @@ class StepTemplate(OpenJDModel_v2023_09):
     cmd: Optional[SimpleAction] = None
     powershell: Optional[SimpleAction] = None
     node: Optional[SimpleAction] = None
+    let: Optional[list[str]] = None
+
+    # Step.Name is available to the step's script and step environments, but
+    # only when the EXPR extension is enabled (RFC 0007).
+    _template_variable_definitions = DefinesTemplateVariables(expr_inject={"|Step.Name"})
+
+    @field_validator("let")
+    @classmethod
+    def _validate_let(cls, v: Any, info: ValidationInfo) -> Any:
+        return validate_let_field(v, info)
 
     _template_variable_sources = {
         "script": {"__self__", "parameterSpace"},
@@ -2806,7 +2903,7 @@ class StepTemplate(OpenJDModel_v2023_09):
     }
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=Step),
-        exclude_fields={"python", "bash", "cmd", "powershell", "node"},
+        exclude_fields={"python", "bash", "cmd", "powershell", "node", "let"},
         transform=lambda t: cast("StepTemplate", t).resolve_syntax_sugar(),
     )
 

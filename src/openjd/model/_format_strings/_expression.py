@@ -29,16 +29,24 @@ class InterpolationExpression:
         # Raises: ExpressionError, TokenError
         self._expresion_tree = parse_format_string_expr(expr, context=context)
 
-    def validate_symbol_refs(self, *, symbols: set[str]) -> None:
+    def validate_symbol_refs(self, *, symbols: set[str], symbol_types: Any = None) -> None:
         """Check whether this expression can be evaluated correctly given a set of symbol names.
 
         Args:
             symbols (set[str]): The names of symbols visible to this expression.
+            symbol_types: Optional mapping of symbol name -> EXPR type string,
+                enabling type-aware validation when available.
 
         Raises:
             ValueError: If the expression cannot be evaluated with the given symbol names
         """
-        self._expresion_tree.validate_symbol_refs(symbols=symbols)
+        self._expresion_tree.validate_symbol_refs(symbols=symbols, symbol_types=symbol_types)
+
+    @property
+    def called_functions(self) -> set:
+        """Names of functions invoked by this expression (empty for the legacy
+        name-only parser)."""
+        return getattr(self._expresion_tree, "called_functions", set())
 
     def evaluate(
         self, *, symtab: SymbolTable, path_format: Optional[Any] = None

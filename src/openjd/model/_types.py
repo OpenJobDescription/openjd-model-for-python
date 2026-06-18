@@ -194,14 +194,19 @@ class DefinesTemplateVariables:
         defines: set[TemplateVariableDef] = set(),
         field: str = "",
         inject: set[str] = set(),
+        expr_inject: set[str] = set(),
     ):
         self.symbol_prefix = symbol_prefix
         self.defines = defines
         self.field = field
         self.inject = inject
+        # Symbols injected only when the EXPR extension is enabled. Applied by
+        # the variable-reference prevalidator (which has the parsing context);
+        # the static `inject` set above cannot be made conditional.
+        self.expr_inject = expr_inject
 
     def __repr__(self) -> str:
-        return f"DefinesTemplateVariables(symbol_prefix={self.symbol_prefix!r}, defines={self.defines!r}, field={self.field!r}, inject={self.inject!r})"
+        return f"DefinesTemplateVariables(symbol_prefix={self.symbol_prefix!r}, defines={self.defines!r}, field={self.field!r}, inject={self.inject!r}, expr_inject={self.expr_inject!r})"
 
 
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)
