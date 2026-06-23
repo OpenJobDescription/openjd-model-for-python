@@ -32,9 +32,16 @@ direct commands. Either path produces wheels with the VCS version.
 from __future__ import annotations
 
 import contextlib
+import os
 import shutil
 import sys
 from pathlib import Path
+
+# Windows MSVC linker fails with LNK1104 when paths exceed MAX_PATH (260 chars).
+# Building from an extracted sdist produces deeply nested target directories.
+# Redirect Cargo's output to a short path to avoid this.
+if sys.platform == "win32" and "CARGO_TARGET_DIR" not in os.environ:
+    os.environ["CARGO_TARGET_DIR"] = "C:\\cargo-target"
 
 import maturin
 

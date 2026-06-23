@@ -67,6 +67,17 @@ def main(argv: list[str]) -> int:
         )
         shutil.move(str(PYPROJECT_BAK), str(PYPROJECT))
 
+    # --version-only: inject the VCS version into pyproject.toml and
+    # _version.py without running maturin. Used in CI when maturin-action
+    # handles the actual build but needs the version patched beforehand.
+    if "--version-only" in argv:
+        version = compute_version()
+        write_version_file(version)
+        print(f"Wrote src/openjd/model/_version.py (version {version})")
+        _patch_pyproject(version)
+        print(f"Patched pyproject.toml: project.version = {version!r}")
+        return 0
+
     maturin_args = argv or ["develop"]
 
     version = compute_version()
