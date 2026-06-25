@@ -1,3 +1,8 @@
+## 0.10.1 (2026-06-25)
+
+_There are no new changes introduced in this release, it is identical to 0.10.0. This release was made to publish all release artifacts on PyPI and the GitHub releases page that were missed in the 0.10.0 release due to a new build and release process._
+
+
 ## 0.10.0 (2026-06-23)
 
 
