@@ -34,19 +34,16 @@ from openjd.expr import (  # type: ignore[import-not-found]
     ExprProfile,
     ExprType,
     ExprValue,
-    FormatString as _RustFormatString,
-    HostContext,
-    parse_expression,
-)
-from openjd.expr import (  # noqa: F401  re-exported for callers/tests
     ExpressionError as RustExpressionError,
     ExpressionTypeError as RustExpressionTypeError,
+    FormatString as _RustFormatString,
     FormatStringValidationError as RustFormatStringValidationError,
+    HostContext,
     RangeExprError as RustRangeExprError,
+    parse_expression,
 )
 
 EXPR_EXTENSION = "EXPR"
-WRAP_ACTIONS_EXTENSION = "WRAP_ACTIONS"
 
 # Errors raised by the Rust expr engine. All subclass ValueError but are
 # distinct classes from the model's own ExpressionError, so they must be
@@ -57,21 +54,6 @@ _RUST_EXPR_ERRORS = (
     RustFormatStringValidationError,
     RustRangeExprError,
 )
-
-
-def expr_profile_from_context(context: Any) -> ExprProfile:
-    """Build the EXPR profile used to parse/evaluate expressions for a template.
-
-    First cut: the current revision with the standard function library (which
-    includes ``repr_sh``/``len``/arithmetic). Host-context-gated functions such
-    as ``apply_path_mapping`` require path-mapping rules supplied at run time by
-    the session runtime, and are intentionally not available on the model
-    create-job path.
-    """
-    # context is a ModelParsingContextInterface; reserved for future use
-    # (selecting revision / extensions). current() is sufficient for the
-    # first cut because ExprExtension is empty upstream.
-    return ExprProfile.current()
 
 
 def symtab_to_expr_values(
@@ -93,11 +75,6 @@ def symtab_to_expr_values(
     expects (``"int"``, ``"list[int]"``) via :func:`expr_type_for_openjd_type`.
     Names whose type has no confident EXPR mapping (e.g. ``RANGE_EXPR``) are
     omitted so the engine infers them from the value.
-
-    Note: end-to-end evaluation of LIST[*]/RANGE_EXPR job parameters on the v0
-    ``create_job`` path additionally requires those values to reach the symbol
-    table as native Python values rather than stringified (``ParameterValueType``
-    has no LIST/RANGE/BOOL members today), which is tracked separately.
     """
     flat = {name: symtab[name] for name in symtab.symbols}
     expr_types: dict[str, str] = {}

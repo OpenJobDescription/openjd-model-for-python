@@ -397,13 +397,21 @@ _WRAP_HOOK_ALLOWED_NAMESPACES = {
 
 def _action_referenced_namespaces(action: Any) -> set[str]:
     """Collect the set of wrapped-context namespaces (``WrappedAction`` /
-    ``WrappedEnv`` / ``WrappedStep``) referenced by an Action's command and
-    args format strings.
+    ``WrappedEnv`` / ``WrappedStep``) referenced by an Action's format strings.
+
+    Inspects every FormatString-bearing field of the Action: ``command``, each
+    of ``args``, and ``timeout`` (which is a FormatString under the
+    FEATURE_BUNDLE_1 extension, and a plain int otherwise — non-FormatString
+    values are skipped).
     """
     referenced: set[str] = set()
     if action is None:
         return referenced
-    format_strings = [getattr(action, "command", None), *(getattr(action, "args", None) or [])]
+    format_strings = [
+        getattr(action, "command", None),
+        *(getattr(action, "args", None) or []),
+        getattr(action, "timeout", None),
+    ]
     for fs in format_strings:
         if not isinstance(fs, FormatString):
             continue

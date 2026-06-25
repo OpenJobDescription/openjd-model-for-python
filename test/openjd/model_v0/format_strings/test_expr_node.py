@@ -112,6 +112,41 @@ class TestExprSymbolRefValidation:
         node.validate_symbol_refs(symbols={"Param.Items"})
 
 
+class TestExprRangeExprTypedValidation:
+    """RANGE_EXPR job-parameter symbols now type-check (the OpenJD-type → EXPR
+    mapping resolves RANGE_EXPR to the engine's ``range_expr`` type instead of
+    the former ``None`` that fell back to name-only validation). Mirrors the
+    openjd-rs range_expr behaviour.
+    """
+
+    def _validate(self, expr):
+        node = parse_format_string_expr(expr, context=_ctx(["EXPR"]))
+        node.validate_symbol_refs(
+            symbols={"Param.Frames"}, symbol_types={"Param.Frames": "range_expr"}
+        )
+
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            "Param.Frames[0]",  # subscript -> int
+            "len(Param.Frames)",  # length of the range
+            "list(Param.Frames)",  # convert to list[int]
+        ],
+    )
+    def test_valid_range_expr_ops_typecheck(self, expr):
+        self._validate(expr)  # does not raise
+
+    def test_type_mismatch_rejected(self):
+        # Arithmetic with a range_expr is a genuine type error, now caught at
+        # validation time rather than slipping through name-only validation.
+        with pytest.raises(ExpressionError, match=r"range_expr"):
+            self._validate("Param.Frames + 1")
+
+    def test_invalid_method_rejected(self):
+        with pytest.raises(ExpressionError, match=r"not available for range_expr"):
+            self._validate("Param.Frames.upper()")
+
+
 class TestExprErrors:
     def test_parse_error_is_model_expression_error(self):
         with pytest.raises(ExpressionError):

@@ -236,3 +236,29 @@ class TestWrappedVariableScopeInvalid:
         actions["onWrapTaskRun"] = _cmd("{{WrappedEnv.Name}}")
         with pytest.raises(DecodeValidationError, match=r"WrappedEnv\.\* variables may not"):
             _decode(_env_template(actions, extensions=["WRAP_ACTIONS", "EXPR"]))
+
+    def test_wrapped_var_in_timeout_format_string_rejected(self):
+        # The scope check must inspect the timeout FormatString too (not only
+        # command/args). timeout is a FormatString under FEATURE_BUNDLE_1.
+        actions = dict(_ALL_THREE)
+        actions["onEnter"] = {
+            "command": "echo",
+            "args": ["hi"],
+            "timeout": "{{ WrappedAction.Timeout }}",
+        }
+        with pytest.raises(DecodeValidationError, match=r"WrappedAction\.\* variables may not"):
+            _decode(
+                _env_template(actions, extensions=["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]),
+                extensions=_ALL_EXTS,
+            )
+
+    def test_wrapped_action_timeout_in_wrap_hook_ok(self):
+        # WrappedAction.Timeout is in scope inside the wrap hooks, including
+        # when referenced from the timeout FormatString field.
+        actions = dict(_ALL_THREE)
+        actions["onWrapTaskRun"] = {
+            "command": "echo",
+            "args": ["{{ WrappedAction.Command }}"],
+            "timeout": "{{ WrappedAction.Timeout }}",
+        }
+        _decode(_env_template(actions, extensions=["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]))

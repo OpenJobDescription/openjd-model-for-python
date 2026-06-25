@@ -11,17 +11,25 @@ symbol table can coerce them.
 
 import pytest
 
-from openjd.model import create_job, decode_job_template, model_to_object
+from openjd.model import (
+    DecodeValidationError,
+    create_job,
+    decode_job_template,
+    model_to_object,
+)
 
 
-def _template(param_def):
+def _template(param_def, *, on_run_args=("hi",)):
     return {
         "specificationVersion": "jobtemplate-2023-09",
         "name": "T",
         "extensions": ["EXPR"],
         "parameterDefinitions": [param_def],
         "steps": [
-            {"name": "S", "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}}}
+            {
+                "name": "S",
+                "script": {"actions": {"onRun": {"command": "echo", "args": list(on_run_args)}}},
+            }
         ],
     }
 
@@ -63,3 +71,27 @@ class TestCreateJobExprParams:
         # The original scalar types still round-trip as strings.
         job = _create({"name": "N", "type": "INT", "default": 7})
         assert _stored_value(job, "N") == "7"
+
+
+class TestRangeExprTypedValidation:
+    """A RANGE_EXPR parameter now carries a typed (``range_expr``) EXPR symbol,
+    so expressions referencing it are type-validated at decode time rather than
+    only name-checked. Mirrors openjd-rs.
+    """
+
+    def _decode_with_expr(self, expr):
+        tmpl = _template(
+            {"name": "Frames", "type": "RANGE_EXPR", "default": "1-10"},
+            on_run_args=["{{ " + expr + " }}"],
+        )
+        return decode_job_template(template=tmpl, supported_extensions=["EXPR"])
+
+    def test_valid_range_expr_use_accepted(self):
+        # Subscripting a RANGE_EXPR parameter is well-typed and must decode.
+        self._decode_with_expr("Param.Frames[0]")
+
+    def test_type_mismatch_rejected_at_decode(self):
+        # Arithmetic on a RANGE_EXPR is a type error; type-aware validation now
+        # catches it (it previously slipped through name-only validation).
+        with pytest.raises(DecodeValidationError, match=r"range_expr"):
+            self._decode_with_expr("Param.Frames + 1")
