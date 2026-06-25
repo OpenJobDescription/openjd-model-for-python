@@ -362,6 +362,61 @@ ArgListType = Annotated[list[ArgString], Field(min_length=1)]
 # WRAP_ACTIONS (RFC 0008) wrap-hook field names on EnvironmentActions.
 _WRAP_ACTION_FIELDS = ("onWrapEnvEnter", "onWrapTaskRun", "onWrapEnvExit")
 
+# RFC 0008 single-wrap-layer rule. Mirrors the message emitted by openjd-rs
+# (validate_v2023_09/wrap_actions.rs::SINGLE_WRAP_LAYER_MSG).
+_SINGLE_WRAP_LAYER_MSG = (
+    "only one environment in the session stack may define any of onWrapEnvEnter, "
+    "onWrapTaskRun, onWrapEnvExit (RFC 0008)."
+)
+
+
+def _env_defines_wrap_hook(env: Any) -> bool:
+    """True if the given Environment's script defines any WRAP_ACTIONS hook.
+
+    Used by the single-wrap-layer validation to count the wrap-defining
+    environments reachable in a session stack.
+    """
+    script = getattr(env, "script", None)
+    actions = getattr(script, "actions", None) if script is not None else None
+    if actions is None:
+        return False
+    return any(getattr(actions, name, None) is not None for name in _WRAP_ACTION_FIELDS)
+
+
+# RFC 0008 wrapped-context variable namespaces and where each may be
+# referenced. `WrappedAction.*` is available in all three wrap hooks;
+# `WrappedEnv.*` only in the env-enter/exit hooks; `WrappedStep.*` only in the
+# task-run hook. None of them may be referenced outside the wrap hooks.
+_WRAPPED_NAMESPACES = ("WrappedAction", "WrappedEnv", "WrappedStep")
+_WRAP_HOOK_ALLOWED_NAMESPACES = {
+    "onWrapEnvEnter": {"WrappedAction", "WrappedEnv"},
+    "onWrapEnvExit": {"WrappedAction", "WrappedEnv"},
+    "onWrapTaskRun": {"WrappedAction", "WrappedStep"},
+}
+
+
+def _action_referenced_namespaces(action: Any) -> set[str]:
+    """Collect the set of wrapped-context namespaces (``WrappedAction`` /
+    ``WrappedEnv`` / ``WrappedStep``) referenced by an Action's command and
+    args format strings.
+    """
+    referenced: set[str] = set()
+    if action is None:
+        return referenced
+    format_strings = [getattr(action, "command", None), *(getattr(action, "args", None) or [])]
+    for fs in format_strings:
+        if not isinstance(fs, FormatString):
+            continue
+        for expr_info in fs.expressions:
+            expr = expr_info.expression
+            if expr is None:
+                continue
+            for symbol in expr.accessed_symbols:
+                namespace = symbol.split(".", 1)[0]
+                if namespace in _WRAPPED_NAMESPACES:
+                    referenced.add(namespace)
+    return referenced
+
 
 class Action(OpenJDModel_v2023_09):
     """An Action to run.
@@ -490,6 +545,46 @@ class EnvironmentActions(OpenJDModel_v2023_09):
         if on_enter is None and on_exit is None:
             raise ValueError("Must define one of: onEnter or onExit")
         return values
+
+    @model_validator(mode="after")
+    def _validate_wrapped_variable_scope(self, info: ValidationInfo) -> Self:
+        # RFC 0008 scope rule: WrappedAction.* may be referenced only in the
+        # three wrap hooks; WrappedEnv.* only in onWrapEnvEnter/onWrapEnvExit;
+        # WrappedStep.* only in onWrapTaskRun. None of them may appear in the
+        # ordinary onEnter/onExit actions. Schedulers must reject templates
+        # that violate this; mirrors openjd-rs (which enforces it via its
+        # per-scope function/symbol library split).
+        context = cast(Optional[ModelParsingContext], info.context) if info else None
+        extensions = context.extensions if context else set()
+        if "EXPR" not in extensions:
+            # Without EXPR the wrapped variables are never resolvable symbols,
+            # and the format strings carry no accessed-symbol set to inspect.
+            return self
+
+        errors = list[InitErrorDetails]()
+        for field_name in ("onEnter", "onExit", *_WRAP_ACTION_FIELDS):
+            action = getattr(self, field_name, None)
+            if action is None:
+                continue
+            allowed = _WRAP_HOOK_ALLOWED_NAMESPACES.get(field_name, set())
+            referenced = _action_referenced_namespaces(action)
+            for namespace in sorted(referenced - allowed):
+                errors.append(
+                    InitErrorDetails(
+                        type="value_error",
+                        loc=(field_name,),
+                        ctx={
+                            "error": ValueError(
+                                f"The {namespace}.* variables may not be referenced in "
+                                f"{field_name} (RFC 0008)."
+                            )
+                        },
+                        input=action,
+                    )
+                )
+        if errors:
+            raise ValidationError.from_exception_data(self.__class__.__name__, errors)
+        return self
 
 
 # --------------------- Embedded Files type -------------------------
@@ -1474,7 +1569,10 @@ FileDialogFilterPatternStringValueList = Annotated[
 # Target model for a job parameter when instantiating a job.
 class JobParameter(OpenJDModel_v2023_09):
     type: JobParameterType
-    value: str
+    # For the original scalar types the value is a string. For the EXPR
+    # extension types (RFC 0007: BOOL and the LIST[*] variants) the value is the
+    # native Python value (bool / list) produced by create_job.
+    value: Any
     description: Optional[Description] = None
 
 
@@ -3314,12 +3412,35 @@ _LIST_PARAM_VARS = DefinesTemplateVariables(
     field="name",
 )
 
+# Shared create-job metadata for the EXPR LIST[*]/RANGE_EXPR job-parameter
+# definitions (RFC 0007). Like the scalar definitions, instantiation produces a
+# JobParameter carrying the resolved value taken from the symbol table. The
+# native value is supplied by create_job (RawParam.<name>); the type-specific
+# definition fields (constraints, userInterface) are dropped. The exclude set
+# is a superset covering every constraint field used across the list/range
+# definitions, so the same metadata applies to all of them.
+_LIST_RANGE_JOB_CREATION_METADATA = JobCreationMetadata(
+    create_as=JobCreateAsMetadata(model=JobParameter),
+    exclude_fields={
+        "name",
+        "userInterface",
+        "default",
+        "minLength",
+        "maxLength",
+        "item",
+        "objectType",
+        "dataFlow",
+    },
+    adds_fields=lambda this, symtab: {"value": symtab[f"RawParam.{getattr(this, 'name')}"]},
+)
+
 
 class JobListStringParameterDefinition(OpenJDModel_v2023_09):
     """LIST[STRING] job parameter (EXPR extension, RFC 0007)."""
 
     name: Identifier
     type: Literal[JobParameterType.LIST_STRING]
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
     userInterface: Optional[_ListParameterUserInterface] = None
     description: Optional[Description] = None
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -3348,6 +3469,7 @@ class JobListPathParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.LIST_PATH]
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
     userInterface: Optional[_ListParameterUserInterface] = None
     description: Optional[Description] = None
     objectType: Optional[JobPathParameterDefinitionObjectType] = None  # noqa: N815
@@ -3378,6 +3500,7 @@ class JobListIntParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.LIST_INT]
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
     userInterface: Optional[_ListParameterUserInterface] = None
     description: Optional[Description] = None
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -3406,6 +3529,7 @@ class JobListFloatParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.LIST_FLOAT]
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
     userInterface: Optional[_ListParameterUserInterface] = None
     description: Optional[Description] = None
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -3434,6 +3558,7 @@ class JobListBoolParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.LIST_BOOL]
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
     userInterface: Optional[_ListParameterUserInterface] = None
     description: Optional[Description] = None
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -3465,6 +3590,7 @@ class JobListListIntParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.LIST_LIST_INT]
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
     userInterface: Optional[_ListParameterUserInterface] = None
     description: Optional[Description] = None
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -3507,6 +3633,7 @@ class JobRangeExprParameterDefinition(OpenJDModel_v2023_09):
 
     name: Identifier
     type: Literal[JobParameterType.RANGE_EXPR]
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
     userInterface: Optional[_ListParameterUserInterface] = None
     description: Optional[Description] = None
     minLength: Optional[StrictInt] = None  # noqa: N815
@@ -3805,6 +3932,61 @@ class JobTemplate(OpenJDModel_v2023_09):
                                 input=env.name,
                             )
                         )
+
+        if errors:
+            raise ValidationError.from_exception_data(self.__class__.__name__, errors)
+
+        return self
+
+    @model_validator(mode="after")
+    def _validate_single_wrap_layer(self, info: ValidationInfo) -> Self:
+        # RFC 0008 single-wrap-layer rule: at most one environment in any
+        # session's stack may define wrap hooks. A session's stack is the
+        # job's jobEnvironments plus exactly one step's stepEnvironments, so
+        # "one wrap layer per session" reduces to: for every step,
+        # (wrap envs in jobEnvironments) + (wrap envs in that step's
+        # stepEnvironments) must be <= 1. Mirrors openjd-rs
+        # validate_v2023_09/wrap_actions.rs.
+        context = cast(Optional[ModelParsingContext], info.context) if info else None
+        extensions = context.extensions if context else set()
+        if "WRAP_ACTIONS" not in extensions:
+            return self
+
+        job_envs = self.jobEnvironments or []
+        job_env_wrap_count = sum(1 for env in job_envs if _env_defines_wrap_hook(env))
+
+        errors = list[InitErrorDetails]()
+
+        # Multiple wrap layers in jobEnvironments are reachable from every
+        # session, independent of any step's stepEnvironments.
+        if job_env_wrap_count > 1:
+            errors.append(
+                InitErrorDetails(
+                    type="value_error",
+                    loc=("jobEnvironments",),
+                    ctx={"error": ValueError(_SINGLE_WRAP_LAYER_MSG)},
+                    input=self.jobEnvironments,
+                )
+            )
+
+        # Each step's session is jobEnvironments + that step's
+        # stepEnvironments. Only steps that declare stepEnvironments are
+        # checked (a step with none adds no wrap layer of its own).
+        for i, step in enumerate(self.steps or []):
+            if step.stepEnvironments is None:
+                continue
+            step_env_wrap_count = sum(
+                1 for env in step.stepEnvironments if _env_defines_wrap_hook(env)
+            )
+            if job_env_wrap_count + step_env_wrap_count > 1:
+                errors.append(
+                    InitErrorDetails(
+                        type="value_error",
+                        loc=("steps", i, "stepEnvironments"),
+                        ctx={"error": ValueError(_SINGLE_WRAP_LAYER_MSG)},
+                        input=step.stepEnvironments,
+                    )
+                )
 
         if errors:
             raise ValidationError.from_exception_data(self.__class__.__name__, errors)

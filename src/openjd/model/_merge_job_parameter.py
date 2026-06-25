@@ -20,6 +20,20 @@ from .v2023_09 import (
     JobIntParameterDefinition,
 )
 
+# The four original scalar parameter types whose allowedValues / length /
+# value-range constraints are cross-merged by
+# merge_job_parameter_definitions_for_one. The EXPR-extension types (BOOL,
+# RANGE_EXPR, LIST[*]) carry different constraint shapes that are validated
+# per-definition at decode time and are not merged here.
+_LEGACY_CONSTRAINT_TYPES = frozenset(
+    {
+        JobParameterType.STRING,
+        JobParameterType.INT,
+        JobParameterType.FLOAT,
+        JobParameterType.PATH,
+    }
+)
+
 
 class SourcedParamDefinition(NamedTuple):
     source: str
@@ -167,37 +181,55 @@ def merge_job_parameter_definitions_for_one(
 
     errors = list[str]()
 
-    # The set of allowedValues for a parameter definition must be a subset as we proceed down the list.
-    av_ret, err = _merge_allowed_values(params)
-    if av_ret is not None:
-        merged_properties["allowedValues"] = av_ret
-    if err:
-        errors.extend(err)
-
-    if param_type == JobParameterType.PATH:
-        ret, err = _merge_path_param_types(params)
-        if ret:
-            merged_properties.update(**ret)
+    # The allowedValues / path / string / number constraint shapes below
+    # belong only to the four original scalar parameter types. The EXPR
+    # extension (RFC 0007) types (BOOL, RANGE_EXPR, and the LIST[*] variants)
+    # carry their own constraint shapes (item:, minLength on lists, etc.) that
+    # are validated per-definition at decode time and are not cross-merged
+    # here, so skip the legacy constraint merge for them and just carry
+    # name/type/default forward.
+    if param_type in _LEGACY_CONSTRAINT_TYPES:
+        # The set of allowedValues for a parameter definition must be a subset as we proceed down the list.
+        av_ret, err = _merge_allowed_values(params)
+        if av_ret is not None:
+            merged_properties["allowedValues"] = av_ret
         if err:
             errors.extend(err)
 
-    if param_type in (JobParameterType.STRING, JobParameterType.PATH):
-        ret, err = _merge_string_kind_param_constraints(params)
-        if ret:
-            merged_properties.update(**ret)
-        if err:
-            errors.extend(err)
-    else:
-        ret, err = _merge_number_kind_param_constraints(params)
-        if ret:
-            merged_properties.update(**ret)
-        if err:
-            errors.extend(err)
+        if param_type == JobParameterType.PATH:
+            ret, err = _merge_path_param_types(params)
+            if ret:
+                merged_properties.update(**ret)
+            if err:
+                errors.extend(err)
 
-    if errors:
-        raise CompatibilityError("\n".join(errors))
+        if param_type in (JobParameterType.STRING, JobParameterType.PATH):
+            ret, err = _merge_string_kind_param_constraints(params)
+            if ret:
+                merged_properties.update(**ret)
+            if err:
+                errors.extend(err)
+        else:
+            ret, err = _merge_number_kind_param_constraints(params)
+            if ret:
+                merged_properties.update(**ret)
+            if err:
+                errors.extend(err)
 
-    return parse_model(model=params[0].definition.__class__, obj=merged_properties)
+        if errors:
+            raise CompatibilityError("\n".join(errors))
+
+        return parse_model(model=params[0].definition.__class__, obj=merged_properties)
+
+    # EXPR-extension types (BOOL, RANGE_EXPR, LIST[*]): not cross-merged. Return
+    # the last-defined definition with the last-defined default applied.
+    # ``model_copy`` avoids re-validation, which would otherwise re-trigger the
+    # EXPR extension gate (the merge has no parsing context to satisfy it).
+    base = params[-1].definition
+    merged_default = merged_properties.get("default")
+    if merged_default is not None and merged_default is not base.default:
+        return base.model_copy(update={"default": merged_default})
+    return base
 
 
 def _merge_allowed_values(
@@ -208,18 +240,19 @@ def _merge_allowed_values(
 
     for param in params:
         definition = param.definition
-        if not definition.allowedValues:
+        # Only the original scalar definitions carry allowedValues, and this
+        # helper only runs for them; getattr keeps it type-safe over the full
+        # JobParameterDefinition union (the EXPR list/bool/range types have no
+        # allowedValues and are never merged here).
+        allowed = getattr(definition, "allowedValues", None)
+        if not allowed:
             # If this definition doesn't have a set of allowedValues, then it's unconstrained.
             # Thus, it's happy with any values and we can move on to the next one.
             continue
         if not return_value:
-            return_value = cast(
-                Union[set[str], set[int], set[Decimal]], set(definition.allowedValues)
-            )
+            return_value = cast(Union[set[str], set[int], set[Decimal]], set(allowed))
         else:
-            param_as_set = cast(
-                Union[set[str], set[int], set[Decimal]], set(definition.allowedValues)
-            )
+            param_as_set = cast(Union[set[str], set[int], set[Decimal]], set(allowed))
             return_value.intersection_update(param_as_set)
 
     if return_value is not None and not return_value:

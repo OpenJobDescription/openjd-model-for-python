@@ -48,6 +48,12 @@ class InterpolationExpression:
         name-only parser)."""
         return getattr(self._expresion_tree, "called_functions", set())
 
+    @property
+    def accessed_symbols(self) -> set:
+        """Free symbol references in this expression in full dotted spelling
+        (empty for the legacy name-only parser, which exposes no such set)."""
+        return getattr(self._expresion_tree, "accessed_symbols", set())
+
     def evaluate(
         self, *, symtab: SymbolTable, path_format: Optional[Any] = None
     ) -> Union[numbers.Real, str, Any]:

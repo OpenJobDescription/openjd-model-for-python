@@ -26,6 +26,12 @@ from ._convert_pydantic_error import pydantic_validationerrors_to_str
 
 __all__ = ("preprocess_job_parameters",)
 
+# The original scalar job-parameter type names whose values are carried as
+# strings through preprocessing. EXPR-extension types (BOOL, RANGE_EXPR, and
+# the LIST[*] variants) are carried natively instead so the typed EXPR symbol
+# table can coerce them.
+_LEGACY_SCALAR_TYPE_NAMES = frozenset({"STRING", "INT", "FLOAT", "PATH"})
+
 
 # =======================================================================
 # ================ Preprocessing Job Parameters =========================
@@ -70,8 +76,18 @@ def _collect_defaults_2023_09(
     return_value: JobParameterValues = dict[str, ParameterValue]()
     # Collect defaults
     for param in job_parameter_definitions:
+        is_legacy_scalar = param.type.name in _LEGACY_SCALAR_TYPE_NAMES
         if param.name not in job_parameter_values:
             if param.default is not None:
+                if not is_legacy_scalar:
+                    # EXPR types (BOOL / RANGE_EXPR / LIST[*]): carry the native
+                    # default through so the typed symbol-table builder can
+                    # coerce it. The PATH-relative-default handling below only
+                    # applies to the scalar PATH type.
+                    return_value[param.name] = ParameterValue(
+                        type=ParameterValueType(param.type), value=param.default
+                    )
+                    continue
                 default = str(param.default)
                 # Make PATH defaults relative to job_template_dir, and
                 # enforce the `allow_job_template_dir_walk_up` parameter request.
@@ -104,6 +120,12 @@ def _collect_defaults_2023_09(
         else:
             # Check the parameter against the constraints
             value = job_parameter_values[param.name]
+            if not is_legacy_scalar:
+                # EXPR types: carry the provided native value through.
+                return_value[param.name] = ParameterValue(
+                    type=ParameterValueType(param.type), value=value
+                )
+                continue
             # Join any provided relative PATH parameter value with the current_working_directory (except the empty value "")
             if param.type.name == "PATH" and value != "" and not Path(value).is_absolute():
                 value = str(current_working_dir / value)
@@ -123,8 +145,16 @@ def _check_2023_09(
     for param in job_parameter_definitions:
         if param.name in job_parameter_values:
             param_value = job_parameter_values[param.name]
+            # The EXPR-extension LIST[*]/RANGE_EXPR definitions don't implement
+            # _check_constraints (BOOL and the original scalars do). Their
+            # template defaults are validated at decode time, and their values
+            # are type-checked when coerced into the typed EXPR symbol table, so
+            # skip the create-time constraint check when it isn't available.
+            check_constraints = getattr(param, "_check_constraints", None)
+            if check_constraints is None:
+                continue
             try:
-                param._check_constraints(param_value.value)
+                check_constraints(param_value.value)
             except ValueError as err:
                 errors.append(str(err))
 
@@ -312,14 +342,22 @@ def create_job(
     if job_template.specificationVersion == TemplateSpecificationVersion.JOBTEMPLATE_v2023_09:
         from .v2023_09 import ValueReferenceConstants as ValueReferenceConstants_2023_09
 
+        # EXPR-extension typed params (BOOL / RANGE_EXPR / LIST[*]) carry native
+        # values; record their OpenJD type so the typed symbol-table builder
+        # coerces them to the right ExprType during expression evaluation. The
+        # original scalar types keep their existing string-based handling.
+        expr_types: dict[str, str] = {}
         for name, param in all_job_parameter_values.items():
+            prefix = ValueReferenceConstants_2023_09.JOB_PARAMETER_PREFIX.value
+            raw_prefix = ValueReferenceConstants_2023_09.JOB_PARAMETER_RAWPREFIX.value
             if param.type != "PATH":
-                symtab[f"{ValueReferenceConstants_2023_09.JOB_PARAMETER_PREFIX.value}.{name}"] = (
-                    all_job_parameter_values[name].value
-                )
-            symtab[f"{ValueReferenceConstants_2023_09.JOB_PARAMETER_RAWPREFIX.value}.{name}"] = (
-                all_job_parameter_values[name].value
-            )
+                symtab[f"{prefix}.{name}"] = all_job_parameter_values[name].value
+            symtab[f"{raw_prefix}.{name}"] = all_job_parameter_values[name].value
+            if param.type.name not in _LEGACY_SCALAR_TYPE_NAMES:
+                expr_types[f"{prefix}.{name}"] = param.type.value
+                expr_types[f"{raw_prefix}.{name}"] = param.type.value
+        if expr_types:
+            symtab.expr_types = expr_types  # type: ignore[attr-defined]
     else:
         raise NotImplementedError(
             f"Spec version {job_template.specificationVersion} not implemented."
