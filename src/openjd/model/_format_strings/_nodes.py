@@ -127,6 +127,13 @@ class ExprNode(Node):
         """Names of functions invoked by this expression."""
         return set(self._parsed.called_functions)
 
+    @property
+    def accessed_symbols(self) -> set:
+        """Free symbol references in this expression, in full dotted spelling
+        (e.g. ``"Param.X"``). Local ``let``/comprehension-bound names are
+        excluded by the engine."""
+        return set(self._parsed.accessed_symbols)
+
     def validate_symbol_refs(self, *, symbols: set[str], symbol_types: Any = None) -> None:
         accessed = set(self._parsed.accessed_symbols)
 

@@ -92,6 +92,12 @@ class TestLetInvalid:
                 )
             )
 
+    def test_self_reference(self):
+        # A binding cannot reference its own name on its RHS (not yet bound at
+        # its definition point). Mirrors openjd-rs "references itself".
+        with pytest.raises(DecodeValidationError, match="cannot reference itself"):
+            _decode(_job([{"name": "S", "let": ["x = x + 1"], "script": _onrun("hi")}]))
+
     def test_comprehension_shadows_let(self):
         with pytest.raises(DecodeValidationError, match="shadows"):
             _decode(

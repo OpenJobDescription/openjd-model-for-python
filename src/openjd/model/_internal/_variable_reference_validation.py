@@ -574,6 +574,35 @@ def _validate_let_bindings(
             )
         try:
             node = ExprNode(rhs)
+        except ValueError as exc:
+            # Parse/static-validation failure in the binding expression.
+            errors.append(
+                InitErrorDetails(
+                    type="value_error", loc=binding_loc, ctx={"error": exc}, input=binding
+                )
+            )
+            accumulated.add(name)
+            continue
+        # A binding may not reference its own name on its RHS: it is not yet
+        # bound at its own definition point (only earlier bindings are in
+        # scope). Reported explicitly so the diagnostic says "references
+        # itself" rather than the misleading "does not exist". Mirrors the
+        # openjd-rs `validate_let_bindings` self-reference check
+        # (`'<name>' references itself.`).
+        if name in node.accessed_symbols:
+            errors.append(
+                InitErrorDetails(
+                    type="value_error",
+                    loc=binding_loc,
+                    ctx={
+                        "error": ValueError(f"The 'let' binding {name!r} cannot reference itself.")
+                    },
+                    input=binding,
+                )
+            )
+            accumulated.add(name)
+            continue
+        try:
             node.validate_symbol_refs(symbols=accumulated)
         except ValueError as exc:
             errors.append(

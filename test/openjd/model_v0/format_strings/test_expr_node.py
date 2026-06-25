@@ -9,6 +9,7 @@ legacy Name.Dot.Name behaviour when it is not.
 
 import pytest
 
+from openjd.expr import PathFormat
 from openjd.model import ExpressionError
 from openjd.model._format_strings._nodes import ExprNode, FullNameNode
 from openjd.model._format_strings._parser import parse_format_string_expr
@@ -84,6 +85,15 @@ class TestExprEvaluate:
         st.expr_types = {"Param.X": "INT"}  # type: ignore[attr-defined]
         assert node.evaluate(symtab=st) == 11
 
+    def test_native_list_symbol_inferred(self):
+        # A native list value is inferred as a typed list by the Rust
+        # build_symbol_table bridge, so aggregate functions work without an
+        # explicit type entry.
+        node = parse_format_string_expr("sum(Param.Items)", context=_ctx(["EXPR"]))
+        st = SymbolTable()
+        st["Param.Items"] = [1, 2, 3]
+        assert node.evaluate(symtab=st) == 6
+
 
 class TestExprSymbolRefValidation:
     def test_missing_symbol_raises(self):
@@ -106,3 +116,83 @@ class TestExprErrors:
     def test_parse_error_is_model_expression_error(self):
         with pytest.raises(ExpressionError):
             parse_format_string_expr("Param.X +", context=_ctx(["EXPR"]))
+
+
+class TestExprPaths:
+    """PATH-typed expression coverage mirroring the openjd-rs path tests
+    (``crates/openjd-expr/tests/integration/test_paths.rs`` and
+    ``test_rfc_examples.rs``): path construction, the path properties/methods
+    (``.name``/``.stem``/``.suffix``/``.parent``/``.with_suffix``), POSIX vs
+    Windows ``path_format`` behavior, and PATH-typed symbol coercion. PR #285
+    review C4.
+    """
+
+    def _eval(self, expr, *, path_format=PathFormat.POSIX, symtab=None):
+        node = parse_format_string_expr(expr, context=_ctx(["EXPR"]))
+        return node.evaluate(symtab=symtab or SymbolTable(), path_format=path_format)
+
+    def test_path_constructor(self):
+        assert self._eval("path('/tmp/file.txt')") == "/tmp/file.txt"
+
+    def test_path_from_parts_list(self):
+        # path(list[string]) reconstructs a path from its parts.
+        assert self._eval("path(['/', 'a', 'b', 'c'])") == "/a/b/c"
+
+    def test_name(self):
+        assert self._eval("path('/a/b/render.exr').name") == "render.exr"
+
+    def test_stem(self):
+        assert self._eval("path('/a/b/render.exr').stem") == "render"
+
+    def test_suffix(self):
+        assert self._eval("path('/a/b/render.exr').suffix") == ".exr"
+
+    def test_parent(self):
+        assert self._eval("path('/a/b/c').parent") == "/a/b"
+
+    @pytest.mark.parametrize(
+        "expr,expected",
+        [
+            (
+                "path('/projects/shot01/render.exr').with_suffix('.png')",
+                "/projects/shot01/render.png",
+            ),
+            ("path('/projects/shot01/render.exr').with_suffix('')", "/projects/shot01/render"),
+            (
+                "path('/projects/shot01/render.exr').with_name('output.png')",
+                "/projects/shot01/output.png",
+            ),
+            (
+                "path('/projects/shot01/render.exr').with_stem('final')",
+                "/projects/shot01/final.exr",
+            ),
+        ],
+    )
+    def test_with_suffix_name_stem(self, expr, expected):
+        assert self._eval(expr) == expected
+
+    def test_windows_as_posix(self):
+        # Convert a Windows path to POSIX separators for shell scripts.
+        assert (
+            self._eval(r"path('C:\\renders\\project').as_posix()", path_format=PathFormat.WINDOWS)
+            == "C:/renders/project"
+        )
+
+    def test_join_operator_and_suffix(self):
+        # RFC example: (OutputDir / InputFile.name).with_suffix('.png')
+        assert (
+            self._eval(
+                "(path('/output') / path('/in/scene.exr').name).with_suffix('.png')",
+            )
+            == "/output/scene.png"
+        )
+
+    def test_path_typed_symbol_method_access(self):
+        # A PATH-typed job-parameter symbol (stored as a string by create_job)
+        # is coerced to a path via the types map, so method/property access
+        # works just like the Rust engine.
+        st = SymbolTable()
+        st["Param.File"] = "/a/b/render.exr"
+        st.expr_types = {"Param.File": "PATH"}  # type: ignore[attr-defined]
+        node = parse_format_string_expr("Param.File.name", context=_ctx(["EXPR"]))
+        assert node.evaluate(symtab=st, path_format=PathFormat.POSIX) == "render.exr"

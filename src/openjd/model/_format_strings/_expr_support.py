@@ -8,13 +8,11 @@ template declares the ``EXPR`` extension, format-string expressions are parsed
 and evaluated by the Rust ``openjd-expr`` engine through the ``openjd._openjd_rs``
 bindings. This module is the thin bridge between the two.
 
-Design reference:
-``SuperDaveDocs/.../delivery-estimate-v3/rs/python-model-with-rust-expr``.
-
-First-cut note: this is the "pure-Python orchestration" path (no Rust binding
-change). The eventual home for the symbol-table conversion is a Rust
-``build_symbol_table`` ``#[pyfunction]``; the ``ExprNode`` call site is
-identical either way.
+The typed symbol-table construction (coercing the v0 model's flat, stringly
+typed values into a typed EXPR ``SymbolTable``) is performed by the Rust
+``build_symbol_table`` binding; this module supplies the OpenJD-type → EXPR
+type-spec mapping and re-raises Rust errors as the model's own
+``ExpressionError`` at the boundary.
 """
 
 from __future__ import annotations
@@ -28,6 +26,7 @@ from .._symbol_table import SymbolTable
 # extension is always present in a released wheel, but keeping the imports here
 # (rather than at the package root) means the non-EXPR parse path never touches
 # the Rust expr surface.
+from openjd._openjd_rs import build_symbol_table  # type: ignore[import-not-found]
 from openjd.expr import (  # type: ignore[import-not-found]
     ExprProfile,
     ExprType,
@@ -58,7 +57,8 @@ _RUST_EXPR_ERRORS = (
 
 # Map an OpenJD parameter type name (spec form) to the EXPR engine's spec-form
 # type string consumed by ExprType(...). Scalars coerce a string value via
-# ExprValue(str, type=...); list/range types are handled in _to_expr_value.
+# ExprValue(str, type=...); list/range types are handled by the Rust
+# build_symbol_table binding via expr_type_for_openjd_type below.
 _OPENJD_TYPE_TO_EXPR_TYPE = {
     "INT": "int",
     "FLOAT": "float",
@@ -66,6 +66,11 @@ _OPENJD_TYPE_TO_EXPR_TYPE = {
     "PATH": "path",
     "BOOL": "bool",
 }
+
+# Spelling of the LIST[...] compound type name in OpenJD spec form. Used to
+# recognize and unwrap list types in expr_type_for_openjd_type.
+_LIST_TYPE_PREFIX = "LIST["
+_LIST_TYPE_SUFFIX = "]"
 
 
 def expr_profile_from_context(context: Any) -> ExprProfile:
@@ -83,53 +88,38 @@ def expr_profile_from_context(context: Any) -> ExprProfile:
     return ExprProfile.current()
 
 
-def _to_expr_value(value: Any, type_name: Optional[str], path_format: Any) -> Any:
-    """Convert a single symbol-table value to something the EXPR engine accepts.
-
-    - If an OpenJD type is known, coerce the (string) value to that EXPR type so
-      ``Param.X`` of type INT becomes a real integer rather than the string
-      ``"10"``.
-    - Otherwise pass the native Python value through; ``ExprValue`` infers
-      int/float/bool/str/list at the boundary.
-    """
-    if type_name is None:
-        return value
-
-    expr_type = _OPENJD_TYPE_TO_EXPR_TYPE.get(type_name.upper())
-    if expr_type is None:
-        # Unknown/aggregate type (e.g. LIST[*], RANGE_EXPR) — let the engine
-        # infer from the native value for now. Typed list/range coercion is
-        # follow-up work (RFC 0007 parameter types).
-        return value
-    if expr_type == "path":
-        return ExprValue(str(value), type=ExprType("path"), path_format=path_format)
-    return ExprValue(str(value), type=ExprType(expr_type))
-
-
 def symtab_to_expr_values(
     symtab: SymbolTable,
     *,
     types: Optional[dict[str, str]] = None,
     path_format: Any = None,
-) -> dict[str, Any]:
-    """Convert the v0 (flat dotted-key) SymbolTable into a nested value tree the
-    EXPR engine can consume.
+) -> Any:
+    """Build a typed EXPR ``SymbolTable`` from the v0 (flat dotted-key)
+    ``SymbolTable``.
 
-    The v0 SymbolTable uses flat dotted keys (``"Param.Frame"``) and direct
-    lookup; the Rust ``dict_to_symtab`` builds subtables from nested dicts. We
-    split each dotted key on ``.`` (parameter names cannot contain ``.``) and
-    nest accordingly, re-typing each leaf from ``types`` when available.
+    The typed coercion (e.g. a stored ``"10"`` of type INT → a real integer)
+    and the dotted-key → nested-subtable construction are delegated to the
+    Rust ``build_symbol_table`` binding, so the value typing lives next to the
+    engine and stays consistent with it (PR #285 review, C3/C5).
+
+    ``types`` maps dotted symbol names to OpenJD type names (e.g. ``"INT"``,
+    ``"LIST[INT]"``); each is translated to the EXPR type spec the engine
+    expects (``"int"``, ``"list[int]"``) via :func:`expr_type_for_openjd_type`.
+    Names whose type has no confident EXPR mapping (e.g. ``RANGE_EXPR``) are
+    omitted so the engine infers them from the value.
+
+    Note: end-to-end evaluation of LIST[*]/RANGE_EXPR job parameters on the v0
+    ``create_job`` path additionally requires those values to reach the symbol
+    table as native Python values rather than stringified (``ParameterValueType``
+    has no LIST/RANGE/BOOL members today), which is tracked separately.
     """
-    types = types or {}
-    nested: dict[str, Any] = {}
-    for dotted_name in symtab.symbols:
-        leaf_value = _to_expr_value(symtab[dotted_name], types.get(dotted_name), path_format)
-        cursor = nested
-        segments = dotted_name.split(".")
-        for segment in segments[:-1]:
-            cursor = cursor.setdefault(segment, {})
-        cursor[segments[-1]] = leaf_value
-    return nested
+    flat = {name: symtab[name] for name in symtab.symbols}
+    expr_types: dict[str, str] = {}
+    for name, openjd_type in (types or {}).items():
+        spec = expr_type_for_openjd_type(openjd_type)
+        if spec is not None:
+            expr_types[name] = spec
+    return build_symbol_table(flat, expr_types or None, path_format=path_format)
 
 
 def parse_expr_or_raise(expr: str) -> Any:
@@ -186,10 +176,11 @@ def expr_type_for_openjd_type(openjd_type: str) -> Optional[str]:
     scalar = _OPENJD_TYPE_TO_EXPR_TYPE.get(t)
     if scalar is not None:
         return scalar
-    if t.startswith("LIST[") and t.endswith("]"):
-        inner = expr_type_for_openjd_type(t[len("LIST[") : -1])
-        if inner is not None:
-            return f"list[{inner}]"
+    if t.startswith(_LIST_TYPE_PREFIX) and t.endswith(_LIST_TYPE_SUFFIX):
+        inner = t[len(_LIST_TYPE_PREFIX) : -len(_LIST_TYPE_SUFFIX)]
+        inner_spec = expr_type_for_openjd_type(inner)
+        if inner_spec is not None:
+            return f"list[{inner_spec}]"
     return None
 
 
