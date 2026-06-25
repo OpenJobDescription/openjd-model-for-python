@@ -81,6 +81,7 @@ fn openjd_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(evaluate_expression, m)?)?;
     m.add_function(wrap_pyfunction!(parse_expression, m)?)?;
     m.add_function(wrap_pyfunction!(escape_format_string, m)?)?;
+    m.add_function(wrap_pyfunction!(build_symbol_table, m)?)?;
     m.add_function(wrap_pyfunction!(_reconstruct_expr_value, m)?)?;
     m.add_function(wrap_pyfunction!(_reconstruct_serialized_symtab, m)?)?;
 

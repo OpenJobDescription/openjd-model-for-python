@@ -26,5 +26,5 @@ pub(crate) use path_mapping::PyPathMappingRule;
 pub(crate) use profile::{PyExprExtension, PyExprProfile, PyExprRevision, PyHostContext};
 pub(crate) use range_expr::{PyIntRange, PyRangeExpr};
 pub(crate) use symbol_table::{
-    _reconstruct_serialized_symtab, PySerializedSymbolTable, PySymbolTable,
+    _reconstruct_serialized_symtab, build_symbol_table, PySerializedSymbolTable, PySymbolTable,
 };

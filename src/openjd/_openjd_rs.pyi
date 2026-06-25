@@ -3567,6 +3567,12 @@ def deserialize_step(step_dict: dict) -> Step:
     """
 
 def escape_format_string(value: builtins.str) -> builtins.str: ...
+def build_symbol_table(
+    values: builtins.dict,
+    types: typing.Optional[builtins.dict] = None,
+    *,
+    path_format: typing.Optional[PathFormat] = None,
+) -> SymbolTable: ...
 def evaluate_expression(
     expr: builtins.str,
     *,
