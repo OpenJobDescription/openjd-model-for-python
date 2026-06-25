@@ -1780,6 +1780,12 @@ class ParsedExpression:
     @property
     def expr(self) -> builtins.str: ...
     def __repr__(self) -> builtins.str: ...
+    def typecheck(
+        self,
+        *,
+        values: typing.Optional[typing.Any] = None,
+        profile: typing.Optional[ExprProfile] = None,
+    ) -> None: ...
     def evaluate(
         self,
         *,
@@ -3567,6 +3573,9 @@ def deserialize_step(step_dict: dict) -> Step:
     """
 
 def escape_format_string(value: builtins.str) -> builtins.str: ...
+def job_parameter_type_expr_spec(
+    type_name: builtins.str,
+) -> typing.Optional[builtins.str]: ...
 def build_symbol_table(
     values: builtins.dict,
     types: typing.Optional[builtins.dict] = None,

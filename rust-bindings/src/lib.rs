@@ -232,6 +232,7 @@ fn openjd_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(validate_attribute_capability_name, m)?)?;
     m.add_function(wrap_pyfunction!(standard_amount_capability_names, m)?)?;
     m.add_function(wrap_pyfunction!(standard_attribute_capability_names, m)?)?;
+    m.add_function(wrap_pyfunction!(job_parameter_type_expr_spec, m)?)?;
     m.add_function(wrap_pyfunction!(standard_attribute_capabilities, m)?)?;
 
     register_renamed_exception(

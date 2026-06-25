@@ -26,7 +26,10 @@ from .._symbol_table import SymbolTable
 # extension is always present in a released wheel, but keeping the imports here
 # (rather than at the package root) means the non-EXPR parse path never touches
 # the Rust expr surface.
-from openjd._openjd_rs import build_symbol_table  # type: ignore[import-not-found]
+from openjd._openjd_rs import (  # type: ignore[import-not-found]
+    build_symbol_table,
+    job_parameter_type_expr_spec,
+)
 from openjd.expr import (  # type: ignore[import-not-found]
     ExprProfile,
     ExprType,
@@ -54,23 +57,6 @@ _RUST_EXPR_ERRORS = (
     RustFormatStringValidationError,
     RustRangeExprError,
 )
-
-# Map an OpenJD parameter type name (spec form) to the EXPR engine's spec-form
-# type string consumed by ExprType(...). Scalars coerce a string value via
-# ExprValue(str, type=...); list/range types are handled by the Rust
-# build_symbol_table binding via expr_type_for_openjd_type below.
-_OPENJD_TYPE_TO_EXPR_TYPE = {
-    "INT": "int",
-    "FLOAT": "float",
-    "STRING": "string",
-    "PATH": "path",
-    "BOOL": "bool",
-}
-
-# Spelling of the LIST[...] compound type name in OpenJD spec form. Used to
-# recognize and unwrap list types in expr_type_for_openjd_type.
-_LIST_TYPE_PREFIX = "LIST["
-_LIST_TYPE_SUFFIX = "]"
 
 
 def expr_profile_from_context(context: Any) -> ExprProfile:
@@ -167,21 +153,17 @@ def map_eval_error(exc: BaseException) -> _ModelExpressionError:
 
 
 def expr_type_for_openjd_type(openjd_type: str) -> Optional[str]:
-    """Map an OpenJD parameter type name (e.g. ``PATH``, ``LIST[INT]``) to the
-    EXPR engine's spec-form type string (``path``, ``list[int]``), or ``None``
-    if there is no confident mapping (so callers fall back to name-only
-    validation rather than risk a wrong type).
+    """Map an OpenJD parameter type name (e.g. ``PATH``, ``LIST[INT]``,
+    ``RANGE_EXPR``; case-insensitive) to the EXPR engine's spec-form type
+    string (``path``, ``list[int]``, ``range_expr``), or ``None`` if the name
+    is not a recognized job-parameter type.
+
+    Delegates to the Rust ``job_parameter_type_expr_spec`` binding so the
+    OpenJD-type → EXPR-type mapping (including ``LIST[...]`` nesting) lives in a
+    single place — the ``openjd-model`` crate — rather than a parallel
+    hand-maintained Python table that could drift.
     """
-    t = openjd_type.strip().upper()
-    scalar = _OPENJD_TYPE_TO_EXPR_TYPE.get(t)
-    if scalar is not None:
-        return scalar
-    if t.startswith(_LIST_TYPE_PREFIX) and t.endswith(_LIST_TYPE_SUFFIX):
-        inner = t[len(_LIST_TYPE_PREFIX) : -len(_LIST_TYPE_SUFFIX)]
-        inner_spec = expr_type_for_openjd_type(inner)
-        if inner_spec is not None:
-            return f"list[{inner_spec}]"
-    return None
+    return job_parameter_type_expr_spec(openjd_type)
 
 
 def longest_defined_prefix(name: str, defined: set) -> Optional[str]:
@@ -215,14 +197,12 @@ def validate_typed_expression(parsed: Any, *, typed_symbols: dict[str, str]) -> 
             cursor = cursor.setdefault(seg, {})
         cursor[segs[-1]] = ev
     try:
-        parsed.evaluate(
+        # typecheck() evaluates without extracting the result, so an expression
+        # that is well-typed but depends on an unresolved runtime symbol passes
+        # (no "cannot extract value from unresolved" boundary error to sniff for).
+        parsed.typecheck(
             values=values,
             profile=ExprProfile.current().with_host_context(HostContext.unresolved()),
         )
     except _RUST_EXPR_ERRORS as exc:
-        msg = str(exc)
-        # A valid expression that merely depends on a runtime value surfaces as
-        # an "unresolved" extraction error — that is success, not a failure.
-        if "unresolved" in msg and "Cannot extract value" in msg:
-            return
-        raise _ModelExpressionError(msg)
+        raise _ModelExpressionError(str(exc))
