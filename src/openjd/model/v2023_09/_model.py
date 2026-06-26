@@ -3376,6 +3376,26 @@ def _check_string_item(name: str, item: Any, c: Optional[_ListStringItemConstrai
         raise ValueError(f"Parameter {name}: item {item!r} is not in item.allowedValues.")
 
 
+def _check_numeric_item_bounds(
+    name: str,
+    item: Any,
+    compare: Any,
+    min_value: Any,
+    max_value: Any,
+    allowed_values: Any,
+) -> None:
+    """Shared minValue / maxValue / allowedValues check for the numeric LIST
+    item types. ``item`` is used only in error messages; ``compare`` is the
+    value the bounds are tested against (the int itself for LIST[INT], the
+    Decimal form for LIST[FLOAT])."""
+    if min_value is not None and compare < min_value:
+        raise ValueError(f"Parameter {name}: item {item} is below item.minValue {min_value}.")
+    if max_value is not None and compare > max_value:
+        raise ValueError(f"Parameter {name}: item {item} is above item.maxValue {max_value}.")
+    if allowed_values is not None and compare not in allowed_values:
+        raise ValueError(f"Parameter {name}: item {item} is not in item.allowedValues.")
+
+
 def _check_int_item(name: str, item: Any, c: Optional[_ListIntItemConstraint]) -> None:
     if isinstance(item, bool) or not isinstance(item, int):
         raise ValueError(
@@ -3383,12 +3403,7 @@ def _check_int_item(name: str, item: Any, c: Optional[_ListIntItemConstraint]) -
         )
     if c is None:
         return
-    if c.minValue is not None and item < c.minValue:
-        raise ValueError(f"Parameter {name}: item {item} is below item.minValue {c.minValue}.")
-    if c.maxValue is not None and item > c.maxValue:
-        raise ValueError(f"Parameter {name}: item {item} is above item.maxValue {c.maxValue}.")
-    if c.allowedValues is not None and item not in c.allowedValues:
-        raise ValueError(f"Parameter {name}: item {item} is not in item.allowedValues.")
+    _check_numeric_item_bounds(name, item, item, c.minValue, c.maxValue, c.allowedValues)
 
 
 def _check_float_item(name: str, item: Any, c: Optional[_ListFloatItemConstraint]) -> None:
@@ -3399,12 +3414,7 @@ def _check_float_item(name: str, item: Any, c: Optional[_ListFloatItemConstraint
     val = Decimal(str(item))
     if c is None:
         return
-    if c.minValue is not None and val < c.minValue:
-        raise ValueError(f"Parameter {name}: item {item} is below item.minValue {c.minValue}.")
-    if c.maxValue is not None and val > c.maxValue:
-        raise ValueError(f"Parameter {name}: item {item} is above item.maxValue {c.maxValue}.")
-    if c.allowedValues is not None and val not in c.allowedValues:
-        raise ValueError(f"Parameter {name}: item {item} is not in item.allowedValues.")
+    _check_numeric_item_bounds(name, item, val, c.minValue, c.maxValue, c.allowedValues)
 
 
 def _expr_param_gate(value: JobParameterType, info: ValidationInfo) -> JobParameterType:

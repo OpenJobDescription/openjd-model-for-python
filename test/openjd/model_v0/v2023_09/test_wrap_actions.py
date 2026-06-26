@@ -12,6 +12,7 @@ import pytest
 
 from openjd.model import (
     DecodeValidationError,
+    create_job,
     decode_environment_template,
     decode_job_template,
 )
@@ -262,3 +263,34 @@ class TestWrappedVariableScopeInvalid:
             "timeout": "{{ WrappedAction.Timeout }}",
         }
         _decode(_env_template(actions, extensions=["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]))
+
+
+# ── RFC 0008 create_job instantiation ──────────────────────────────────
+#
+# create_job re-validates the instantiated Job submodels without a parsing
+# context. The EnvironmentActions extension gate must therefore only enforce
+# the WRAP_ACTIONS/EXPR requirement at decode time (context present), not at
+# instantiation time -- otherwise a template that decodes cleanly fails when a
+# Job is generated from it.
+
+
+class TestWrapActionsCreateJob:
+    def test_create_job_with_wrap_env_succeeds(self):
+        # A wrap-defining jobEnvironment decodes AND instantiates into a Job.
+        # Regression: instantiate_model used to re-fire the WRAP_ACTIONS
+        # extension gate (no context) and raise "require the WRAP_ACTIONS
+        # extension."
+        jt = _decode_job(_job_template(job_environments=[_wrap_env("W")]))
+        job = create_job(job_template=jt, job_parameter_values={})
+        env_actions = job.jobEnvironments[0].script.actions
+        assert env_actions.onWrapEnvEnter is not None
+        assert env_actions.onWrapTaskRun is not None
+        assert env_actions.onWrapEnvExit is not None
+
+    def test_create_job_with_step_env_wrap_succeeds(self):
+        jt = _decode_job(
+            _job_template(steps=[_plain_step("S", step_environments=[_wrap_env("W")])])
+        )
+        job = create_job(job_template=jt, job_parameter_values={})
+        step_env_actions = job.steps[0].stepEnvironments[0].script.actions
+        assert step_env_actions.onWrapTaskRun is not None

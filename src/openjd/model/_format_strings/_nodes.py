@@ -80,6 +80,21 @@ class Node(ABC):
 MAX_MATCH_DISTANCE_THRESHOLD = 5
 
 
+def _missing_symbol_error(name: str, symbols: set[str]) -> ValueError:
+    """Build the "Variable ... does not exist" error for an unresolved symbol,
+    appending an edit-distance "Did you mean ...?" hint when a close match
+    exists. Shared by the legacy and EXPR symbol-reference checks so the
+    diagnostic stays identical across both."""
+    msg = f"Variable {name} does not exist at this location."
+    distance, closest_matches = closest(symbols, name)
+    if distance < MAX_MATCH_DISTANCE_THRESHOLD:
+        if len(closest_matches) == 1:
+            msg += f" Did you mean: {''.join(closest_matches)}"
+        elif len(closest_matches) > 1:
+            msg += f" Did you mean one of: {', '.join(sorted(closest_matches))}"
+    return ValueError(msg)
+
+
 @dataclass
 class FullNameNode(Node):
     """Expression tree node representing a fully qualified identifier name.
@@ -90,14 +105,7 @@ class FullNameNode(Node):
 
     def validate_symbol_refs(self, *, symbols: set[str], symbol_types: Any = None) -> None:
         if self.name not in symbols:
-            msg = f"Variable {self.name} does not exist at this location."
-            distance, closest_matches = closest(symbols, self.name)
-            if distance < MAX_MATCH_DISTANCE_THRESHOLD:
-                if len(closest_matches) == 1:
-                    msg += f" Did you mean: {''.join(closest_matches)}"
-                elif len(closest_matches) > 1:
-                    msg += f" Did you mean one of: {', '.join(sorted(closest_matches))}"
-            raise ValueError(msg)
+            raise _missing_symbol_error(self.name, symbols)
 
     def evaluate(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
         if self.name not in symtab:
@@ -181,17 +189,7 @@ class ExprNode(Node):
         # engine. Compare against the set of symbols visible at this location.
         missing = accessed - symbols
         if missing:
-            from ._edit_distance import closest
-
-            name = sorted(missing)[0]
-            msg = f"Variable {name} does not exist at this location."
-            distance, closest_matches = closest(symbols, name)
-            if distance < MAX_MATCH_DISTANCE_THRESHOLD:
-                if len(closest_matches) == 1:
-                    msg += f" Did you mean: {''.join(closest_matches)}"
-                elif len(closest_matches) > 1:
-                    msg += f" Did you mean one of: {', '.join(sorted(closest_matches))}"
-            raise ValueError(msg)
+            raise _missing_symbol_error(sorted(missing)[0], symbols)
         self._check_comprehension_shadowing(symbols)
 
     def _check_comprehension_shadowing(self, symbols: set) -> None:
