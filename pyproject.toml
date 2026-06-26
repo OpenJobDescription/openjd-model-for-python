@@ -64,6 +64,9 @@ features = ["extension-module"]
 #   These only need to be in the sdist; they're build-time
 #   tooling, not runtime code.
 include = [
+    { path = ".gitignore", format = "sdist" },
+    { path = "LICENSE", format = "sdist" },
+    { path = "NOTICE", format = "sdist" },
     "src/openjd/model/_version.py",
     { path = "_build_backend.py", format = "sdist" },
     { path = "scripts/generate_version.py", format = "sdist" },
