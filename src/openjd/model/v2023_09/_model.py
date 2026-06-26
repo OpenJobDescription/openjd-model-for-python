@@ -532,13 +532,20 @@ class EnvironmentActions(OpenJDModel_v2023_09):
         any_wrap = any(v is not None for v in wrap_values.values())
 
         if any_wrap:
-            if "WRAP_ACTIONS" not in extensions:
-                raise ValueError(
-                    "The onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit actions "
-                    "require the WRAP_ACTIONS extension."
-                )
-            if "EXPR" not in extensions:
-                raise ValueError("The WRAP_ACTIONS extension requires the EXPR extension.")
+            # Extension gating is a template-decode concern and only applies
+            # when a parsing context is present. During job instantiation
+            # (create_job re-validates the model without a ModelParsingContext)
+            # the template has already been validated at decode time, so the
+            # extension-requirement checks are skipped then -- mirroring the
+            # `if context` guard the other extension gates in this module use.
+            if context is not None:
+                if "WRAP_ACTIONS" not in extensions:
+                    raise ValueError(
+                        "The onWrapEnvEnter, onWrapTaskRun, and onWrapEnvExit actions "
+                        "require the WRAP_ACTIONS extension."
+                    )
+                if "EXPR" not in extensions:
+                    raise ValueError("The WRAP_ACTIONS extension requires the EXPR extension.")
             if not all(v is not None for v in wrap_values.values()):
                 raise ValueError(
                     "When any wrap action is defined, all of onWrapEnvEnter, "
@@ -1077,6 +1084,19 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
         return value
 
 
+def _validate_range_expr_requires_expr(value: Any, info: ValidationInfo) -> Any:
+    """Shared ``range`` field validator for task-parameter definitions: a range
+    expression (a ``RangeString`` format string, RFC 0007) requires the EXPR
+    extension to be declared. Used by the Float/String/Path task-parameter
+    definitions so the gate and its message are single-sourced.
+    """
+    if isinstance(value, RangeString):
+        context = cast(Optional[ModelParsingContext], info.context)
+        if context and "EXPR" not in context.extensions:
+            raise ValueError("A range expression (format string) requires the EXPR extension.")
+    return value
+
+
 class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
     """Definition of a float-typed Task Parameter and its value range.
 
@@ -1118,11 +1138,7 @@ class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("range")
     @classmethod
     def _range_expr_requires_expr(cls, value: Any, info: ValidationInfo) -> Any:
-        if isinstance(value, RangeString):
-            context = cast(Optional[ModelParsingContext], info.context)
-            if context and "EXPR" not in context.extensions:
-                raise ValueError("A range expression (format string) requires the EXPR extension.")
-        return value
+        return _validate_range_expr_requires_expr(value, info)
 
 
 class StringTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -1155,11 +1171,7 @@ class StringTaskParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("range")
     @classmethod
     def _range_expr_requires_expr(cls, value: Any, info: ValidationInfo) -> Any:
-        if isinstance(value, RangeString):
-            context = cast(Optional[ModelParsingContext], info.context)
-            if context and "EXPR" not in context.extensions:
-                raise ValueError("A range expression (format string) requires the EXPR extension.")
-        return value
+        return _validate_range_expr_requires_expr(value, info)
 
 
 class PathTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -1192,11 +1204,7 @@ class PathTaskParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("range")
     @classmethod
     def _range_expr_requires_expr(cls, value: Any, info: ValidationInfo) -> Any:
-        if isinstance(value, RangeString):
-            context = cast(Optional[ModelParsingContext], info.context)
-            if context and "EXPR" not in context.extensions:
-                raise ValueError("A range expression (format string) requires the EXPR extension.")
-        return value
+        return _validate_range_expr_requires_expr(value, info)
 
 
 class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
@@ -3107,6 +3115,15 @@ class StepTemplate(OpenJDModel_v2023_09):
             StepTemplate: A new StepTemplate with de-sugared script, or self if no sugar.
         """
         if self.script:
+            # Step-level `let` (RFC 0007) is excluded from the instantiated Step
+            # by the job-creation metadata, so fold it into the script's own
+            # `let` (step bindings first, then the script's) so it survives into
+            # the Job and the runtime resolves it. The model has already
+            # validated reference/shadowing rules across both scopes at decode.
+            if self.let:
+                merged_let = [*self.let, *(self.script.let or [])]
+                new_script = self.script.model_copy(update={"let": merged_let})
+                return self.model_copy(update={"script": new_script, "let": None})
             return self
 
         for name, (command, ext, arg_prefix) in _INTERPRETER_MAP.items():
@@ -3143,6 +3160,10 @@ class StepTemplate(OpenJDModel_v2023_09):
                         cancelation=simple_action.cancelation,
                     )
                 ),
+                # Carry step-level `let` (RFC 0007) and the SimpleAction's own
+                # `let` onto the de-sugared script (step bindings first) so they
+                # are preserved into the Job and resolved at runtime.
+                let=([*(self.let or []), *(simple_action.let or [])] or None),
                 embeddedFiles=[
                     EmbeddedFileText.model_construct(
                         name=embedded_name,
@@ -3443,196 +3464,140 @@ _LIST_RANGE_JOB_CREATION_METADATA = JobCreationMetadata(
 )
 
 
-class JobListStringParameterDefinition(OpenJDModel_v2023_09):
+class _JobListParameterDefinitionBase(OpenJDModel_v2023_09, JobParameterInterface):
+    """Shared base for the EXPR (RFC 0007) ``LIST[*]`` job-parameter definitions.
+
+    Collects the fields and machinery common to every list parameter type — the
+    name/type-gate, the shared create-job metadata and template-variable
+    definitions, list-length checking, and the EXPR-extension gate. Each concrete
+    subclass declares only its ``type`` literal, its ``item`` constraint (if any),
+    and overrides :meth:`_check_item` to validate a single element.
+
+    Both the template ``default`` (via :meth:`_validate_default`) and any
+    user-supplied value at create time (via :meth:`_check_constraints`) are
+    validated through the same length + per-item checks, so list constraints are
+    enforced consistently in both paths.
+    """
+
+    name: Identifier
+    userInterface: Optional[_ListParameterUserInterface] = None
+    description: Optional[Description] = None
+    minLength: Optional[StrictInt] = None  # noqa: N815
+    maxLength: Optional[StrictInt] = None  # noqa: N815
+    default: Optional[list[Any]] = None
+
+    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
+    _template_variable_definitions = _LIST_PARAM_VARS
+    _template_variable_sources = {"__export__": {"__self__"}}
+
+    @field_validator("type", check_fields=False)
+    @classmethod
+    def _validate_type_gate(cls, value: JobParameterType, info: ValidationInfo) -> JobParameterType:
+        return _expr_param_gate(value, info)
+
+    def _check_item(self, item: Any) -> None:  # pragma: no cover - overridden
+        """Validate a single list element. Overridden per element type."""
+        raise NotImplementedError
+
+    def _check_list_value(self, value: list[Any]) -> None:
+        """Length + per-item validation shared by default- and value-checking."""
+        _check_list_length(self.name, value, self.minLength, self.maxLength)
+        for it in value:
+            self._check_item(it)
+
+    @model_validator(mode="after")
+    def _validate_default(self) -> Self:
+        if self.default is not None:
+            self._check_list_value(self.default)
+        return self
+
+    # override (JobParameterInterface) — enforce list constraints on a
+    # user-supplied value at create time, mirroring the scalar definitions.
+    def _check_constraints(self, value: Any) -> None:
+        if value is None:
+            raise ValueError(f"No value given for {self.name}.")
+        if not isinstance(value, list):
+            raise ValueError(
+                f"Parameter {self.name}: value must be a list, got {type(value).__name__}."
+            )
+        self._check_list_value(value)
+
+
+class JobListStringParameterDefinition(_JobListParameterDefinitionBase):
     """LIST[STRING] job parameter (EXPR extension, RFC 0007)."""
 
-    name: Identifier
     type: Literal[JobParameterType.LIST_STRING]
-    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
-    userInterface: Optional[_ListParameterUserInterface] = None
-    description: Optional[Description] = None
-    minLength: Optional[StrictInt] = None  # noqa: N815
-    maxLength: Optional[StrictInt] = None  # noqa: N815
     item: Optional[_ListStringItemConstraint] = None
-    default: Optional[list[Any]] = None
 
-    _template_variable_definitions = _LIST_PARAM_VARS
-    _template_variable_sources = {"__export__": {"__self__"}}
-
-    _validate_type_gate = field_validator("type")(
-        classmethod(lambda cls, v, info: _expr_param_gate(v, info))
-    )
-
-    @model_validator(mode="after")
-    def _validate_default(self) -> Self:
-        if self.default is not None:
-            _check_list_length(self.name, self.default, self.minLength, self.maxLength)
-            for it in self.default:
-                _check_string_item(self.name, it, self.item)
-        return self
+    def _check_item(self, item: Any) -> None:
+        _check_string_item(self.name, item, self.item)
 
 
-class JobListPathParameterDefinition(OpenJDModel_v2023_09):
+class JobListPathParameterDefinition(_JobListParameterDefinitionBase):
     """LIST[PATH] job parameter (EXPR extension, RFC 0007)."""
 
-    name: Identifier
     type: Literal[JobParameterType.LIST_PATH]
-    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
-    userInterface: Optional[_ListParameterUserInterface] = None
-    description: Optional[Description] = None
     objectType: Optional[JobPathParameterDefinitionObjectType] = None  # noqa: N815
     dataFlow: Optional[JobPathParameterDefinitionDataFlow] = None  # noqa: N815
-    minLength: Optional[StrictInt] = None  # noqa: N815
-    maxLength: Optional[StrictInt] = None  # noqa: N815
     item: Optional[_ListStringItemConstraint] = None
-    default: Optional[list[Any]] = None
 
-    _template_variable_definitions = _LIST_PARAM_VARS
-    _template_variable_sources = {"__export__": {"__self__"}}
-
-    _validate_type_gate = field_validator("type")(
-        classmethod(lambda cls, v, info: _expr_param_gate(v, info))
-    )
-
-    @model_validator(mode="after")
-    def _validate_default(self) -> Self:
-        if self.default is not None:
-            _check_list_length(self.name, self.default, self.minLength, self.maxLength)
-            for it in self.default:
-                _check_string_item(self.name, it, self.item)
-        return self
+    def _check_item(self, item: Any) -> None:
+        _check_string_item(self.name, item, self.item)
 
 
-class JobListIntParameterDefinition(OpenJDModel_v2023_09):
+class JobListIntParameterDefinition(_JobListParameterDefinitionBase):
     """LIST[INT] job parameter (EXPR extension, RFC 0007)."""
 
-    name: Identifier
     type: Literal[JobParameterType.LIST_INT]
-    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
-    userInterface: Optional[_ListParameterUserInterface] = None
-    description: Optional[Description] = None
-    minLength: Optional[StrictInt] = None  # noqa: N815
-    maxLength: Optional[StrictInt] = None  # noqa: N815
     item: Optional[_ListIntItemConstraint] = None
-    default: Optional[list[Any]] = None
 
-    _template_variable_definitions = _LIST_PARAM_VARS
-    _template_variable_sources = {"__export__": {"__self__"}}
-
-    _validate_type_gate = field_validator("type")(
-        classmethod(lambda cls, v, info: _expr_param_gate(v, info))
-    )
-
-    @model_validator(mode="after")
-    def _validate_default(self) -> Self:
-        if self.default is not None:
-            _check_list_length(self.name, self.default, self.minLength, self.maxLength)
-            for it in self.default:
-                _check_int_item(self.name, it, self.item)
-        return self
+    def _check_item(self, item: Any) -> None:
+        _check_int_item(self.name, item, self.item)
 
 
-class JobListFloatParameterDefinition(OpenJDModel_v2023_09):
+class JobListFloatParameterDefinition(_JobListParameterDefinitionBase):
     """LIST[FLOAT] job parameter (EXPR extension, RFC 0007)."""
 
-    name: Identifier
     type: Literal[JobParameterType.LIST_FLOAT]
-    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
-    userInterface: Optional[_ListParameterUserInterface] = None
-    description: Optional[Description] = None
-    minLength: Optional[StrictInt] = None  # noqa: N815
-    maxLength: Optional[StrictInt] = None  # noqa: N815
     item: Optional[_ListFloatItemConstraint] = None
-    default: Optional[list[Any]] = None
 
-    _template_variable_definitions = _LIST_PARAM_VARS
-    _template_variable_sources = {"__export__": {"__self__"}}
-
-    _validate_type_gate = field_validator("type")(
-        classmethod(lambda cls, v, info: _expr_param_gate(v, info))
-    )
-
-    @model_validator(mode="after")
-    def _validate_default(self) -> Self:
-        if self.default is not None:
-            _check_list_length(self.name, self.default, self.minLength, self.maxLength)
-            for it in self.default:
-                _check_float_item(self.name, it, self.item)
-        return self
+    def _check_item(self, item: Any) -> None:
+        _check_float_item(self.name, item, self.item)
 
 
-class JobListBoolParameterDefinition(OpenJDModel_v2023_09):
+class JobListBoolParameterDefinition(_JobListParameterDefinitionBase):
     """LIST[BOOL] job parameter (EXPR extension, RFC 0007)."""
 
-    name: Identifier
     type: Literal[JobParameterType.LIST_BOOL]
-    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
-    userInterface: Optional[_ListParameterUserInterface] = None
-    description: Optional[Description] = None
-    minLength: Optional[StrictInt] = None  # noqa: N815
-    maxLength: Optional[StrictInt] = None  # noqa: N815
-    default: Optional[list[Any]] = None
 
-    _template_variable_definitions = _LIST_PARAM_VARS
-    _template_variable_sources = {"__export__": {"__self__"}}
-
-    _validate_type_gate = field_validator("type")(
-        classmethod(lambda cls, v, info: _expr_param_gate(v, info))
-    )
-
-    @model_validator(mode="after")
-    def _validate_default(self) -> Self:
-        if self.default is not None:
-            _check_list_length(self.name, self.default, self.minLength, self.maxLength)
-            for it in self.default:
-                # Reuse the BOOL coercion: each item must be boolean-like.
-                try:
-                    _coerce_bool_value(it)
-                except ValueError as exc:
-                    raise ValueError(f"Parameter {self.name}: {exc}")
-        return self
+    def _check_item(self, item: Any) -> None:
+        # Reuse the BOOL coercion: each item must be boolean-like.
+        try:
+            _coerce_bool_value(item)
+        except ValueError as exc:
+            raise ValueError(f"Parameter {self.name}: {exc}")
 
 
-class JobListListIntParameterDefinition(OpenJDModel_v2023_09):
+class JobListListIntParameterDefinition(_JobListParameterDefinitionBase):
     """LIST[LIST[INT]] job parameter (EXPR extension, RFC 0007)."""
 
-    name: Identifier
     type: Literal[JobParameterType.LIST_LIST_INT]
-    _job_creation_metadata = _LIST_RANGE_JOB_CREATION_METADATA
-    userInterface: Optional[_ListParameterUserInterface] = None
-    description: Optional[Description] = None
-    minLength: Optional[StrictInt] = None  # noqa: N815
-    maxLength: Optional[StrictInt] = None  # noqa: N815
     item: Optional[_ListListIntInnerConstraint] = None
-    default: Optional[list[Any]] = None
 
-    _template_variable_definitions = _LIST_PARAM_VARS
-    _template_variable_sources = {"__export__": {"__self__"}}
-
-    _validate_type_gate = field_validator("type")(
-        classmethod(lambda cls, v, info: _expr_param_gate(v, info))
-    )
-
-    @model_validator(mode="after")
-    def _validate_default(self) -> Self:
-        if self.default is None:
-            return self
-        _check_list_length(self.name, self.default, self.minLength, self.maxLength)
+    def _check_item(self, item: Any) -> None:
         inner_c = self.item
         inner_item_c = inner_c.item if inner_c else None
-        for inner in self.default:
-            if not isinstance(inner, list):
-                raise ValueError(
-                    f"Parameter {self.name}: every element of LIST[LIST[INT]] must be a list."
-                )
-            if inner_c is not None:
-                _check_list_length(self.name, inner, inner_c.minLength, inner_c.maxLength)
-            for it in inner:
-                _check_int_item(self.name, it, inner_item_c)
-        return self
+        if not isinstance(item, list):
+            raise ValueError(
+                f"Parameter {self.name}: every element of LIST[LIST[INT]] must be a list."
+            )
+        if inner_c is not None:
+            _check_list_length(self.name, item, inner_c.minLength, inner_c.maxLength)
+        for it in item:
+            _check_int_item(self.name, it, inner_item_c)
 
 
-class JobRangeExprParameterDefinition(OpenJDModel_v2023_09):
+class JobRangeExprParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
     """RANGE_EXPR job parameter (EXPR extension, RFC 0007).
 
     The value is an integer range expression string (e.g. ``"1-100:10"``)
@@ -3663,6 +3628,22 @@ class JobRangeExprParameterDefinition(OpenJDModel_v2023_09):
         # Raises: ExpressionError / TokenError on a malformed range expression.
         IntRangeExpr.from_str(value)
         return value
+
+    # override (JobParameterInterface) — validate a user-supplied range
+    # expression string at create time against the IntRangeExpr grammar.
+    def _check_constraints(self, value: Any) -> None:
+        if value is None:
+            raise ValueError(f"No value given for {self.name}.")
+        if not isinstance(value, str):
+            raise ValueError(
+                f"Parameter {self.name}: RANGE_EXPR value must be a string, "
+                f"got {type(value).__name__}."
+            )
+        try:
+            # Raises: ExpressionError / TokenError on a malformed range expression.
+            IntRangeExpr.from_str(value)
+        except (ExpressionError, TokenError) as exc:
+            raise ValueError(f"Value ({value}) for parameter {self.name}: {exc}")
 
 
 JobParameterDefinitionList = Annotated[

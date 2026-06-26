@@ -57,6 +57,18 @@ class Node(ABC):
         """
         pass
 
+    def evaluate_to_str(self, *, symtab: SymbolTable, path_format: Any = None) -> str:
+        """Evaluate the expression and coerce the result to its format-string
+        string form (the value substituted into the surrounding string).
+
+        The default implementation applies Python ``str()`` to the evaluated
+        value, which is correct for the legacy scalar (``str``/``Real``) nodes.
+        EXPR-backed nodes override this to use the engine's own spec-defined
+        coercion (RFC 0005), so e.g. ``true``/``false``/``null`` and lists
+        render per the specification rather than as Python reprs.
+        """
+        return str(self.evaluate(symtab=symtab, path_format=path_format))
+
     @abstractmethod
     def __repr__(self) -> str:  # pragma: no cover
         """String representation of the node for printing."""
@@ -193,7 +205,13 @@ class ExprNode(Node):
                 "a variable that already exists at this location."
             )
 
-    def evaluate(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
+    def _evaluate_raw(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
+        """Evaluate the expression and return the engine's ``ExprValue``.
+
+        Shared by :meth:`evaluate` (which unwraps to the native Python value)
+        and :meth:`evaluate_to_str` (which uses the engine's spec-defined string
+        coercion). Re-raises engine errors as the model's ``ExpressionError``.
+        """
         from ._expr_support import (
             ExprProfile,
             map_eval_error,
@@ -201,15 +219,29 @@ class ExprNode(Node):
         )
 
         values = symtab_to_expr_values(
-            symtab, types=getattr(symtab, "expr_types", None), path_format=path_format
+            symtab, types=symtab.expr_types or None, path_format=path_format
         )
         try:
-            result = self._parsed.evaluate(
+            return self._parsed.evaluate(
                 values=values, profile=ExprProfile.current(), path_format=path_format
             )
         except Exception as exc:  # noqa: BLE001 - boundary; re-raise as model error
             raise map_eval_error(exc)
-        return result.item()
+
+    def evaluate(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
+        return self._evaluate_raw(symtab=symtab, path_format=path_format).item()
+
+    def evaluate_to_str(self, *, symtab: SymbolTable, path_format: Any = None) -> str:
+        # ``str(ExprValue)`` applies the engine's RFC 0005 format-string
+        # coercion (e.g. ``true``/``false``, double-quoted list items, preserved
+        # Decimal trailing zeros) rather than Python's ``str()`` of the native
+        # value, which would emit Python reprs (``True``/``None``/``['a', 'b']``).
+        # A null result interpolates as the empty string, matching the Rust
+        # engine's FormatString resolution (RFC 0005).
+        value = self._evaluate_raw(symtab=symtab, path_format=path_format)
+        if getattr(value, "is_null", False):
+            return ""
+        return str(value)
 
     def __repr__(self):
         return f"Expr({self.expr})"

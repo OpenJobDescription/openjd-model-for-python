@@ -7,7 +7,12 @@ from .._tokenstream import Token, TokenStream, TokenType
 from ._nodes import ExprNode, FullNameNode, Node
 from ._tokens import DotToken, NameToken
 from .._types import ModelParsingContextInterface
-from ._expr_support import EXPR_EXTENSION
+
+# Defined here (rather than imported from ._expr_support) so that importing the
+# parser does not transitively load the Rust expr surface. ExprNode itself
+# imports the Rust bindings lazily, so the non-EXPR parse path never touches
+# them.
+EXPR_EXTENSION = "EXPR"
 
 _tokens: dict[TokenType, Type[Token]] = {TokenType.NAME: NameToken, TokenType.DOT: DotToken}
 

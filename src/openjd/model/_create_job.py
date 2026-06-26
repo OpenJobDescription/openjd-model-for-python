@@ -356,8 +356,7 @@ def create_job(
             if param.type.name not in _LEGACY_SCALAR_TYPE_NAMES:
                 expr_types[f"{prefix}.{name}"] = param.type.value
                 expr_types[f"{raw_prefix}.{name}"] = param.type.value
-        if expr_types:
-            symtab.expr_types = expr_types  # type: ignore[attr-defined]
+        symtab.expr_types.update(expr_types)
     else:
         raise NotImplementedError(
             f"Spec version {job_template.specificationVersion} not implemented."

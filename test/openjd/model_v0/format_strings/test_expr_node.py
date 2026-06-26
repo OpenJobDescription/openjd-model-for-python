@@ -11,6 +11,7 @@ import pytest
 
 from openjd.expr import PathFormat
 from openjd.model import ExpressionError
+from openjd.model._format_strings._format_string import FormatString
 from openjd.model._format_strings._nodes import ExprNode, FullNameNode
 from openjd.model._format_strings._parser import parse_format_string_expr
 from openjd.model._symbol_table import SymbolTable
@@ -82,7 +83,7 @@ class TestExprEvaluate:
         node = parse_format_string_expr("Param.X + 1", context=_ctx(["EXPR"]))
         st = SymbolTable()
         st["Param.X"] = "10"  # stringly-typed, as create_job stores it
-        st.expr_types = {"Param.X": "INT"}  # type: ignore[attr-defined]
+        st.expr_types = {"Param.X": "INT"}
         assert node.evaluate(symtab=st) == 11
 
     def test_native_list_symbol_inferred(self):
@@ -228,6 +229,82 @@ class TestExprPaths:
         # works just like the Rust engine.
         st = SymbolTable()
         st["Param.File"] = "/a/b/render.exr"
-        st.expr_types = {"Param.File": "PATH"}  # type: ignore[attr-defined]
+        st.expr_types = {"Param.File": "PATH"}
         node = parse_format_string_expr("Param.File.name", context=_ctx(["EXPR"]))
         assert node.evaluate(symtab=st, path_format=PathFormat.POSIX) == "render.exr"
+
+
+class TestExprStringCoercion:
+    """An EXPR result substituted into a format string must use the engine's
+    spec-defined string coercion (RFC 0005), not Python's ``str()`` of the
+    native value. Booleans render lowercase, null renders as the empty string,
+    list items are double-quoted, and Decimal trailing zeros are preserved.
+    Guards against the ``str(value.item())`` regression that emitted Python
+    reprs (``True``/``None``/``['a', 'b']``).
+    """
+
+    @pytest.mark.parametrize(
+        "expr,expected",
+        [
+            ("true", "true"),
+            ("false", "false"),
+            ("[1, 2, 3]", "[1, 2, 3]"),
+            ('["a", "b"]', '["a", "b"]'),
+            ("[true, false]", "[true, false]"),
+            ("1.0 + 2.0", "3.0"),
+        ],
+    )
+    def test_evaluate_to_str_matches_spec(self, expr, expected):
+        node = parse_format_string_expr(expr, context=_ctx(["EXPR"]))
+        assert node.evaluate_to_str(symtab=SymbolTable()) == expected
+
+    def test_null_evaluates_to_empty_string(self):
+        node = parse_format_string_expr("null", context=_ctx(["EXPR"]))
+        assert node.evaluate_to_str(symtab=SymbolTable()) == ""
+
+    def test_resolve_uses_spec_coercion(self):
+        # End-to-end through FormatString.resolve.
+        fs = FormatString("a={{ true }} b={{ null }} c={{ [1, 2] }}", context=_ctx(["EXPR"]))
+        assert fs.resolve(symtab=SymbolTable()) == "a=true b= c=[1, 2]"
+
+    def test_evaluate_returns_native_value(self):
+        # evaluate() (as opposed to evaluate_to_str) still returns the native
+        # Python value, preserving the existing contract for callers that need
+        # the typed result rather than its string form.
+        node = parse_format_string_expr("true", context=_ctx(["EXPR"]))
+        assert node.evaluate(symtab=SymbolTable()) is True
+
+
+class TestSymbolTableExprTypesPreserved:
+    """``SymbolTable.expr_types`` is a first-class field, so it survives copies
+    and unions — type-aware EXPR coercion must not silently revert to inference
+    when a derived symbol table is used."""
+
+    def test_copy_preserves_expr_types(self):
+        st = SymbolTable()
+        st["Param.X"] = "10"
+        st.expr_types = {"Param.X": "INT"}
+        copied = SymbolTable(source=st)
+        assert copied.expr_types == {"Param.X": "INT"}
+
+    def test_union_preserves_expr_types(self):
+        st = SymbolTable()
+        st["Param.X"] = "10"
+        st.expr_types = {"Param.X": "INT"}
+        other = SymbolTable()
+        other["Param.Y"] = "hi"
+        other.expr_types = {"Param.Y": "STRING"}
+        merged = st.union(other)
+        assert merged.expr_types == {"Param.X": "INT", "Param.Y": "STRING"}
+
+    def test_union_coercion_still_works_on_derived_table(self):
+        # The typed coercion must apply when evaluating against a unioned table.
+        st = SymbolTable()
+        st["Param.X"] = "10"
+        st.expr_types = {"Param.X": "INT"}
+        derived = st.union(SymbolTable())
+        node = parse_format_string_expr("Param.X + 1", context=_ctx(["EXPR"]))
+        assert node.evaluate(symtab=derived) == 11
+
+    def test_default_expr_types_is_empty(self):
+        assert SymbolTable().expr_types == {}

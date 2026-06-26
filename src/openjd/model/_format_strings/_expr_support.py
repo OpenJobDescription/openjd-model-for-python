@@ -22,10 +22,11 @@ from typing import Any, Optional
 from .._errors import ExpressionError as _ModelExpressionError
 from .._symbol_table import SymbolTable
 
-# The EXPR engine lives in the compiled extension. Import lazily-tolerant: the
-# extension is always present in a released wheel, but keeping the imports here
-# (rather than at the package root) means the non-EXPR parse path never touches
-# the Rust expr surface.
+# The EXPR engine lives in the compiled extension. These module-level imports
+# are reached only by code that handles an EXPR template: callers import this
+# module lazily (inside functions), and the EXPR_EXTENSION gate constant lives
+# in ._parser so that merely importing the parser does not load the Rust expr
+# surface. The non-EXPR parse path therefore never imports this module.
 from openjd._openjd_rs import (  # type: ignore[import-not-found]
     build_symbol_table,
     job_parameter_type_expr_spec,
@@ -42,8 +43,6 @@ from openjd.expr import (  # type: ignore[import-not-found]
     RangeExprError as RustRangeExprError,
     parse_expression,
 )
-
-EXPR_EXTENSION = "EXPR"
 
 # Errors raised by the Rust expr engine. All subclass ValueError but are
 # distinct classes from the model's own ExpressionError, so they must be

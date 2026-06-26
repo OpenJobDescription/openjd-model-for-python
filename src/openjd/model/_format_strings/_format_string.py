@@ -1,7 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from dataclasses import dataclass
-from numbers import Real
 from typing import Optional, Union
 
 from .._errors import ExpressionError, TokenError
@@ -16,7 +15,9 @@ class ExpressionInfo:
     start_pos: int
     end_pos: int
     expression: Optional[InterpolationExpression] = None
-    resolved_value: Optional[Union[Real, str]] = None
+    # The string form substituted into the surrounding format string, produced
+    # by InterpolationExpression.evaluate_to_str during resolve().
+    resolved_value: Optional[str] = None
 
 
 class FormatStringError(ValueError):
@@ -108,7 +109,10 @@ class FormatString(DynamicConstrainedStr):
 
             assert element.expression is not None
             try:
-                element.resolved_value = element.expression.evaluate(
+                # evaluate_to_str applies the engine's spec-defined string
+                # coercion for EXPR results (RFC 0005), so booleans/null/lists
+                # render per the specification rather than as Python reprs.
+                element.resolved_value = element.expression.evaluate_to_str(
                     symtab=symtab, path_format=path_format
                 )
             except ExpressionError as exc:
@@ -120,7 +124,7 @@ class FormatString(DynamicConstrainedStr):
                     details=str(exc),
                 )
 
-            resolved_list.append(str(element.resolved_value))
+            resolved_list.append(element.resolved_value)
 
         return "".join(resolved_list)
 

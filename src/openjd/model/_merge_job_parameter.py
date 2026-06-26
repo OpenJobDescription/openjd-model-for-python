@@ -224,10 +224,20 @@ def merge_job_parameter_definitions_for_one(
     # EXPR-extension types (BOOL, RANGE_EXPR, LIST[*]): not cross-merged. Return
     # the last-defined definition with the last-defined default applied.
     # ``model_copy`` avoids re-validation, which would otherwise re-trigger the
-    # EXPR extension gate (the merge has no parsing context to satisfy it).
+    # EXPR extension gate (the merge has no parsing context to satisfy it). But
+    # because ``model_copy`` skips validators, re-validate the merged default
+    # against the base definition's own constraints explicitly so a default
+    # carried over from another source that violates them is still rejected
+    # (mirrors the ``parse_model`` re-validation the legacy path performs).
     base = params[-1].definition
     merged_default = merged_properties.get("default")
     if merged_default is not None and merged_default is not base.default:
+        check_constraints = getattr(base, "_check_constraints", None)
+        if check_constraints is not None:
+            try:
+                check_constraints(merged_default)
+            except ValueError as err:
+                raise CompatibilityError(str(err))
         return base.model_copy(update={"default": merged_default})
     return base
 

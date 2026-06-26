@@ -85,3 +85,23 @@ class InterpolationExpression:
             return result
 
         raise ExpressionError(f"Nonvalid result type: {result} of type {type(result)}")
+
+    def evaluate_to_str(self, *, symtab: SymbolTable, path_format: Optional[Any] = None) -> str:
+        """Evaluate the expression and coerce the result to the string form that
+        is substituted into the surrounding format string.
+
+        For EXPR expressions this uses the engine's spec-defined string coercion
+        (RFC 0005) rather than Python's ``str()``, so booleans, null, and lists
+        render per the specification rather than as Python reprs.
+
+        Args:
+            symtab (SymbolTable): A symbol table containing values to use in the evaluation.
+            path_format (Any): Optional EXPR PathFormat for PATH-typed values.
+
+        Raises:
+            ExpressionError: If the expression could not be evaluated.
+        """
+        try:
+            return self._expresion_tree.evaluate_to_str(symtab=symtab, path_format=path_format)
+        except ValueError as exc:
+            raise ExpressionError(f"Expression failed validation: {str(exc)}")
