@@ -164,17 +164,17 @@ steps:
         # Select the appropriate loader directly
         if loader_type == "CSafeLoader":
             try:
-                from yaml import CSafeLoader as YamlLoader  # type: ignore[attr-defined]
+                from yaml import CSafeLoader as SafeLoader  # type: ignore[attr-defined]
             except ImportError:
-                from yaml import SafeLoader as YamlLoader  # type: ignore[assignment]
+                from yaml import SafeLoader  # type: ignore[assignment]
         else:
-            from yaml import SafeLoader as YamlLoader  # type: ignore[assignment]
+            from yaml import SafeLoader  # type: ignore[assignment]
 
         for _ in range(iterations):
             start_time = time.perf_counter()
             # Parse YAML directly instead of using document_string_to_object
             # to avoid the module-level loader selection
-            yaml.load(template_content, Loader=YamlLoader)
+            yaml.load(template_content, Loader=SafeLoader)
             end_time = time.perf_counter()
             times.append((end_time - start_time) * 1000)  # Convert to milliseconds
 
