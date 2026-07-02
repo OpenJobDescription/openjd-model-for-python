@@ -51,7 +51,7 @@ jobs:
 
     steps:
       - name: Checkout openjd-model-for-python
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.branch || inputs.tag || github.ref }}
 
@@ -118,7 +118,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout openjd-model-for-python
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.branch || inputs.tag || github.ref }}
 
@@ -159,7 +159,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout openjd-model-for-python
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.branch || inputs.tag || github.ref }}
 
@@ -186,7 +186,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout openjd-model-for-python
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.branch || inputs.tag || github.ref }}
 
