@@ -450,16 +450,28 @@ established v0 idiom or a spec-promised behavior). Numbers are stable
 so future fix commits can resolve them with the
 `~~ ... ~~ **Resolved.**` strikethrough convention.
 
-1. **Empty-steps validation should raise `DecodeValidationError`, not
+1. ~~**Empty-steps validation should raise `DecodeValidationError`, not
    `ModelValidationError`** — for v0 parity. Either remap the
    empty-steps case in
    `rust-bindings/src/model/errors.rs::model_err_to_py` (or in the
    upstream Rust validator) so it surfaces under
    `PyDecodeValidationError`, or update the spec to call out the
    exception-class change explicitly. Pinned in
-   `test/openjd/model_v1/test_known_gaps.py::test_empty_steps_raises_decode_validation_error_like_v0`.
+   `test/openjd/model_v1/test_known_gaps.py::test_empty_steps_raises_decode_validation_error_like_v0`.~~
+   **Resolved** — documented in `specs/python-model-interface.md`
+   under "Exceptions" as a deliberate v0 divergence:
+   `DecodeValidationError` is reserved for schema-level (parse-stage)
+   failures the binding can detect before constructing the typed
+   model, and `ModelValidationError` is raised for everything caught
+   by the model validator (the at-least-one-step rule, parameter-
+   definition invariants, step-name uniqueness, etc.). Both classes
+   inherit `ValueError`, so callers catching `ValueError` are
+   unaffected; callers that distinguish should catch the tuple.
+   Regression test (with full message-body assertion per AGENTS.md
+   test quality standard) lives at
+   `test/openjd/model_v1/test_parse.py::TestDecodeJobTemplate::test_empty_steps_raises_model_validation_error`.
 
-2. **`JobTemplate.specification_version` should return a value
+2. ~~**`JobTemplate.specification_version` should return a value
    comparable to `v1.TemplateSpecificationVersion`** — today it
    returns the Rust pyo3 enum
    (`openjd._openjd_rs.TemplateSpecificationVersion`, variants
@@ -472,9 +484,26 @@ so future fix commits can resolve them with the
    shim); (b) drop the Python str-Enum shim and re-export the Rust
    pyclass under `v1.TemplateSpecificationVersion` (requires renaming
    variants for v0 parity — `JOBTEMPLATE_v2023_09` style). Pinned in
-   `test/openjd/model_v1/test_known_gaps.py::test_template_specification_version_comparable_to_python_str_enum`.
+   `test/openjd/model_v1/test_known_gaps.py::test_template_specification_version_comparable_to_python_str_enum`.~~
+   **Resolved** — chose path (b). The Rust pyclass
+   `PyTemplateSpecificationVersion` in
+   `rust-bindings/src/model/types.rs` was reshaped to expose the v0
+   `str`-Enum surface directly: `#[pyo3(name = "JOBTEMPLATE_v2023_09")]`
+   / `ENVIRONMENT_v2023_09` variant names, a `.value` getter that
+   returns the spec-form string, a `__new__` that accepts either form,
+   `__eq__` / `__hash__` that compare equal (and hash equal) to the
+   spec-form string, and `module = "openjd._openjd_rs"` so its
+   canonical Python identity lives in the Rust module. The Python
+   wrapper `_v1/__init__.py` now imports `TemplateSpecificationVersion`
+   directly from `openjd._openjd_rs` (no shim). There is exactly one
+   class, identity-preserving across re-exports.
+   The same treatment was applied to `SpecificationRevision`.
+   The stale "str-Enum shim" paragraph in the spec's "Pickle Support"
+   section was also corrected to match. Regression test moved from
+   `test_known_gaps.py` to
+   `test/openjd/model_v1/test_version_enums.py::TestTemplateSpecificationVersion::test_template_specification_version_returned_from_decode`.
 
-3. **`merge_job_parameter_definitions` should emit `default` as the
+3. ~~**`merge_job_parameter_definitions` should emit `default` as the
    parameter's native Python type, not as a string** — `int` for
    `INT`, `float` for `FLOAT`, `bool` for `BOOL`, `list[T]` for the
    `LIST[*]` variants, and `str` for `STRING` / `PATH` /
@@ -484,9 +513,30 @@ so future fix commits can resolve them with the
    `param_type` dispatch that converts the underlying typed value into
    the right Python type. Pinned in
    `test/openjd/model_v1/test_known_gaps.py::test_merge_default_int_returned_as_int`
-   and `test_merge_default_float_returned_as_float`.
+   and `test_merge_default_float_returned_as_float`.~~
+   **Resolved** — added a `default_to_native` helper in
+   `rust-bindings/src/model/create_job_fns.rs` that dispatches on
+   `JobParameterType` and parses the upstream-stringified default
+   back into the native Python type. The upstream
+   `MergedParameterDefinition::default` is `Option<String>` (every
+   variant is round-tripped through `default_value()`'s stringifier),
+   so the binding now parses it back: `i64` for `INT`, `f64` for
+   `FLOAT`, `bool` for `BOOL`, `serde_json::from_str::<Vec<T>>` for
+   the `LIST[*]` variants, pass-through for `STRING` / `PATH` /
+   `RANGE_EXPR`. Parsing failures fall back to the raw string as a
+   defensive guard against future upstream serialization changes.
+   Existing parametrized tests in
+   `test/openjd/model_v1/test_merge_job_parameters.py::TestMergeTemplates_v2023_09`
+   updated to reflect native-type defaults (`"default": 8` instead of
+   `"default": "8"`, etc.). The two int/float gap tests were moved
+   out of `test_known_gaps.py` and expanded into a full per-type
+   coverage class `TestMergeDefaultNativeTypes` covering all 12 type
+   variants (INT, FLOAT, STRING, PATH, BOOL, LIST_INT, LIST_FLOAT,
+   LIST_STRING, LIST_BOOL, LIST_LIST_INT). Each assertion pins type
+   identity (`isinstance(..., int)`) as well as equality, since
+   `5 == 5.0` would otherwise let a regression slip through.
 
-4. **`merge_job_parameter_definitions` should include the `description`
+4. ~~**`merge_job_parameter_definitions` should include the `description`
    field on each merged dict** — v0's typed defs carried it, and the
    upstream `openjd_model::merge_job_parameter_definitions` produces
    it on each input definition. The fix at the binding layer is to
@@ -495,7 +545,26 @@ so future fix commits can resolve them with the
    template or the relevant environment template, and add it to the
    merged dict when present. Update the spec's "Return shape" key
    list to include `description`. Pinned in
-   `test/openjd/model_v1/test_known_gaps.py::test_merge_includes_description`.
+   `test/openjd/model_v1/test_known_gaps.py::test_merge_includes_description`.~~
+   **Resolved** — chose path (a). The binding's
+   `py_merge_job_parameter_definitions` in
+   `rust-bindings/src/model/create_job_fns.rs` now builds a
+   `HashMap<&str, &str>` from `name → description` by walking the
+   same template sources the upstream merge walked (environment
+   templates in order, then the job template), with later
+   descriptions overwriting earlier ones — matching how the upstream
+   merge tracks `default`. The merged dict carries the `description`
+   key when at least one contributing template provided one, and
+   omits the key otherwise (consistent with how `default` /
+   `objectType` / `dataFlow` are conditionally emitted). The spec's
+   "Return shape" key list now lists `description` with its
+   semantics. Test moved out of `test_known_gaps.py` and expanded
+   into a full `TestMergeDescriptionPropagation` class covering five
+   cases: description from job template, description from
+   environment template, job-template-wins ordering, later-env-wins
+   ordering, and key-absent-when-no-description. `test_known_gaps.py`
+   is now empty of merge gaps (only the typing-imports leak
+   regression test remains).
 
 5. **Internal typing imports in `openjd.model._v1.__init__.py` should
    be prefixed with `_`** — `from typing import Any, Optional,

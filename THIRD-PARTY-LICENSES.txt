@@ -119,7 +119,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------
-** typing_extensions; version 4.15.0 -- https://pypi.org/project/typing_extensions/
+** typing_extensions; version 4.16.0 -- https://pypi.org/project/typing_extensions/
 A. HISTORY OF THE SOFTWARE
 ==========================
 
