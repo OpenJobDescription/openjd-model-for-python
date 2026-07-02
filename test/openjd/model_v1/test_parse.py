@@ -74,13 +74,20 @@ class TestDecodeJobTemplate:
         # (v0 raised the latter, which v1 deliberately corrects —
         # ``DecodeValidationError`` is reserved for parse-stage failures
         # like unknown specificationVersion or malformed YAML/JSON).
+        # The divergence is documented in
+        # ``specs/python-model-interface.md`` under "Exceptions".
         template = {
             "specificationVersion": "jobtemplate-2023-09",
             "name": "T",
             "steps": [],
         }
-        with pytest.raises(ModelValidationError):
+        with pytest.raises(ModelValidationError) as exc_info:
             decode_job_template(template=template)
+        # Pin the message body (per the AGENTS.md "Test Quality Standard":
+        # exception class + message body, not just class).
+        assert str(exc_info.value) == (
+            "1 validation error for JobTemplate\n" "JobTemplate: must have at least one step."
+        )
 
 
 class TestDecodeEnvironmentTemplate:

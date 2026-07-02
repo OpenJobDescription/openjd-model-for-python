@@ -8,6 +8,7 @@ use pyo3_stub_gen::derive::*;
 
 use openjd_model::template::EnvironmentTemplate;
 use openjd_model::types::JobParameterInputValues;
+use openjd_model::JobParameterType;
 use openjd_model::PathParameterOptions;
 
 use crate::expr::expr_value::py_to_expr_value;
@@ -188,13 +189,41 @@ pub(crate) fn py_merge_job_parameter_definitions(
     let merged = openjd_model::merge_job_parameter_definitions(&job_template.inner, &env_templates)
         .map_err(model_err_to_py)?;
 
+    // Collect descriptions by parameter name. The upstream
+    // `MergedParameterDefinition` struct does not carry a description
+    // field (only `name`, `param_type`, `default`, `object_type`,
+    // `data_flow`, `source`, and the merged constraint fields), so we
+    // recover it here by walking the same template sources the merge
+    // walked. To match how `default` is tracked (later template wins),
+    // we walk environment templates first (in order) then the job
+    // template last, overwriting on each set description we encounter.
+    let mut descriptions: std::collections::HashMap<&str, &str> = std::collections::HashMap::new();
+    for et in &env_templates {
+        if let Some(params) = &et.parameter_definitions {
+            for p in params {
+                if let Some(desc) = p.description() {
+                    descriptions.insert(p.name(), desc);
+                }
+            }
+        }
+    }
+    for p in job_template.inner.parameter_definitions_list() {
+        if let Some(desc) = p.description() {
+            descriptions.insert(p.name(), desc);
+        }
+    }
+
     let mut out = Vec::new();
     for m in &merged {
         let d = PyDict::new(py);
         d.set_item("name", &m.name)?;
         d.set_item("type", m.param_type.as_spec_str())?;
         if let Some(ref default) = m.default {
-            d.set_item("default", default)?;
+            let py_default = default_to_native(py, m.param_type, default)?;
+            d.set_item("default", py_default)?;
+        }
+        if let Some(desc) = descriptions.get(m.name.as_str()) {
+            d.set_item("description", *desc)?;
         }
         if let Some(ref ot) = m.object_type {
             d.set_item("objectType", ot.to_string())?;
@@ -206,6 +235,81 @@ pub(crate) fn py_merge_job_parameter_definitions(
         out.push(d.unbind());
     }
     Ok(out)
+}
+
+/// Convert a stringified default value back into the native Python
+/// type for its parameter type.
+///
+/// The upstream Rust crate's `MergedParameterDefinition::default` is
+/// `Option<String>` — every variant is stringified through
+/// `JobParameterDefinition::default_value()` regardless of the
+/// underlying typed payload. The binding contract (per
+/// `specs/python-model-interface.md`) is that callers receive the
+/// default in its native Python type (`int` for `INT`, `float` for
+/// `FLOAT`, `list[T]` for `LIST[T]`, etc.). This helper parses the
+/// stringified form back into the right Python type.
+///
+/// `STRING` / `PATH` / `RANGE_EXPR` defaults pass through unchanged
+/// (they are already strings). `LIST[*]` defaults are JSON-serialised
+/// by the upstream `default_value()` implementation, so they round-trip
+/// through `serde_json`.
+///
+/// If parsing fails for any reason (defensive fallback against future
+/// upstream serialization changes), the original string is returned
+/// so the caller never sees a `None` where v0 would have produced a
+/// default.
+fn default_to_native(
+    py: Python<'_>,
+    param_type: JobParameterType,
+    raw: &str,
+) -> PyResult<Py<pyo3::PyAny>> {
+    use pyo3::IntoPyObjectExt;
+    match param_type {
+        JobParameterType::String | JobParameterType::Path | JobParameterType::RangeExpr => {
+            raw.into_py_any(py)
+        }
+        JobParameterType::Int => raw
+            .parse::<i64>()
+            .ok()
+            .map(|v| v.into_py_any(py))
+            .unwrap_or_else(|| raw.into_py_any(py)),
+        JobParameterType::Float => raw
+            .parse::<f64>()
+            .ok()
+            .map(|v| v.into_py_any(py))
+            .unwrap_or_else(|| raw.into_py_any(py)),
+        JobParameterType::Bool => match raw {
+            "true" => true.into_py_any(py),
+            "false" => false.into_py_any(py),
+            _ => raw.into_py_any(py),
+        },
+        JobParameterType::ListString | JobParameterType::ListPath => {
+            serde_json::from_str::<Vec<String>>(raw)
+                .ok()
+                .map(|v| v.into_py_any(py))
+                .unwrap_or_else(|| raw.into_py_any(py))
+        }
+        JobParameterType::ListInt => serde_json::from_str::<Vec<i64>>(raw)
+            .ok()
+            .map(|v| v.into_py_any(py))
+            .unwrap_or_else(|| raw.into_py_any(py)),
+        JobParameterType::ListFloat => serde_json::from_str::<Vec<f64>>(raw)
+            .ok()
+            .map(|v| v.into_py_any(py))
+            .unwrap_or_else(|| raw.into_py_any(py)),
+        JobParameterType::ListBool => serde_json::from_str::<Vec<bool>>(raw)
+            .ok()
+            .map(|v| v.into_py_any(py))
+            .unwrap_or_else(|| raw.into_py_any(py)),
+        JobParameterType::ListListInt => serde_json::from_str::<Vec<Vec<i64>>>(raw)
+            .ok()
+            .map(|v| v.into_py_any(py))
+            .unwrap_or_else(|| raw.into_py_any(py)),
+        // ``JobParameterType`` is ``#[non_exhaustive]`` — any future
+        // variant we don't know about falls back to the raw string so
+        // callers see *some* value rather than nothing.
+        _ => raw.into_py_any(py),
+    }
 }
 
 #[cfg_attr(

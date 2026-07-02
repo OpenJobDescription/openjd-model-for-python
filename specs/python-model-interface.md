@@ -324,6 +324,13 @@ following keys:
   default) — the default value, in its native Python type
   (``int`` / ``float`` / ``str`` / ``list`` / …) per the
   parameter's type.
+* ``description`` (``str``, present only if at least one
+  contributing template provided one) — the human-readable
+  description copied from the originating template. When more
+  than one contributing template defines a description for the
+  same parameter, the description from the template walked last
+  wins (environment templates are walked in order, then the job
+  template), mirroring how ``default`` is tracked.
 * ``objectType`` (``str``, present only for ``PATH`` parameters
   with an ``objectType`` declared) — ``"FILE"`` or
   ``"DIRECTORY"``.
@@ -342,7 +349,9 @@ values" pass. The underlying Rust crate's
 ``openjd_model::merge_job_parameter_definitions`` returns a
 struct with ``source`` / ``name`` / ``param_type`` / ``default`` /
 ``object_type`` / ``data_flow`` fields; the binding flattens
-that struct into the dict above.
+that struct into the dict above and additionally recovers
+``description`` by walking the same template sources the merge
+walked (the upstream struct does not carry a description field).
 
 #### `evaluate_let_bindings`
 
@@ -1386,23 +1395,31 @@ Practical consequences:
 
 ```python
 from openjd.model._v1 import decode_job_template
-from openjd.model._v1.errors import DecodeValidationError
+from openjd.model._v1.errors import DecodeValidationError, ModelValidationError
 
-# Invalid template
+# Invalid template — schema-level failure (missing required top-level
+# key) raises DecodeValidationError. These are the failures the
+# binding can detect before the dict is reshaped into the typed
+# model, so they don't need to run through the model validator.
 try:
     decode_job_template(template={"bad": "template"})
 except DecodeValidationError as e:
     str(e)  # "Template is missing Open Job Description schema version key: specificationVersion"
 
-# Empty steps
+# Empty steps — model-level structural failure raises
+# ModelValidationError. The shape parses successfully but the
+# decoded JobTemplate fails the "at least one step" invariant when
+# the model validator runs, so the failure surfaces under
+# ModelValidationError rather than DecodeValidationError. See the
+# divergence note below.
 try:
     decode_job_template(template={
         "specificationVersion": "jobtemplate-2023-09",
         "name": "Test",
         "steps": [],
     })
-except DecodeValidationError as e:
-    str(e)  # validation error about empty steps
+except ModelValidationError as e:
+    str(e)  # "1 validation error for JobTemplate\nJobTemplate: must have at least one step."
 ```
 
 | Exception | Base |
@@ -1411,6 +1428,28 @@ except DecodeValidationError as e:
 | `ModelValidationError` | `ValueError` |
 | `UnsupportedSchema` | `ValueError` |
 | `ExpressionError` | `ValueError` |
+
+**`DecodeValidationError` vs `ModelValidationError` divergence from v0.**
+The v0 (Pydantic) reference raised ``DecodeValidationError`` for *every*
+template-decode failure — including model-level structural invariants
+like "must have at least one step" — because pydantic's discriminated-
+union dispatch ran the field validators inside the decode call. The v1
+binding splits the two phases: ``DecodeValidationError`` is raised
+strictly for schema-level failures the binding can detect before
+constructing the typed model (missing/unknown ``specificationVersion``,
+unknown fields under strict mode, unparseable JSON/YAML, etc.), and
+``ModelValidationError`` is raised for everything caught by the model
+validator that runs once the decoded shape is in hand (the at-least-one-
+step rule, parameter-definition invariants, step-name uniqueness, etc.).
+Both classes inherit ``ValueError``, so callers that catch ``ValueError``
+are unaffected — only callers that distinguish between the two classes
+need to be aware of the split. The v1 binding **deliberately** does not
+remap empty-steps to ``DecodeValidationError`` for v0 byte-parity: the
+v1 model validator is the right home for the check (it surfaces with the
+same path-prefixed message shape as every other model-level invariant),
+and callers wanting to catch every decode-time failure should catch
+``ValueError`` or both classes by tuple (``except (DecodeValidationError,
+ModelValidationError)``).
 
 **`UnsupportedSchema` constructor divergence from v0.** The v0
 reference defines ``UnsupportedSchema(version_str)`` such that
@@ -1472,12 +1511,15 @@ original.
 | ``PathTaskParameter`` | constructor argument (``range``) |
 | ``ChunkIntTaskParameter`` | constructor arguments (``range``, ``chunks``) |
 | ``TaskChunksDefinition`` | constructor arguments (three fields) |
+| ``SpecificationRevision`` | variant name (``v2023_09``) |
+| ``TemplateSpecificationVersion`` | variant name (``JOBTEMPLATE_v2023_09``, ``ENVIRONMENT_v2023_09``) |
 | ``DecodeValidationError``, ``ModelValidationError``, ``UnsupportedSchema`` | standard exception pickle, under their canonical ``openjd.model._v1`` module path |
 
-``SpecificationRevision`` and ``TemplateSpecificationVersion`` pickle
-through the Python ``str``-Enum shims provided by ``openjd.model._v1``
-(the underlying Rust pyclasses live at ``openjd._openjd_rs`` and pickle
-correctly there too).
+``SpecificationRevision`` and ``TemplateSpecificationVersion`` are Rust
+pyclass enums whose canonical home is ``openjd._openjd_rs``; they are
+re-exported from ``openjd.model._v1`` (identity-preserving — there is
+exactly one class in each case). Pickled instances round-trip through
+the variant name via the module-level ``_reconstruct_enum`` helper.
 
 The decoded model containers (``JobTemplate``, ``EnvironmentTemplate``,
 ``Job``, ``Step``, etc.) and the live ``StepParameterSpaceIterator`` /
