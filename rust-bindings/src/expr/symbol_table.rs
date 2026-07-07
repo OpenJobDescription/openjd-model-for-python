@@ -2,13 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyString};
 #[cfg(feature = "stub-gen")]
 use pyo3_stub_gen::derive::*;
 
+use openjd_expr::path_mapping::PathFormat;
 use openjd_expr::symbol_table::SymbolTable;
+use openjd_expr::types::ExprType;
+use openjd_expr::value::ExprValue;
 
 use crate::expr::expr_value::{py_to_expr_value, PyExprValue};
+use crate::expr::path_format::PyPathFormat;
 
 #[cfg_attr(feature = "stub-gen", gen_stub_pyclass(module = "openjd._openjd_rs"))]
 #[pyclass(module = "openjd.expr", name = "SymbolTable", from_py_object)]
@@ -323,4 +327,80 @@ pub(crate) fn _reconstruct_serialized_symtab(json: &str) -> PyResult<PySerialize
         ))
     })?;
     Ok(PySerializedSymbolTable { inner })
+}
+
+// ── Typed symbol-table builder ─────────────────────────────────────
+//
+// Bridges the pure-Python (v0) model's flat dotted-key symbol table into
+// a typed `SymbolTable` the engine can evaluate against. This replaces the
+// former Python `symtab_to_expr_values`/`_to_expr_value` coercion so the
+// string→typed-value coercion lives next to the engine (PR #285 review,
+// C3/C5). The OpenJD-type → EXPR-type-spec mapping stays in Python; this
+// function takes the resolved EXPR type spec strings (e.g. "int",
+// "list[int]", "path") so the engine owns only the coercion + nesting.
+
+/// Coerce a single Python value to an `ExprValue`, optionally toward a known
+/// target `ExprType`. String values are coerced via `from_str_coerce` (so a
+/// stored ``"10"`` of type INT becomes a real integer); other native values
+/// are built then coerced. With no target the value's native type is
+/// inferred. Mirrors the former Python ``_expr_support._to_expr_value``.
+fn coerce_symbol_value(
+    value: &Bound<'_, pyo3::PyAny>,
+    target: Option<&ExprType>,
+    pf: PathFormat,
+) -> PyResult<ExprValue> {
+    let Some(target) = target else {
+        // No confident type — let the engine infer from the native value.
+        return py_to_expr_value(value);
+    };
+    if let Ok(s) = value.cast::<PyString>() {
+        return ExprValue::from_str_coerce(&s.to_cow()?, target, pf)
+            .map_err(pyo3::exceptions::PyValueError::new_err);
+    }
+    py_to_expr_value(value)?
+        .coerce(target, pf)
+        .map_err(pyo3::exceptions::PyValueError::new_err)
+}
+
+/// Build a typed :class:`SymbolTable` from a flat dotted-key value map and an
+/// optional per-key EXPR type-spec map, coercing string values to their
+/// declared type and nesting dotted keys (``"Param.Frame"``) into subtables.
+///
+/// ``values`` maps dotted symbol names to their (typically string) values, as
+/// the v0 model stores them. ``types`` maps the same dotted names to EXPR
+/// type spec strings (``"int"``, ``"list[int]"``, ``"path"``, …); names absent
+/// from ``types`` are inferred from the value. ``path_format`` controls how
+/// PATH-typed values are interpreted (defaults to the host OS).
+#[cfg_attr(
+    feature = "stub-gen",
+    gen_stub_pyfunction(module = "openjd._openjd_rs")
+)]
+#[pyfunction]
+#[pyo3(signature = (values, types=None, *, path_format=None))]
+pub(crate) fn build_symbol_table(
+    values: &Bound<'_, PyDict>,
+    types: Option<&Bound<'_, PyDict>>,
+    path_format: Option<PyPathFormat>,
+) -> PyResult<PySymbolTable> {
+    let pf = path_format
+        .map(PathFormat::from)
+        .unwrap_or_else(PathFormat::host);
+    let mut st = SymbolTable::new();
+    for (key, value) in values.iter() {
+        let dotted: String = key.extract()?;
+        let target: Option<ExprType> = match types {
+            Some(t) => match t.get_item(dotted.as_str())? {
+                Some(spec_obj) => {
+                    let spec: String = spec_obj.extract()?;
+                    Some(ExprType::parse(&spec).map_err(pyo3::exceptions::PyValueError::new_err)?)
+                }
+                None => None,
+            },
+            None => None,
+        };
+        let ev = coerce_symbol_value(&value, target.as_ref(), pf)?;
+        st.set(&dotted, ev)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+    }
+    Ok(PySymbolTable { inner: st })
 }

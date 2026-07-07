@@ -14,6 +14,12 @@ class SymbolTable:
     """
 
     _table: dict[str, Any]
+    # Optional mapping of symbol name -> OpenJD type name (e.g. "INT",
+    # "LIST[INT]") for EXPR-typed symbols. Used by the EXPR expression engine to
+    # coerce stored values to their declared type. Declared as a real field
+    # (rather than stashed dynamically) so it is preserved across copies and
+    # unions; empty for non-EXPR symbol tables.
+    expr_types: dict[str, str]
 
     def __init__(self, *, source: Optional[Union[SymbolTable, dict[str, Any]]] = None):
         """Initialize the SymbolTable
@@ -23,9 +29,11 @@ class SymbolTable:
                 gets initialized with the contents of the given source. Defaults to None.
         """
         self._table = dict()
+        self.expr_types = dict()
         if source is not None:
             if isinstance(source, SymbolTable):
                 self._table.update(source._table)
+                self.expr_types.update(source.expr_types)
             elif isinstance(source, dict):
                 self._table.update(source)
             else:
@@ -65,9 +73,11 @@ class SymbolTable:
         """
         retval = SymbolTable()
         retval._table.update(self._table)
+        retval.expr_types.update(self.expr_types)
         for symtab in symtabs:
             if isinstance(symtab, SymbolTable):
                 retval._table.update(symtab._table)
+                retval.expr_types.update(symtab.expr_types)
             elif isinstance(symtab, dict):
                 retval._table.update(symtab)
             else:

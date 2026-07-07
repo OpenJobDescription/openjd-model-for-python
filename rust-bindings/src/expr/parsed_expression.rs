@@ -92,6 +92,37 @@ impl PyParsedExpression {
         Ok(PyExprValue { inner: value })
     }
 
+    /// Type-check the expression against a symbol table of (typically
+    /// unresolved) typed placeholders, without extracting a concrete value.
+    ///
+    /// Succeeds when the expression is well-typed for the given symbol types —
+    /// including when the result is an unresolved value that merely depends on
+    /// a runtime symbol — and raises only on a genuine type/evaluation error.
+    /// Unlike :meth:`evaluate`, it discards the result, so it never raises the
+    /// "cannot extract value from unresolved" boundary error; callers no longer
+    /// need to sniff the error message to tell a real type error from a
+    /// runtime-dependent one.
+    #[pyo3(signature = (*, values=None, profile=None))]
+    fn typecheck(
+        &self,
+        values: Option<&Bound<'_, pyo3::PyAny>>,
+        profile: Option<&PyExprProfile>,
+    ) -> PyResult<()> {
+        let symtab;
+        let symtab_refs: Vec<&SymbolTable> = if let Some(v) = values {
+            symtab = extract_symtab(v)?;
+            vec![&symtab]
+        } else {
+            vec![]
+        };
+        let lib = profile_for_call(profile);
+        self.inner
+            .with_library(&lib)
+            .evaluate(&symtab_refs)
+            .map_err(expr_err_to_py)?;
+        Ok(())
+    }
+
     /// Evaluate the expression and return an :class:`EvalResult` with the
     /// resulting value alongside the per-call resource-usage metrics
     /// (``peak_memory`` in bytes, ``operation_count``).

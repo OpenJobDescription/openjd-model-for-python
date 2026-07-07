@@ -55,6 +55,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         [
             pytest.param(param_type.value, id=f"{param_type.value} type")
             for param_type in JobParameterType_2023_09
+            if param_type.value in ("STRING", "PATH", "INT", "FLOAT")
         ],
     )
     def test_preprocess_job_parameters_handles_parameter_type(self, param_type: str) -> None:
@@ -94,6 +95,7 @@ class TestPreprocessJobParameters_2023_09:  # noqa: N801
         [
             pytest.param(param_type.value, id=f"{param_type.value} type")
             for param_type in JobParameterType_2023_09
+            if param_type.value in ("STRING", "PATH", "INT", "FLOAT")
         ],
     )
     def test_handles_parameter_type_without_path_escape_validation(self, param_type: str) -> None:

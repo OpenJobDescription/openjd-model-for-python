@@ -24,6 +24,14 @@ if TYPE_CHECKING:
         JobFloatParameterDefinition,
         JobStringParameterDefinition,
         JobPathParameterDefinition,
+        JobBoolParameterDefinition,
+        JobListStringParameterDefinition,
+        JobListPathParameterDefinition,
+        JobListIntParameterDefinition,
+        JobListFloatParameterDefinition,
+        JobListBoolParameterDefinition,
+        JobListListIntParameterDefinition,
+        JobRangeExprParameterDefinition,
     )
 
     EnvironmentTemplate = EnvironmentTemplate_2023_09
@@ -34,6 +42,14 @@ if TYPE_CHECKING:
         JobFloatParameterDefinition,
         JobStringParameterDefinition,
         JobPathParameterDefinition,
+        JobBoolParameterDefinition,
+        JobListStringParameterDefinition,
+        JobListPathParameterDefinition,
+        JobListIntParameterDefinition,
+        JobListFloatParameterDefinition,
+        JobListBoolParameterDefinition,
+        JobListListIntParameterDefinition,
+        JobRangeExprParameterDefinition,
     ]
     StepParameterSpace = StepParameterSpace_2023_09
     Step = Step_2023_09
@@ -77,15 +93,31 @@ class ParameterValueType(str, Enum):
     PATH = "PATH"
     # This type is only used for task parameters, not job parameters
     CHUNK_INT = "CHUNK[INT]"
+    # EXPR extension (RFC 0007) job-parameter value types. These tag a job
+    # parameter value through preprocessing/create_job; the underlying value is
+    # carried natively (lists/bools) for these types so the typed EXPR
+    # SymbolTable builder can coerce them, rather than the stringified form used
+    # by the original scalar types.
+    BOOL = "BOOL"
+    RANGE_EXPR = "RANGE_EXPR"
+    LIST_STRING = "LIST[STRING]"
+    LIST_PATH = "LIST[PATH]"
+    LIST_INT = "LIST[INT]"
+    LIST_FLOAT = "LIST[FLOAT]"
+    LIST_BOOL = "LIST[BOOL]"
+    LIST_LIST_INT = "LIST[LIST[INT]]"
 
 
 @dataclass(frozen=True, **dataclass_kwargs)
 class ParameterValue:
     type: ParameterValueType
-    # All values are strings regardless of types.
-    # We typecast as needed during processing based on the type
-    # of the parameter value.
-    value: str
+    # For the original scalar types (STRING/INT/FLOAT/PATH) the value is a
+    # string, typecast as needed during processing. For the EXPR-extension
+    # types (RFC 0007: BOOL and the LIST[*] variants) the value is carried as
+    # its native Python type (bool / list) so the typed EXPR SymbolTable
+    # builder can coerce it — a stringified list cannot be re-parsed back to a
+    # typed list.
+    value: Any
 
 
 TaskParameterSet = dict[str, ParameterValue]
@@ -194,14 +226,19 @@ class DefinesTemplateVariables:
         defines: set[TemplateVariableDef] = set(),
         field: str = "",
         inject: set[str] = set(),
+        expr_inject: set[str] = set(),
     ):
         self.symbol_prefix = symbol_prefix
         self.defines = defines
         self.field = field
         self.inject = inject
+        # Symbols injected only when the EXPR extension is enabled. Applied by
+        # the variable-reference prevalidator (which has the parsing context);
+        # the static `inject` set above cannot be made conditional.
+        self.expr_inject = expr_inject
 
     def __repr__(self) -> str:
-        return f"DefinesTemplateVariables(symbol_prefix={self.symbol_prefix!r}, defines={self.defines!r}, field={self.field!r}, inject={self.inject!r})"
+        return f"DefinesTemplateVariables(symbol_prefix={self.symbol_prefix!r}, defines={self.defines!r}, field={self.field!r}, inject={self.inject!r}, expr_inject={self.expr_inject!r})"
 
 
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)

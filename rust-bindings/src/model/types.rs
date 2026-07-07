@@ -304,6 +304,22 @@ impl PyJobParameterType {
     }
 }
 
+/// Map an OpenJD job-parameter type spec name (e.g. ``"INT"``, ``"LIST[INT]"``,
+/// ``"RANGE_EXPR"``; case-insensitive) to its EXPR type spec string
+/// (``"int"``, ``"list[int]"``, ``"range_expr"``), or ``None`` when the name is
+/// not a recognized job-parameter type. Single-sources both the
+/// (case-insensitive) type-name parsing and the OpenJD-type -> EXPR-type
+/// mapping in the Rust ``openjd-model`` crate so the Python model does not
+/// hand-maintain a parallel table.
+#[cfg_attr(
+    feature = "stub-gen",
+    gen_stub_pyfunction(module = "openjd._openjd_rs")
+)]
+#[pyfunction]
+pub(crate) fn job_parameter_type_expr_spec(type_name: &str) -> Option<String> {
+    JobParameterType::from_spec_str(type_name.trim()).map(|t| t.expr_type().to_string())
+}
+
 impl From<PyJobParameterType> for JobParameterType {
     fn from(v: PyJobParameterType) -> Self {
         match v {

@@ -72,8 +72,8 @@ pub(crate) use template_types::{
     PyStepScript as PyTemplateStepScript, PyStepTemplate,
 };
 pub(crate) use types::{
-    PyDocumentType, PyJobParameterType, PyJobParameterValue, PyTaskParameterType,
-    PyTaskParameterValue, PyTemplateSpecificationVersion,
+    job_parameter_type_expr_spec, PyDocumentType, PyJobParameterType, PyJobParameterValue,
+    PyTaskParameterType, PyTaskParameterValue, PyTemplateSpecificationVersion,
 };
 pub(crate) use user_interfaces::{
     PyBoolUserInterface, PyFileFilter, PyFloatUserInterface, PyHiddenOnlyUserInterface,
