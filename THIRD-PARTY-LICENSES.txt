@@ -2522,13 +2522,13 @@ limitations under the License.
 ** arraydeque; version 0.5.1 -- https://crates.io/crates/arraydeque
 ** get-size-derive2; version 0.7.4 -- https://crates.io/crates/get-size-derive2
 ** get-size2; version 0.7.4 -- https://crates.io/crates/get-size2
-** granit-parser; version 0.0.2 -- https://crates.io/crates/granit-parser
+** granit-parser; version 0.0.3 -- https://crates.io/crates/granit-parser
 ** itoa; version 1.0.18 -- https://crates.io/crates/itoa
 ** libc; version 0.2.186 -- https://crates.io/crates/libc
 ** manyhow-macros; version 0.11.4 -- https://crates.io/crates/manyhow-macros
 ** openjd-expr; version 0.1.2 -- https://crates.io/crates/openjd-expr
-** openjd-model; version 0.2.1 -- https://crates.io/crates/openjd-model
-** openjd-sessions; version 0.2.3 -- https://crates.io/crates/openjd-sessions
+** openjd-model; version 0.3.0 -- https://crates.io/crates/openjd-model
+** openjd-sessions; version 0.3.1 -- https://crates.io/crates/openjd-sessions
 ** pin-project-lite; version 0.2.17 -- https://crates.io/crates/pin-project-lite
 ** portable-atomic; version 1.13.1 -- https://crates.io/crates/portable-atomic
 ** proc-macro2; version 1.0.106 -- https://crates.io/crates/proc-macro2
@@ -2542,7 +2542,7 @@ limitations under the License.
 ** rustc-hash; version 2.1.2 -- https://crates.io/crates/rustc-hash
 ** rustversion; version 1.0.22 -- https://crates.io/crates/rustversion
 ** ryu; version 1.0.23 -- https://crates.io/crates/ryu
-** serde-saphyr; version 0.0.26 -- https://crates.io/crates/serde-saphyr
+** serde-saphyr; version 0.0.27 -- https://crates.io/crates/serde-saphyr
 ** serde; version 1.0.228 -- https://crates.io/crates/serde
 ** serde_core; version 1.0.228 -- https://crates.io/crates/serde_core
 ** serde_derive; version 1.0.228 -- https://crates.io/crates/serde_derive

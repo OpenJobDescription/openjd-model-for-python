@@ -325,17 +325,30 @@ impl PyEnvironmentActions {
     /// schema. If both flavours of the same field are passed, the
     /// snake-case form wins.
     #[new]
-    #[pyo3(signature = (*, on_enter=None, on_exit=None, onEnter=None, onExit=None))]
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (*, on_enter=None, on_exit=None, on_wrap_env_enter=None, on_wrap_task_run=None, on_wrap_env_exit=None, onEnter=None, onExit=None, onWrapEnvEnter=None, onWrapTaskRun=None, onWrapEnvExit=None))]
     fn new(
         on_enter: Option<PyAction>,
         on_exit: Option<PyAction>,
+        on_wrap_env_enter: Option<PyAction>,
+        on_wrap_task_run: Option<PyAction>,
+        on_wrap_env_exit: Option<PyAction>,
         #[allow(non_snake_case)] onEnter: Option<PyAction>,
         #[allow(non_snake_case)] onExit: Option<PyAction>,
+        #[allow(non_snake_case)] onWrapEnvEnter: Option<PyAction>,
+        #[allow(non_snake_case)] onWrapTaskRun: Option<PyAction>,
+        #[allow(non_snake_case)] onWrapEnvExit: Option<PyAction>,
     ) -> Self {
         let on_enter = on_enter.or(onEnter);
         let on_exit = on_exit.or(onExit);
+        let on_wrap_env_enter = on_wrap_env_enter.or(onWrapEnvEnter);
+        let on_wrap_task_run = on_wrap_task_run.or(onWrapTaskRun);
+        let on_wrap_env_exit = on_wrap_env_exit.or(onWrapEnvExit);
         PyEnvironmentActions {
             inner: EnvironmentActions {
+                on_wrap_env_enter: on_wrap_env_enter.map(|a| a.inner),
+                on_wrap_task_run: on_wrap_task_run.map(|a| a.inner),
+                on_wrap_env_exit: on_wrap_env_exit.map(|a| a.inner),
                 on_enter: on_enter.map(|a| a.inner),
                 on_exit: on_exit.map(|a| a.inner),
             },
@@ -370,6 +383,48 @@ impl PyEnvironmentActions {
         self.on_exit()
     }
 
+    #[getter]
+    fn on_wrap_env_enter(&self) -> Option<PyAction> {
+        self.inner
+            .on_wrap_env_enter
+            .as_ref()
+            .map(|a| PyAction { inner: a.clone() })
+    }
+
+    #[getter]
+    #[pyo3(name = "onWrapEnvEnter")]
+    fn on_wrap_env_enter_camel(&self) -> Option<PyAction> {
+        self.on_wrap_env_enter()
+    }
+
+    #[getter]
+    fn on_wrap_task_run(&self) -> Option<PyAction> {
+        self.inner
+            .on_wrap_task_run
+            .as_ref()
+            .map(|a| PyAction { inner: a.clone() })
+    }
+
+    #[getter]
+    #[pyo3(name = "onWrapTaskRun")]
+    fn on_wrap_task_run_camel(&self) -> Option<PyAction> {
+        self.on_wrap_task_run()
+    }
+
+    #[getter]
+    fn on_wrap_env_exit(&self) -> Option<PyAction> {
+        self.inner
+            .on_wrap_env_exit
+            .as_ref()
+            .map(|a| PyAction { inner: a.clone() })
+    }
+
+    #[getter]
+    #[pyo3(name = "onWrapEnvExit")]
+    fn on_wrap_env_exit_camel(&self) -> Option<PyAction> {
+        self.on_wrap_env_exit()
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "EnvironmentActions(on_enter={}, on_exit={})",
@@ -397,6 +452,15 @@ impl PyEnvironmentActions {
         }
         if let Some(a) = slf.on_exit() {
             kwargs.set_item("on_exit", a)?;
+        }
+        if let Some(a) = slf.on_wrap_env_enter() {
+            kwargs.set_item("on_wrap_env_enter", a)?;
+        }
+        if let Some(a) = slf.on_wrap_task_run() {
+            kwargs.set_item("on_wrap_task_run", a)?;
+        }
+        if let Some(a) = slf.on_wrap_env_exit() {
+            kwargs.set_item("on_wrap_env_exit", a)?;
         }
         let cls = py.get_type::<PyEnvironmentActions>();
         let args = PyTuple::new(py, [cls.into_any(), kwargs.into_any()])?;
