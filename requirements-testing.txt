@@ -6,7 +6,7 @@ pytest-xdist == 3.8.*
 types-PyYAML ~= 6.0
 black == 25.*
 ruff == 0.15.*
-mypy == 1.19.*
+mypy == 2.2.*
 # pydantic: required by the legacy model_v0 (Pydantic) test suite,
 # which lives alongside the new Rust-backed model_v1 implementation.
 pydantic >= 2.10, < 3
