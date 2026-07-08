@@ -539,15 +539,20 @@ impl PySession {
     }
 
     /// Run a task. Non-blocking — spawns the onRun action on a background thread.
-    #[pyo3(signature = (*, step_script, task_parameter_values=None, resolved_symtab=None, os_env_vars=None))]
+    ///
+    /// `step_name` is surfaced as `WrappedStep.Name` to a wrapping environment's
+    /// `onWrapTaskRun` hook (RFC 0008).
+    #[pyo3(signature = (*, step_script, step_name="", task_parameter_values=None, resolved_symtab=None, os_env_vars=None))]
     fn run_task(
         &self,
         step_script: &PyStepScript,
+        step_name: &str,
         task_parameter_values: Option<&Bound<'_, PyDict>>,
         resolved_symtab: Option<&crate::expr::PySerializedSymbolTable>,
         os_env_vars: Option<HashMap<String, String>>,
     ) -> PyResult<()> {
         let script = step_script.inner.clone();
+        let step_name = step_name.to_owned();
         let task_params = match task_parameter_values {
             Some(d) => Some(extract_task_parameter_values(d)?),
             None => None,
@@ -573,8 +578,13 @@ impl PySession {
             run_action(session, session_arc, snapshot, move |rt, session| {
                 let env_ref = os_env_vars.as_ref();
                 let task_ref = task_params.as_ref();
-                let _ =
-                    rt.block_on(session.run_task(&script, task_ref, resolved.as_ref(), env_ref));
+                let _ = rt.block_on(session.run_task(
+                    &step_name,
+                    &script,
+                    task_ref,
+                    resolved.as_ref(),
+                    env_ref,
+                ));
             });
         });
 
