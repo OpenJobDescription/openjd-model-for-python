@@ -66,7 +66,6 @@ from openjd._openjd_rs import (
 #   from openjd.model._v1 import template, job, types, errors
 from . import errors, job, template, types  # noqa: F401
 
-
 # ── Python-only types ──
 
 
@@ -91,7 +90,6 @@ from openjd._openjd_rs import (
 
 
 from .._version import version  # noqa: E402
-
 
 __all__ = (
     # Submodules

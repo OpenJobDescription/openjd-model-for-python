@@ -24,7 +24,6 @@ from openjd.model._step_param_space_iter import (
     divide_int_list_into_noncontiguous_chunks,
 )
 
-
 PARAMETRIZE_CASES: tuple = (
     pytest.param(
         RangeListTaskParameterDefinition_2023_09(

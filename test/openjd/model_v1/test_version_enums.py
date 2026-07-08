@@ -4,7 +4,6 @@ import pytest
 
 from openjd.model._v1 import TemplateSpecificationVersion, decode_job_template
 
-
 # All known variants. Add new ones here as the spec evolves; the test
 # ensures every variant is classified as exactly job-template OR
 # environment-template, never both.

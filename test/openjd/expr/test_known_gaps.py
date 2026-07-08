@@ -23,7 +23,6 @@ from openjd.expr import (
     SymbolTable,
 )
 
-
 # ── SymbolTable['Key'] = value when Key is already a subtable ──
 #
 # Reference (``_set_path`` with a single-component key):

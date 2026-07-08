@@ -19,7 +19,6 @@ import importlib
 
 import pytest
 
-
 # A minimal but real job template that exercises parsing, validation,
 # job creation, and task parameter iteration.
 _MINIMAL_JOB_TEMPLATE = {

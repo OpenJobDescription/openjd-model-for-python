@@ -25,7 +25,6 @@ import pickle
 
 import pytest
 
-
 # ── Group A: enums ───────────────────────────────────────────────
 
 

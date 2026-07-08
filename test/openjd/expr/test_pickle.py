@@ -32,7 +32,6 @@ from openjd.expr import (
     TypeCode,
 )
 
-
 # ── Group A: enums round-trip via variant name ───────────────────
 
 

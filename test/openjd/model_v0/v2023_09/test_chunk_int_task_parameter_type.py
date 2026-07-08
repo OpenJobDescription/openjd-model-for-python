@@ -12,7 +12,6 @@ from openjd.model.v2023_09 import (
     StepParameterSpaceDefinition,
 )
 
-
 PARAMETRIZE_CASES: tuple = (
     "data",
     (

@@ -19,7 +19,6 @@ Cross-reference:
 
 from __future__ import annotations
 
-
 # ── Top-level package no longer leaks typing imports ──
 #
 # An earlier draft of ``openjd.model._v1`` imported ``Any``,
