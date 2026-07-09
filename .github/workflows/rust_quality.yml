@@ -71,7 +71,7 @@ jobs:
 
       - name: Cache Cargo registry and build artifacts
         id: cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index
@@ -133,7 +133,7 @@ jobs:
       # Restore-only: rust_quality(ubuntu) owns the cache write. Saving
       # from here too would race with that job.
       - name: Restore Cargo cache (read-only)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             ~/.cargo/registry/index
