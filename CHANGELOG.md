@@ -1,3 +1,14 @@
+## 0.11.0 (2026-07-09)
+
+
+### Features
+* bump openjd crates for EXPR and WRAP_ACTIONS extension support (#306) ([`9995c45`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/9995c453c693e292b9cc8e61e7a8b3cc3fce1d7f))
+* Implement WRAP_ACTIONS with EXPR binding to RS (#285) ([`8eae8ae`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/8eae8ae133fe0fd80d616ee698770c137c824cbc))
+
+### Bug Fixes
+* resolve recommendations #1-#4 from model-bindings quality report ([`8f1f9f1`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/8f1f9f1c3f5d9d148d4c7398014dd142835e784e))
+
+
 ## 0.10.1 (2026-06-25)
 
 _There are no new changes introduced in this release, it is identical to 0.10.0. This release was made to publish all release artifacts on PyPI and the GitHub releases page that were missed in the 0.10.0 release due to a new build and release process._
