@@ -29,7 +29,6 @@ import importlib
 import os
 import sys
 
-
 _VAR = "OPENJD_MODEL_V0_TEST_IMPORT"
 _DEFAULT = "root"
 _CHOICES = ("root", "v0")

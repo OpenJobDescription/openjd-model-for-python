@@ -37,7 +37,6 @@ from openjd._openjd_rs import (
     HostContext,
 )
 
-
 # Note: the `__module__` / `__name__` / `__qualname__` of the Rust-backed
 # exceptions (ExpressionError, FormatStringValidationError, etc.) are set by
 # the `_openjd_rs` module init in Rust to their canonical user-facing values

@@ -81,7 +81,6 @@ from openjd._openjd_rs import (
     HiddenOnlyUserInterface,
 )
 
-
 # Short aliases for ergonomics. Both names refer to the same class
 # object — ``Action is TemplateAction`` is True.
 Action = TemplateAction

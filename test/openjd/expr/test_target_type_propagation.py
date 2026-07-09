@@ -29,7 +29,6 @@ the tests here use that — same coverage, same parametrized cases.
 
 from openjd.expr import ExprType, SymbolTable, TypeCode, evaluate_expression
 
-
 STRING = ExprType("string")
 LIST_INT = ExprType("list[int]")
 INT_OR_STRING = ExprType("int | string")

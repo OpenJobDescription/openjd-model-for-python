@@ -1,15 +1,20 @@
 coverage[toml] == 7.*
-pytest == 8.4.*
+pytest == 9.1.*; python_version >= "3.10"
+pytest == 8.4.*; python_version < "3.10"
 pytest-cov == 7.1.*
 pytest-timeout == 2.4.*
 pytest-xdist == 3.8.*
 types-PyYAML ~= 6.0
-black == 25.*
+# Pinned to 25.x because black 26+ produces different formatting output
+# that is incompatible with black 25 (last version supporting Python 3.9).
+black == 25.11.*
 ruff == 0.15.*
-mypy == 1.19.*
+mypy == 2.2.*; python_version >= "3.10"
+mypy == 1.19.*; python_version < "3.10"
 # pydantic: required by the legacy model_v0 (Pydantic) test suite,
 # which lives alongside the new Rust-backed model_v1 implementation.
 pydantic >= 2.10, < 3
 # hypothesis: used by the opt-in fuzz test suites in test/openjd/expr
 # and test/openjd/model-v*. conftest.py imports it unconditionally.
-hypothesis ~= 6.0
+hypothesis ~= 6.156; python_version >= "3.10"
+hypothesis ~= 6.141; python_version < "3.10"

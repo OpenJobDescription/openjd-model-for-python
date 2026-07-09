@@ -12,6 +12,10 @@ updates:
       day: "monday"
     commit-message: 
       prefix: "chore(deps):"
+    ignore:
+      # black 26+ drops Python 3.9 compat and produces different formatting
+      - dependency-name: "black"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:

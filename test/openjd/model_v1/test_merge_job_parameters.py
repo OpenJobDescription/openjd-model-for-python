@@ -13,7 +13,6 @@ from openjd.model._v1.template import (
     JobTemplate,
 )
 
-
 BASIC_JOB_TEMPLATE_STEP_2023_09: dict[str, Any] = {
     "name": "Test",
     "script": {"actions": {"onRun": {"command": "foo"}}},

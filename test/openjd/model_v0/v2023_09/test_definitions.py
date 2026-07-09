@@ -9,7 +9,6 @@ from inspect import getmembers, getmodule, isclass
 
 from .test_module import ClassWithForwardRef, ClassWithoutForwardRef
 
-
 ALL_MODELS = sorted(
     [obj for name, obj in getmembers(mod) if isclass(obj) and issubclass(obj, BaseModel)],
     key=lambda o: o.__name__,
