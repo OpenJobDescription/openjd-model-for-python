@@ -349,6 +349,10 @@ def _validate_model_template_variable_references(
     ):
         return []
 
+    # _issubclass_for_pydantic isn't a TypeGuard, so mypy only narrows `model` to
+    # `type[object]` via isclass(). Re-assert the OpenJDModel subclass narrowing.
+    model = cast(Type[OpenJDModel], model)
+
     # Does this cls change the variable reference scope for itself and its children? If so, then update
     # our scope.
     model_override_scope = cast(ModelPrivateAttr, model._template_variable_scope).get_default()
@@ -762,6 +766,10 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
     # Anything except for an OpenJDModel returns an empty result
     if not isclass(model) or not _issubclass_for_pydantic(model, OpenJDModel):
         return {"__export__": ScopedSymtabs()}
+
+    # _issubclass_for_pydantic isn't a TypeGuard, so mypy only narrows `model` to
+    # `type[object]` via isclass(). Re-assert the OpenJDModel subclass narrowing.
+    model = cast(Type[OpenJDModel], model)
 
     # If the model has no exported variable definitions, prune it
     if recursive_pruning and "__export__" not in model._template_variable_sources:

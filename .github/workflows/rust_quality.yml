@@ -174,10 +174,10 @@ jobs:
       # are scoped to the normal dep graph (what actually ships in the
       # extension module).
       - name: cargo deny check licenses, bans, sources
-        run: cargo deny --manifest-path rust-bindings/Cargo.toml check --config deny.toml licenses bans sources
+        run: cargo deny --manifest-path rust-bindings/Cargo.toml --config deny.toml check licenses bans sources
 
       - name: cargo deny check advisories
-        run: cargo deny --manifest-path rust-bindings/Cargo.toml check --config deny.toml advisories --exclude-dev
+        run: cargo deny --manifest-path rust-bindings/Cargo.toml --config deny.toml --exclude-dev check advisories
 
   third_party_licenses:
     name: THIRD-PARTY-LICENSES check
