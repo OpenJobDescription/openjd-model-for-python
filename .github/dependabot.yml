@@ -16,6 +16,15 @@ updates:
       # black 26+ drops Python 3.9 compat and produces different formatting
       - dependency-name: "black"
         update-types: ["version-update:semver-major"]
+    # Combine all minor and patch bumps into a single PR. Major bumps do not
+    # match this group and so each get their own individual PR.
+    groups:
+      pip-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:
@@ -23,3 +32,12 @@ updates:
       day: "monday"
     commit-message: 
       prefix: "chore(github):"
+    # Combine all minor and patch bumps into a single PR. Major bumps do not
+    # match this group and so each get their own individual PR.
+    groups:
+      github-actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
