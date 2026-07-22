@@ -359,7 +359,7 @@ class TestInternalCreateJobCreateAs:
         class Model(BaseModelForTesting):
             f: str
             _job_creation_metadata = JobCreationMetadata(
-                create_as=JobCreateAsMetadata(callable=lambda m: TargetModel)
+                create_as=JobCreateAsMetadata(callable=lambda m, symtab: TargetModel)
             )
 
         model = Model(f="some string")

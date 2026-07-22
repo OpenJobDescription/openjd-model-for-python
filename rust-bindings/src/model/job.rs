@@ -557,7 +557,7 @@ impl PyEmbeddedFile {
     fn new(
         name: String,
         r#type: String,
-        filename: Option<crate::expr::PyFormatString>,
+        filename: Option<String>,
         data: Option<crate::expr::PyFormatString>,
         runnable: Option<bool>,
         #[allow(non_snake_case)] endOfLine: Option<String>,
@@ -586,7 +586,9 @@ impl PyEmbeddedFile {
             inner: job::EmbeddedFile {
                 name,
                 file_type,
-                filename: filename.map(|f| f.inner),
+                // Plain string per the 2023-09 schema: the field is not
+                // @fmtstring, so "{{ }}" sequences are literal text.
+                filename,
                 data: data.map(|d| d.inner),
                 runnable,
                 end_of_line,
@@ -607,7 +609,7 @@ impl PyEmbeddedFile {
 
     #[getter]
     fn filename(&self) -> Option<String> {
-        self.inner.filename.as_ref().map(|f| f.raw().to_string())
+        self.inner.filename.clone()
     }
 
     #[getter]
@@ -1085,6 +1087,9 @@ impl PyCancelationMode {
         match &self.inner {
             job::CancelationMode::Terminate => "TERMINATE",
             job::CancelationMode::NotifyThenTerminate { .. } => "NOTIFY_THEN_TERMINATE",
+            // The raw format string; the mode decision is deferred to run
+            // time. Matches the openjd-rs serialization of DeferredMode.
+            job::CancelationMode::DeferredMode { mode, .. } => mode.raw(),
         }
     }
 
@@ -1093,6 +1098,10 @@ impl PyCancelationMode {
         match &self.inner {
             job::CancelationMode::NotifyThenTerminate {
                 notify_period_in_seconds,
+            }
+            | job::CancelationMode::DeferredMode {
+                notify_period_in_seconds,
+                ..
             } => notify_period_in_seconds
                 .as_ref()
                 .map(|t| t.raw().to_string()),

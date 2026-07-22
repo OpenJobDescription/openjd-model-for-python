@@ -15,12 +15,14 @@ from pydantic import (
     field_validator,
     model_validator,
     ConfigDict,
+    Discriminator,
     StringConstraints,
     Field,
     PositiveInt,
     PositiveFloat,
     StrictBool,
     StrictInt,
+    Tag,
     ValidationError,
     ValidationInfo,
 )
@@ -46,6 +48,7 @@ from .._internal._variable_reference_validation import (
     prevalidate_model_template_variable_references,
 )
 from .._range_expr import IntRangeExpr
+from .._symbol_table import SymbolTable
 from .._types import (
     DefinesTemplateVariables,
     JobCreateAsMetadata,
@@ -283,6 +286,31 @@ class CancelationMode(str, Enum):
 NotifyPeriodType = Annotated[int, Field(ge=1, le=600)]
 
 
+def _validate_notify_period_value(
+    v: Any, info: ValidationInfo
+) -> Optional[Union[int, FormatString]]:
+    """Shared notifyPeriodInSeconds validation for
+    CancelationMethodNotifyThenTerminate and CancelationMethodDeferred."""
+    if v is None:
+        return v
+    context = cast(Optional[ModelParsingContext], info.context)
+    if isinstance(v, str):
+        if context and "FEATURE_BUNDLE_1" not in context.extensions:
+            # Try to parse as int, fail if not
+            try:
+                return int(v)
+            except ValueError:
+                raise ValueError(
+                    "notifyPeriodInSeconds as a format string requires the FEATURE_BUNDLE_1 extension."
+                )
+        return validate_int_fmtstring_field(v, ge=1, context=context)
+    if isinstance(v, int):
+        if v < 1 or v > 600:
+            raise ValueError("notifyPeriodInSeconds must be between 1 and 600")
+        return v
+    return v
+
+
 class CancelationMethodNotifyThenTerminate(OpenJDModel_v2023_09):
     """Notify-then-terminate cancelation mode for an Action.
 
@@ -323,24 +351,7 @@ class CancelationMethodNotifyThenTerminate(OpenJDModel_v2023_09):
     def _validate_notify_period(
         cls, v: Any, info: ValidationInfo
     ) -> Optional[Union[int, FormatString]]:
-        if v is None:
-            return v
-        context = cast(Optional[ModelParsingContext], info.context)
-        if isinstance(v, str):
-            if context and "FEATURE_BUNDLE_1" not in context.extensions:
-                # Try to parse as int, fail if not
-                try:
-                    return int(v)
-                except ValueError:
-                    raise ValueError(
-                        "notifyPeriodInSeconds as a format string requires the FEATURE_BUNDLE_1 extension."
-                    )
-            return validate_int_fmtstring_field(v, ge=1, context=context)
-        if isinstance(v, int):
-            if v < 1 or v > 600:
-                raise ValueError("notifyPeriodInSeconds must be between 1 and 600")
-            return v
-        return v
+        return _validate_notify_period_value(v, info)
 
 
 class CancelationMethodTerminate(OpenJDModel_v2023_09):
@@ -355,6 +366,130 @@ class CancelationMethodTerminate(OpenJDModel_v2023_09):
     """
 
     mode: Literal[CancelationMode.TERMINATE]
+
+
+class CancelationMethodDeferred(OpenJDModel_v2023_09):
+    """A cancelation whose ``mode`` is a format string, resolved at run
+    time (Template Schemas 5.3, FEATURE_BUNDLE_1 extension).
+
+    What is the problem this solves?
+
+    Format strings in general are *already* delay-processed: when a template
+    says ``args: ["{{WrappedAction.Command}}"]``, the parser just stores
+    "this is a format string" and the value gets resolved much later, inside
+    a running session, right before the action launches — that's when the
+    runtime seeds the ``WrappedAction.*`` variables from the action being
+    wrapped. "Resolve later" is the normal pipeline for every other field.
+
+    ``mode`` is different because it isn't a normal value field — it's the
+    *schema selector*. The parser needs to know TERMINATE vs
+    NOTIFY_THEN_TERMINATE at parse time to decide what shape of object it's
+    even reading (only one of them allows ``notifyPeriodInSeconds``). So the
+    "which shape?" decision happens at parse time, but a forwarded value
+    like ``mode: "{{WrappedAction.Cancelation.Mode}}"`` only exists at run
+    time — that mismatch made round-trip cancelation forwarding in RFC 0008
+    wrap hooks impossible (pydantic's discriminated union rejected the
+    template with "does not match any of the expected tags").
+
+    The fix is this class: the parser accepts a format string in ``mode``
+    as a third, "decided later" state (gated on the FEATURE_BUNDLE_1
+    extension), and the shape decision moves to resolution time, right
+    before the action runs:
+
+    1. The runtime seeds ``WrappedAction.Cancelation.Mode`` from the
+       wrapped action (``"TERMINATE"``, ``"NOTIFY_THEN_TERMINATE"``, or
+       ``None``).
+    2. It resolves the ``mode:`` expression against that.
+    3. ``"TERMINATE"``/``"NOTIFY_THEN_TERMINATE"`` — the cancelation block
+       now acts as that method, and its sibling fields are validated
+       against that shape. ``None`` (null, whole-field expressions only) —
+       the whole ``cancelation:`` block is treated as never written.
+       Anything else — the action fails.
+
+    Static validation is *not* deferred: at parse time the validator still
+    checks the expression is well-formed and that ``WrappedAction.*`` is
+    only referenced inside wrap hooks. Any format string is accepted —
+    normal interpolation like ``"{{Prefix}}_THEN_TERMINATE"`` is permitted;
+    only the resolved value is constrained. You just can't know *which* of
+    the two modes it'll be until the wrapped action is in front of you —
+    which is inherent to forwarding: the same wrap environment gets reused
+    across many steps whose cancelation settings differ.
+
+    Mirrors ``CancelationMode::DeferredMode`` in openjd-rs. See
+    openjd-specifications Template Schemas 5.3 and RFC 0008 "Cancelation
+    behavior".
+
+    Attributes:
+        mode (FormatString): A format string resolving to "TERMINATE" or
+            "NOTIFY_THEN_TERMINATE"; a whole-field interpolation expression
+            may also resolve to null.
+        notifyPeriodInSeconds (Optional[Union[int, FormatString]]): As on
+            CancelationMethodNotifyThenTerminate; only meaningful when the
+            mode resolves to NOTIFY_THEN_TERMINATE, and must resolve to
+            null when the mode resolves to TERMINATE.
+    """
+
+    mode: FormatString
+    notifyPeriodInSeconds: Optional[Union[NotifyPeriodType, FormatString]] = None  # noqa: N815
+
+    _job_creation_metadata = JobCreationMetadata(resolve_fields={"notifyPeriodInSeconds"})
+
+    @field_validator("mode", mode="before")
+    @classmethod
+    def _validate_mode(cls, v: Any, info: ValidationInfo) -> Any:
+        if isinstance(v, str):
+            context = cast(Optional[ModelParsingContext], info.context)
+            if context and "FEATURE_BUNDLE_1" not in context.extensions:
+                raise ValueError(
+                    "a format string in cancelation mode requires the FEATURE_BUNDLE_1 extension."
+                )
+            # Any format string is permitted (normal format string
+            # behavior, Template Schemas 5.3); the resolved value is
+            # checked against the two mode names at run time. Only a
+            # whole-field expression additionally gets string? null
+            # semantics (a null result drops the cancelation object).
+        return v
+
+    @field_validator("notifyPeriodInSeconds", mode="before")
+    @classmethod
+    def _validate_notify_period(
+        cls, v: Any, info: ValidationInfo
+    ) -> Optional[Union[int, FormatString]]:
+        return _validate_notify_period_value(v, info)
+
+
+def _cancelation_discriminator(v: Any) -> Optional[str]:
+    """Callable discriminator for the cancelation union: routes the two
+    literal modes to their fixed-shape classes and a format-string mode to
+    :class:`CancelationMethodDeferred` (see that class's docstring for why
+    the mode decision can be deferred at all)."""
+    mode = v.get("mode") if isinstance(v, dict) else getattr(v, "mode", None)
+    if isinstance(mode, CancelationMode):
+        mode = mode.value
+    if isinstance(mode, str):
+        if mode == CancelationMode.NOTIFY_THEN_TERMINATE.value:
+            return "notify_then_terminate"
+        if mode == CancelationMode.TERMINATE.value:
+            return "terminate"
+        if "{{" in mode:
+            return "deferred"
+    if isinstance(v, CancelationMethodNotifyThenTerminate):
+        return "notify_then_terminate"
+    if isinstance(v, CancelationMethodTerminate):
+        return "terminate"
+    if isinstance(v, CancelationMethodDeferred):
+        return "deferred"
+    return None
+
+
+CancelationMethod = Annotated[
+    Union[
+        Annotated[CancelationMethodNotifyThenTerminate, Tag("notify_then_terminate")],
+        Annotated[CancelationMethodTerminate, Tag("terminate")],
+        Annotated[CancelationMethodDeferred, Tag("deferred")],
+    ],
+    Discriminator(_cancelation_discriminator),
+]
 
 
 ArgListType = Annotated[list[ArgString], Field(min_length=1)]
@@ -436,19 +571,33 @@ class Action(OpenJDModel_v2023_09):
         timeout (Optional[int]): Maximum allowed runtime of the Action in seconds.
             Can be a format string with FEATURE_BUNDLE_1 extension.
             Default: No timeout
-        cancelation (Optional[Union[CancelationMethodNotifyThenTerminate, CancelationMethodTerminate]]):
-            If defined, provides details regarding how this action should be canceled.
+        cancelation (Optional[CancelationMethod]): If defined, provides details
+            regarding how this action should be canceled. One of
+            CancelationMethodNotifyThenTerminate, CancelationMethodTerminate, or
+            CancelationMethodDeferred (a format-string mode resolved
+            at run time; FEATURE_BUNDLE_1).
             Default: CancelationMethodTerminate
     """
 
     command: CommandString
     args: Optional[ArgListType] = None
     timeout: Optional[Union[PositiveInt, FormatString]] = None
-    cancelation: Optional[
-        Union[CancelationMethodNotifyThenTerminate, CancelationMethodTerminate]
-    ] = Field(None, discriminator="mode")
+    cancelation: Optional[CancelationMethod] = None
 
     _job_creation_metadata = JobCreationMetadata(resolve_fields={"timeout"})
+
+    # `timeout` and `cancelation` (its notifyPeriodInSeconds and a deferred
+    # format-string mode) are plain @fmtstring fields resolved at job
+    # creation, before any session exists — unlike `command`/`args`, which
+    # resolve in the session. They therefore validate at template scope: no
+    # Session.*, no Env.File.*/Task.File.*, and no host-context functions.
+    # The RFC 0008 wrap hooks may still forward the wrapped action's values
+    # ("{{WrappedAction.Timeout}}"): the WrappedAction.* symbols are injected
+    # per-hook at every scope via EnvironmentActions._template_field_inject.
+    _template_field_scopes = {
+        "timeout": ResolutionScope.TEMPLATE,
+        "cancelation": ResolutionScope.TEMPLATE,
+    }
 
     @field_validator("timeout", mode="before")
     @classmethod
@@ -511,6 +660,28 @@ class EnvironmentActions(OpenJDModel_v2023_09):
     onWrapTaskRun: Optional[Action] = Field(None)  # noqa: N815
     onWrapEnvExit: Optional[Action] = Field(None)  # noqa: N815
 
+    # RFC 0008: the wrapped-context variables exist only within their wrap
+    # hook's action, seeded by the runtime when the hook runs in place of the
+    # wrapped action. WrappedAction.* is available in all three hooks;
+    # WrappedEnv.Name only in the env-enter/exit hooks; WrappedStep.Name only
+    # in the task-run hook. Injected per-field at every scope so a hook's
+    # creation-scoped fields (timeout/cancelation) can round-trip forward
+    # the wrapped action's values ("{{WrappedAction.Timeout}}",
+    # "{{WrappedAction.Cancelation.Mode}}").
+    _WRAPPED_ACTION_SYMBOLS: ClassVar[set[str]] = {
+        "|WrappedAction.Command",
+        "|WrappedAction.Args",
+        "|WrappedAction.Environment",
+        "|WrappedAction.Timeout",
+        "|WrappedAction.Cancelation.Mode",
+        "|WrappedAction.Cancelation.NotifyPeriodInSeconds",
+    }
+    _template_field_inject = {
+        "onWrapEnvEnter": _WRAPPED_ACTION_SYMBOLS | {"|WrappedEnv.Name"},
+        "onWrapEnvExit": _WRAPPED_ACTION_SYMBOLS | {"|WrappedEnv.Name"},
+        "onWrapTaskRun": _WRAPPED_ACTION_SYMBOLS | {"|WrappedStep.Name"},
+    }
+
     @model_validator(mode="before")
     @classmethod
     def _requires_oneof(cls, values: dict[str, Any], info: ValidationInfo) -> dict[str, Any]:
@@ -557,6 +728,15 @@ class EnvironmentActions(OpenJDModel_v2023_09):
 
         on_enter = values.get("onEnter")
         on_exit = values.get("onExit")
+        # Base 2023-09 (§3.5) requires onEnter whenever a script is present;
+        # RFC 0008 relaxes this to "at least one action" when the
+        # WRAP_ACTIONS extension is declared. The strict base rule is only
+        # applied at template decode (context present) — job-instantiation
+        # re-validation has no parsing context, matching the other extension
+        # gates in this module.
+        if context is not None and "WRAP_ACTIONS" not in extensions:
+            if on_enter is None:
+                raise ValueError("onEnter is required.")
         if on_enter is None and on_exit is None:
             raise ValueError("Must define one of: onEnter or onExit")
         return values
@@ -770,6 +950,42 @@ def validate_let_field(value: Any, info: ValidationInfo, *, simple_action: bool 
     return value
 
 
+# §3.4: the maximum number of values a task parameter's range may take on.
+# Not raised by FEATURE_BUNDLE_1 in 2023-09 (matches openjd-rs's
+# EffectiveLimits.max_task_param_range_len).
+_MAX_TASK_PARAM_RANGE_LEN = 1024
+
+
+class NameIdentifierLengthMixin:
+    """Applies the §7.1 identifier length limit — 64 characters, or 512 with
+    FEATURE_BUNDLE_1 — to a model's ``name`` field.
+
+    The static ``Identifier`` type constraint is the FEATURE_BUNDLE_1 maximum
+    (512); this tightens it to 64 when the extension is not declared. The
+    check is skipped when no parsing context is present (job-instantiation
+    re-validation), matching the other extension gates in this module.
+    """
+
+    @field_validator("name", check_fields=False)
+    @classmethod
+    def _validate_name_identifier_length(cls, v: str, info: ValidationInfo) -> str:
+        context = cast(Optional[ModelParsingContext], info.context)
+        if context is None:
+            return v
+        max_len = 512 if "FEATURE_BUNDLE_1" in context.extensions else 64
+        if len(v) > max_len:
+            raise ValueError(f"name must be at most {max_len} characters long")
+        return v
+
+
+def validate_task_param_range_list_len(value: Any) -> Any:
+    """§3.4: a task parameter's list-form range may define at most
+    ``_MAX_TASK_PARAM_RANGE_LEN`` values."""
+    if isinstance(value, list) and len(value) > _MAX_TASK_PARAM_RANGE_LEN:
+        raise ValueError(f"range exceeds {_MAX_TASK_PARAM_RANGE_LEN} elements.")
+    return value
+
+
 class SimpleAction(OpenJDModel_v2023_09):
     """Syntax sugar for a script action with a specific interpreter.
 
@@ -786,9 +1002,7 @@ class SimpleAction(OpenJDModel_v2023_09):
     script: DataString
     args: Optional[ArgListType] = None
     timeout: Optional[Union[PositiveInt, FormatString]] = None
-    cancelation: Optional[
-        Union[CancelationMethodNotifyThenTerminate, CancelationMethodTerminate]
-    ] = Field(None, discriminator="mode")
+    cancelation: Optional[CancelationMethod] = None
     let: Optional[list[str]] = None
 
     # SimpleAction is syntax sugar that resolves to a StepScript (TASK scope),
@@ -892,19 +1106,11 @@ class EnvironmentScript(OpenJDModel_v2023_09):
             f"|{ValueReferenceConstants.WORKING_DIRECTORY.value}",
             f"|{ValueReferenceConstants.HAS_PATH_MAPPING_RULES.value}",
             f"|{ValueReferenceConstants.PATH_MAPPING_RULES_FILE.value}",
-            # WRAP_ACTIONS (RFC 0008) variables, visible inside the wrap hooks.
-            # First-cut note: injected at the script scope, so they are visible
-            # to all of this environment's actions rather than only the wrap
-            # hooks. Precise per-hook scoping (and rejecting WrappedAction.* /
-            # WrappedEnv.* / WrappedStep.* outside their hook) is deferred and
-            # belongs with the sessions runtime that produces these variables;
-            # the conformance scope-restriction cases are runtime `jobs/` tests.
-            "|WrappedAction.Command",
-            "|WrappedAction.Args",
-            "|WrappedAction.Environment",
-            "|WrappedAction.Timeout",
-            "|WrappedEnv.Name",
-            "|WrappedStep.Name",
+            # The WRAP_ACTIONS (RFC 0008) WrappedAction.* / WrappedEnv.* /
+            # WrappedStep.* variables are injected per wrap hook via
+            # EnvironmentActions._template_field_inject, so they are visible
+            # only within their hook's action — including its creation-scoped
+            # timeout/cancelation fields for round-trip forwarding.
         },
     )
     _template_variable_sources = {
@@ -1017,7 +1223,7 @@ class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
     chunks: Optional[TaskChunksDefinition] = None
 
 
-class IntTaskParameterDefinition(OpenJDModel_v2023_09):
+class IntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """Definition of an integer-typed Task Parameter and its value range.
 
     Attributes:
@@ -1041,14 +1247,23 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
     )
     _template_variable_sources = {"__export__": {"__self__"}}
 
-    def _get_range_task_param_type(self: Any) -> Type[OpenJDModel]:
+    def _get_range_task_param_type(self: Any, symtab: SymbolTable) -> Type[OpenJDModel]:
         if isinstance(self.range, RangeString):
+            # RFC 0006 typed whole-field resolution: a range that is a single
+            # whole-field expression evaluating to a list instantiates as a
+            # literal value list (matching openjd-rs); otherwise the resolved
+            # string is parsed as a range expression.
+            from .._internal._create_job import resolve_whole_field_typed_list
+
+            if resolve_whole_field_typed_list(self.range, symtab) is not None:
+                return RangeListTaskParameterDefinition
             return RangeExpressionTaskParameterDefinition
         return RangeListTaskParameterDefinition
 
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(callable=_get_range_task_param_type),
         resolve_fields={"range"},
+        typed_resolve_fields={"range"},
         exclude_fields={"name"},
     )
 
@@ -1078,26 +1293,37 @@ class IntTaskParameterDefinition(OpenJDModel_v2023_09):
             # they've all been evaluated
             if len(value.expressions) == 0:
                 try:
-                    IntRangeExpr.from_str(value)
+                    parsed_range = IntRangeExpr.from_str(value)
                 except Exception as e:
                     raise ValueError(str(e))
+                # §3.4: the range may take on at most 1024 values.
+                if len(parsed_range) > _MAX_TASK_PARAM_RANGE_LEN:
+                    raise ValueError(
+                        f"range expression expands to {len(parsed_range)} elements "
+                        f"(max {_MAX_TASK_PARAM_RANGE_LEN})."
+                    )
+        else:
+            validate_task_param_range_list_len(value)
         return value
 
 
 def _validate_range_expr_requires_expr(value: Any, info: ValidationInfo) -> Any:
     """Shared ``range`` field validator for task-parameter definitions: a range
     expression (a ``RangeString`` format string, RFC 0007) requires the EXPR
-    extension to be declared. Used by the Float/String/Path task-parameter
-    definitions so the gate and its message are single-sourced.
+    extension to be declared, and a list-form range may take on at most 1024
+    values (§3.4). Used by the Float/String/Path task-parameter definitions so
+    the gate and its message are single-sourced.
     """
     if isinstance(value, RangeString):
         context = cast(Optional[ModelParsingContext], info.context)
         if context and "EXPR" not in context.extensions:
             raise ValueError("A range expression (format string) requires the EXPR extension.")
+    else:
+        validate_task_param_range_list_len(value)
     return value
 
 
-class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
+class FloatTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """Definition of a float-typed Task Parameter and its value range.
 
     Attributes:
@@ -1121,6 +1347,7 @@ class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=RangeListTaskParameterDefinition),
         resolve_fields={"range"},
+        typed_resolve_fields={"range"},
         exclude_fields={"name"},
     )
 
@@ -1141,7 +1368,7 @@ class FloatTaskParameterDefinition(OpenJDModel_v2023_09):
         return _validate_range_expr_requires_expr(value, info)
 
 
-class StringTaskParameterDefinition(OpenJDModel_v2023_09):
+class StringTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """Definition of a string-typed Task Parameter and its value range.
 
     Attributes:
@@ -1165,6 +1392,7 @@ class StringTaskParameterDefinition(OpenJDModel_v2023_09):
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=RangeListTaskParameterDefinition),
         resolve_fields={"range"},
+        typed_resolve_fields={"range"},
         exclude_fields={"name"},
     )
 
@@ -1174,7 +1402,7 @@ class StringTaskParameterDefinition(OpenJDModel_v2023_09):
         return _validate_range_expr_requires_expr(value, info)
 
 
-class PathTaskParameterDefinition(OpenJDModel_v2023_09):
+class PathTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """Definition of a path-typed Task Parameter and its value range.
 
     Attributes:
@@ -1198,6 +1426,7 @@ class PathTaskParameterDefinition(OpenJDModel_v2023_09):
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=RangeListTaskParameterDefinition),
         resolve_fields={"range"},
+        typed_resolve_fields={"range"},
         exclude_fields={"name"},
     )
 
@@ -1206,8 +1435,22 @@ class PathTaskParameterDefinition(OpenJDModel_v2023_09):
     def _range_expr_requires_expr(cls, value: Any, info: ValidationInfo) -> Any:
         return _validate_range_expr_requires_expr(value, info)
 
+    @field_validator("range")
+    @classmethod
+    def _validate_no_empty_path_values(cls, value: Any) -> Any:
+        # §3.4.2: an empty string is not a valid path on any OS, so a PATH
+        # task parameter's range may not contain one. Format-string items
+        # with expressions resolve later; literal empties are rejected here.
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                if isinstance(item, FormatString) and len(item.expressions) > 0:
+                    continue
+                if str(item) == "":
+                    raise ValueError(f"range[{i}] must not be an empty string.")
+        return value
 
-class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
+
+class ChunkIntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """Definition of an integer-typed Task Parameter, that is processed as
      chunks of tasks insteas of as individual tasks when running.
 
@@ -1234,14 +1477,23 @@ class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
     )
     _template_variable_sources = {"__export__": {"__self__"}}
 
-    def _get_range_task_param_type(self: Any) -> Type[OpenJDModel]:
+    def _get_range_task_param_type(self: Any, symtab: SymbolTable) -> Type[OpenJDModel]:
         if isinstance(self.range, RangeString):
+            # RFC 0006 typed whole-field resolution: a range that is a single
+            # whole-field expression evaluating to a list instantiates as a
+            # literal value list (matching openjd-rs); otherwise the resolved
+            # string is parsed as a range expression.
+            from .._internal._create_job import resolve_whole_field_typed_list
+
+            if resolve_whole_field_typed_list(self.range, symtab) is not None:
+                return RangeListTaskParameterDefinition
             return RangeExpressionTaskParameterDefinition
         return RangeListTaskParameterDefinition
 
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(callable=_get_range_task_param_type),
         resolve_fields={"range"},
+        typed_resolve_fields={"range"},
         exclude_fields={"name"},
     )
 
@@ -1284,9 +1536,17 @@ class ChunkIntTaskParameterDefinition(OpenJDModel_v2023_09):
             # they've all been evaluated
             if len(value.expressions) == 0:
                 try:
-                    IntRangeExpr.from_str(value)
+                    parsed_range = IntRangeExpr.from_str(value)
                 except Exception as e:
                     raise ValueError(str(e))
+                # §3.4: the range may take on at most 1024 values.
+                if len(parsed_range) > _MAX_TASK_PARAM_RANGE_LEN:
+                    raise ValueError(
+                        f"range expression expands to {len(parsed_range)} elements "
+                        f"(max {_MAX_TASK_PARAM_RANGE_LEN})."
+                    )
+        else:
+            validate_task_param_range_list_len(value)
         return value
 
 
@@ -1511,6 +1771,20 @@ class Environment(OpenJDModel_v2023_09):
     description: Optional[Description] = None
 
     _template_variable_scope = ResolutionScope.SESSION
+    # §7.3.1: an environment's `variables` values are format strings resolved
+    # at session scope, so the Session.* value references are available to
+    # them — matching the script's actions (whose injection lives on the
+    # script model) and the openjd-rs validator.
+    _template_variable_definitions = DefinesTemplateVariables(
+        inject={
+            f"|{ValueReferenceConstants.WORKING_DIRECTORY.value}",
+            f"|{ValueReferenceConstants.HAS_PATH_MAPPING_RULES.value}",
+            f"|{ValueReferenceConstants.PATH_MAPPING_RULES_FILE.value}",
+        },
+    )
+    _template_variable_sources = {
+        "variables": {"__self__"},
+    }
 
     @field_validator("name")
     @classmethod
@@ -1622,7 +1896,9 @@ class JobStringParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     groupLabel: Optional[UserInterfaceLabelStringValue] = None
 
 
-class JobStringParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
+class JobStringParameterDefinition(
+    NameIdentifierLengthMixin, OpenJDModel_v2023_09, JobParameterInterface
+):
     """A Job Parameter of type string.
 
     Attributes:
@@ -1861,7 +2137,9 @@ class JobPathParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     fileFilterDefault: Optional[JobPathParameterDefinitionFileFilter] = None
 
 
-class JobPathParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
+class JobPathParameterDefinition(
+    NameIdentifierLengthMixin, OpenJDModel_v2023_09, JobParameterInterface
+):
     """A Job Parameter of type path.
 
     Attributes:
@@ -2095,7 +2373,7 @@ class JobIntParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     singleStepDelta: Optional[PositiveInt] = None
 
 
-class JobIntParameterDefinition(OpenJDModel_v2023_09):
+class JobIntParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """A Job Parameter of type integer.
 
     Attributes:
@@ -2353,7 +2631,7 @@ class JobFloatParameterDefinitionUserInterface(OpenJDModel_v2023_09):
     singleStepDelta: Optional[PositiveFloat] = None
 
 
-class JobFloatParameterDefinition(OpenJDModel_v2023_09):
+class JobFloatParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """A Job Parameter of type float.
 
     Attributes:
@@ -2380,6 +2658,25 @@ class JobFloatParameterDefinition(OpenJDModel_v2023_09):
     maxValue: Optional[Decimal] = None  # noqa: N815
     allowedValues: Optional[AllowedFloatParameterList] = None  # noqa: N815
     default: Optional[Decimal] = None
+
+    @model_validator(mode="after")
+    def _validate_decimals_requires_spin_box(self) -> Self:
+        # §2.4: `decimals` configures the places editable in a SPIN_BOX; it is
+        # meaningless for DROPDOWN_LIST and HIDDEN controls. The effective
+        # control defaults to DROPDOWN_LIST when allowedValues is provided and
+        # SPIN_BOX otherwise, matching openjd-rs's validate_ui rules.
+        ui = self.userInterface
+        if ui is not None and ui.decimals is not None:
+            control = ui.control
+            if control is None:
+                control = (
+                    FloatUserInterfaceControl.DROPDOWN_LIST
+                    if self.allowedValues is not None
+                    else FloatUserInterfaceControl.SPIN_BOX
+                )
+            if control != FloatUserInterfaceControl.SPIN_BOX:
+                raise ValueError("decimals can only be provided when the control is SPIN_BOX.")
+        return self
 
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
@@ -2833,7 +3130,9 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
                 # validate when those values are substituted.
                 if isinstance(item, FormatString) and len(item.expressions) > 0:
                     continue
-                if item not in standard_capability["values"]:
+                # §3.3.2: attribute values follow capability naming, which is
+                # case-insensitive, so "LINUX" matches "linux".
+                if item.lower() not in standard_capability["values"]:
                     raise ValueError(
                         f"Values must be from {' '.join(standard_capability['values'])}"
                     )
@@ -2958,6 +3257,12 @@ class Step(OpenJDModel_v2023_09):
     parameterSpace: Optional[StepParameterSpace] = None  # noqa: N815
     hostRequirements: Optional[HostRequirements] = None
     dependencies: Optional[StepDependenciesList] = None
+    # RFC 0007 (EXPR): the step-level `let` bindings, preserved from the
+    # StepTemplate so the runtime can seed them when entering the step's
+    # environments — a step environment's variables and actions may reference
+    # them. The step's own script carries a merged copy (step bindings first)
+    # for the task-run path.
+    let: Optional[list[str]] = None
 
 
 class StepTemplate(OpenJDModel_v2023_09):
@@ -3006,9 +3311,48 @@ class StepTemplate(OpenJDModel_v2023_09):
     def _validate_let(cls, v: Any, info: ValidationInfo) -> Any:
         return validate_let_field(v, info)
 
+    def _extend_step_symtab(self: Any, symtab: SymbolTable) -> SymbolTable:
+        """Per-step symbol table for job instantiation, mirroring openjd-rs's
+        ``instantiate_step``: seeds ``Step.Name`` and evaluates the step-level
+        EXPR ``let`` bindings (RFC 0007 §3.6) in template scope, so the step's
+        parameter space, host requirements, and script instantiate against
+        them. Script-level ``let`` bindings are *not* evaluated here — they
+        resolve at session time.
+
+        ``Step.Name`` and ``let`` references only pass template validation
+        with the EXPR extension enabled, so seeding them unconditionally does
+        not change the behavior of non-EXPR templates.
+        """
+        step_symtab = SymbolTable(source=symtab)
+        step_symtab["Step.Name"] = str(self.name)
+        if self.let:
+            # Deferred import to keep the Rust expr surface off the non-EXPR
+            # path; `let` fields only exist when EXPR is declared.
+            from .._format_strings._nodes import ExprNode
+
+            for binding in self.let:
+                name, sep, rhs = binding.partition("=")
+                name = name.strip()
+                rhs = rhs.strip()
+                if not sep or not name or not rhs:
+                    # Malformed bindings are rejected by the `let` validator.
+                    continue
+                try:
+                    # evaluate_value keeps the engine's typed value (paths
+                    # stay paths, float rendering fidelity is preserved) when
+                    # the binding is later referenced.
+                    step_symtab[name] = ExprNode(rhs).evaluate_value(symtab=step_symtab)
+                except ValueError as exc:
+                    raise ValueError(f"let binding {name!r}: {exc}")
+        return step_symtab
+
     _template_variable_sources = {
         "script": {"__self__", "parameterSpace"},
         "stepEnvironments": {"__self__"},
+        # RFC 0007 §3.6: step-level `let` names (defined on __self__) are in
+        # scope for the step's parameter space and host requirements.
+        "parameterSpace": {"__self__"},
+        "hostRequirements": {"__self__"},
         "python": {"__self__", "parameterSpace"},
         "bash": {"__self__", "parameterSpace"},
         "cmd": {"__self__", "parameterSpace"},
@@ -3017,8 +3361,9 @@ class StepTemplate(OpenJDModel_v2023_09):
     }
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=Step),
-        exclude_fields={"python", "bash", "cmd", "powershell", "node", "let"},
+        exclude_fields={"python", "bash", "cmd", "powershell", "node"},
         transform=lambda t: cast("StepTemplate", t).resolve_syntax_sugar(),
+        extends_symtab=_extend_step_symtab,
     )
 
     @field_validator("name")
@@ -3121,9 +3466,11 @@ class StepTemplate(OpenJDModel_v2023_09):
             # the Job and the runtime resolves it. The model has already
             # validated reference/shadowing rules across both scopes at decode.
             if self.let:
+                # The step's own `let` is preserved too (Step.let): the
+                # runtime seeds it when entering the step's environments.
                 merged_let = [*self.let, *(self.script.let or [])]
                 new_script = self.script.model_copy(update={"let": merged_let})
-                return self.model_copy(update={"script": new_script, "let": None})
+                return self.model_copy(update={"script": new_script})
             return self
 
         for name, (command, ext, arg_prefix) in _INTERPRETER_MAP.items():
@@ -3178,6 +3525,9 @@ class StepTemplate(OpenJDModel_v2023_09):
             parameterSpace=self.parameterSpace,
             hostRequirements=self.hostRequirements,
             dependencies=self.dependencies,
+            # Preserved for the runtime to seed when entering the step's
+            # environments (RFC 0007).
+            let=self.let,
         )
 
 
@@ -3232,7 +3582,7 @@ def _coerce_bool_value(value: Any) -> bool:
     raise ValueError("BOOL value must be a boolean, 0/1, 0.0/1.0, or a boolean string.")
 
 
-class JobBoolParameterDefinition(OpenJDModel_v2023_09):
+class JobBoolParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
     """A Job Parameter of type bool (EXPR extension, RFC 0007).
 
     Attributes:
@@ -3474,7 +3824,9 @@ _LIST_RANGE_JOB_CREATION_METADATA = JobCreationMetadata(
 )
 
 
-class _JobListParameterDefinitionBase(OpenJDModel_v2023_09, JobParameterInterface):
+class _JobListParameterDefinitionBase(
+    NameIdentifierLengthMixin, OpenJDModel_v2023_09, JobParameterInterface
+):
     """Shared base for the EXPR (RFC 0007) ``LIST[*]`` job-parameter definitions.
 
     Collects the fields and machinery common to every list parameter type — the
@@ -3607,7 +3959,9 @@ class JobListListIntParameterDefinition(_JobListParameterDefinitionBase):
             _check_int_item(self.name, it, inner_item_c)
 
 
-class JobRangeExprParameterDefinition(OpenJDModel_v2023_09, JobParameterInterface):
+class JobRangeExprParameterDefinition(
+    NameIdentifierLengthMixin, OpenJDModel_v2023_09, JobParameterInterface
+):
     """RANGE_EXPR job parameter (EXPR extension, RFC 0007).
 
     The value is an integer range expression string (e.g. ``"1-100:10"``)
@@ -3734,10 +4088,13 @@ class JobTemplate(OpenJDModel_v2023_09):
     schemaStr: Optional[str] = Field(None, alias="$schema")  # noqa: N815
 
     _template_variable_scope = ResolutionScope.TEMPLATE
+    # Job.Name is available to the job's steps and environments, but only
+    # when the EXPR extension is enabled (RFC 0007 §7.3.1).
+    _template_variable_definitions = DefinesTemplateVariables(expr_inject={"|Job.Name"})
     _template_variable_sources = {
         "name": {"parameterDefinitions"},
-        "steps": {"parameterDefinitions"},
-        "jobEnvironments": {"parameterDefinitions"},
+        "steps": {"parameterDefinitions", "__self__"},
+        "jobEnvironments": {"parameterDefinitions", "__self__"},
     }
     _job_creation_metadata = JobCreationMetadata(
         create_as=JobCreateAsMetadata(model=Job),
@@ -4012,8 +4369,12 @@ class EnvironmentTemplate(OpenJDModel_v2023_09):
     environment: Environment
 
     _template_variable_scope = ResolutionScope.TEMPLATE
+    # Job.Name is available within an environment template's environment
+    # (RFC 0007 §7.3.1) when the EXPR extension is enabled: external
+    # environments run within a session that always belongs to a job.
+    _template_variable_definitions = DefinesTemplateVariables(expr_inject={"|Job.Name"})
     _template_variable_sources = {
-        "environment": {"parameterDefinitions"},
+        "environment": {"parameterDefinitions", "__self__"},
     }
 
     @field_validator("extensions")

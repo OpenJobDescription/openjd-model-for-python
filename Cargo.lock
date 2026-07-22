@@ -405,9 +405,9 @@ dependencies = [
 
 [[package]]
 name = "granit-parser"
-version = "0.0.3"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f50ba32164f9e098d5da618776a32afbb32270adcbe3d3d006107dae11e37c91"
+checksum = "d03f81ad4732830d85cfd417a9f62cde6dadda4354d37d078a6084a19560aa2d"
 dependencies = [
  "arraydeque",
  "smallvec",
@@ -706,9 +706,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "openjd-expr"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c9407d110e2b7a769d163314883d50e5333fc697bb9bb8ace1daeb48b5a58cd"
+version = "0.2.0"
 dependencies = [
  "regex",
  "regex-syntax",
@@ -723,9 +721,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-model"
-version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dfe8867627c211bc704c9a8d94f16b32bc4b184b96560ae1ed2af24522965677"
+version = "0.3.1"
 dependencies = [
  "indexmap",
  "openjd-expr",
@@ -755,9 +751,7 @@ dependencies = [
 
 [[package]]
 name = "openjd-sessions"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a6afe6534a84e47e19ef834d78bf9715e578202b343454f258f2792e08fe503"
+version = "0.3.2"
 dependencies = [
  "bitflags",
  "futures-util",
@@ -1271,9 +1265,9 @@ dependencies = [
 
 [[package]]
 name = "serde-saphyr"
-version = "0.0.27"
+version = "0.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5897b4c3faadadd35fdb6689f015641f3bc481d5adaaac56231ea15aeb243db3"
+checksum = "7bd22781911de0ca6debda95f073c8f18bec65d1a94f1fa9573f3102e514cea4"
 dependencies = [
  "ahash",
  "annotate-snippets",
@@ -1283,7 +1277,7 @@ dependencies = [
  "granit-parser",
  "nohash-hasher",
  "num-traits",
- "serde",
+ "serde_core",
  "smallvec",
  "zmij",
 ]

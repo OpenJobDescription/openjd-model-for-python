@@ -1,3 +1,14 @@
 [workspace]
 members = ["rust-bindings"]
 resolver = "2"
+
+# ── Local-development overrides (opt-in) ──────────────────────────────
+# Redirect the openjd-* crates to a sibling ~/openjd-rs checkout so the
+# bindings build against the in-flight Rust workspace instead of crates.io.
+# Cargo only honors [patch] at the workspace root, so it lives here rather
+# than in rust-bindings/Cargo.toml. Paths are relative to this file.
+# Re-comment before committing so CI/published wheels resolve from crates.io.
+[patch.crates-io]
+openjd-expr     = { path = "../openjd-rs/crates/openjd-expr" }
+openjd-model    = { path = "../openjd-rs/crates/openjd-model" }
+openjd-sessions = { path = "../openjd-rs/crates/openjd-sessions" }

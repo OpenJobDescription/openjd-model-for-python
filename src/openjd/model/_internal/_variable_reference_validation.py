@@ -412,11 +412,25 @@ def _validate_model_template_variable_references(
         # Add in all of the symbols passed down from the parent.
         validation_symbols.update_self(symbols)
 
+        # Per-field extra symbols (e.g. the RFC 0008 WrappedAction.* variables
+        # within their wrap hook's action). Added at TEMPLATE scope so they
+        # are visible in every scope within the field's subtree, including
+        # creation-time fields such as the action's timeout — a wrap hook's
+        # timeout may forward "{{WrappedAction.Timeout}}".
+        for symbol in model._template_field_inject.get(field_name, set()):
+            symbol_name = symbol[1:] if symbol.startswith("|") else f"{symbol_prefix}{symbol}"
+            _add_symbol(validation_symbols, ResolutionScope.TEMPLATE, symbol_name)
+
+        # Per-field scope override: fields that resolve at job creation (e.g.
+        # an Action's timeout/cancelation) validate at their declared scope
+        # rather than the model's ambient scope.
+        field_scope = model._template_field_scopes.get(field_name, current_scope)
+
         errors.extend(
             _validate_model_template_variable_references(
                 field_model,
                 field_value,
-                current_scope,
+                field_scope,
                 symbol_prefix,
                 validation_symbols,
                 (*loc, field_name),
@@ -549,9 +563,15 @@ def _validate_let_bindings(
 
     enclosing: set = set(symbols[current_scope])
     self_symbols: set = set(value_symbols.get("__self__", ScopedSymtabs())[current_scope])
+    # A script's embedded files define Env.File.*/Task.File.* symbols that its
+    # `let` bindings may reference: the runtime allocates the file paths
+    # before evaluating the bindings (file contents are written after, so
+    # `data` can reference let-bound values) — matching openjd-rs.
+    file_symbols: set = set(value_symbols.get("embeddedFiles", ScopedSymtabs())[current_scope])
     # Visible to the bindings: enclosing scope + this model's injected/defined
-    # symbols, minus the let names themselves (added progressively below).
-    accumulated: set = (enclosing | self_symbols) - let_names
+    # symbols + its embedded-file symbols, minus the let names themselves
+    # (added progressively below).
+    accumulated: set = (enclosing | self_symbols | file_symbols) - let_names
     for index, binding in enumerate(let_value):
         if not isinstance(binding, str):
             continue

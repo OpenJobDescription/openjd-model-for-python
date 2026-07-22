@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from dataclasses import dataclass
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from .._errors import ExpressionError, TokenError
 from .._symbol_table import SymbolTable
@@ -127,6 +127,40 @@ class FormatString(DynamicConstrainedStr):
             resolved_list.append(element.resolved_value)
 
         return "".join(resolved_list)
+
+    def resolve_value(self, *, symtab: SymbolTable, path_format: Optional[object] = None) -> Any:
+        """Typed resolution of this format string (RFC 0005/0006).
+
+        When the format string is a single whole-field ``{{ ... }}`` EXPR
+        expression (only whitespace outside the braces), returns the engine's
+        typed value (an ``ExprValue``), preserving lists, null, and numeric
+        types — callers such as the session runner's argument resolution use
+        this for RFC 0005 §1.3.2 list flattening and null skipping, mirroring
+        openjd-rs's ``FormatString::resolve_with``. In every other case
+        (multi-segment strings, legacy non-EXPR expressions) the result is the
+        ordinary resolved string, identical to :meth:`resolve`.
+
+        Raises:
+            FormatStringError: if the expression cannot be evaluated.
+        """
+        expressions = self.expressions
+        if len(expressions) == 1:
+            info = expressions[0]
+            expression = info.expression
+            prefix = self.original_value[: info.start_pos]
+            suffix = self.original_value[info.end_pos :]
+            if expression is not None and not prefix.strip() and not suffix.strip():
+                try:
+                    return expression.evaluate_value(symtab=symtab, path_format=path_format)
+                except ExpressionError as exc:
+                    raise FormatStringError(
+                        string=self.original_value,
+                        start=info.start_pos,
+                        end=info.end_pos,
+                        expr=expression.expr,
+                        details=str(exc),
+                    )
+        return self.resolve(symtab=symtab, path_format=path_format)
 
     def _preprocess(
         self, *, context: ModelParsingContextInterface

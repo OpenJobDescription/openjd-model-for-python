@@ -244,9 +244,11 @@ class DefinesTemplateVariables:
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)
 class JobCreateAsMetadata:
     # Only one of the following may be non-None
-    # model: Union[Type["OpenJDModel"], Callable[["OpenJDModel"], Type["OpenJDModel"]]]
+    # model: Union[Type["OpenJDModel"], Callable[["OpenJDModel", SymbolTable], Type["OpenJDModel"]]]
     model: Optional[Type["OpenJDModel"]] = field(default=None)
-    callable: Optional[Callable[["OpenJDModel"], Type["OpenJDModel"]]] = field(default=None)
+    callable: Optional[Callable[["OpenJDModel", SymbolTable], Type["OpenJDModel"]]] = field(
+        default=None
+    )
 
 
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)
@@ -264,6 +266,17 @@ class JobCreationMetadata:
      1. FormatStrings
      2. lists of FormatStrings
      3. lists of a mix of FormatStrings and non-FormatStrings (e.g. ints,floats,regular-strings,etc)
+    """
+
+    typed_resolve_fields: set[str] = field(default_factory=set)
+    """The names of fields (a subset of ``resolve_fields``) that first attempt
+    RFC 0006 typed whole-field resolution: a field whose value is a single
+    whole-field ``{{ ... }}`` expression evaluating to a list keeps the native
+    list instead of a stringified rendering. Used by task-parameter ``range``
+    fields so ``range: "{{Param.Values}}"`` with a ``LIST[*]`` job parameter
+    instantiates to the literal value list, matching openjd-rs. Fields whose
+    typed resolution does not apply (multi-segment format strings, non-list
+    results, or evaluation errors) fall back to normal string resolution.
     """
 
     create_as: Optional[JobCreateAsMetadata] = field(default=None)
@@ -312,6 +325,20 @@ class JobCreationMetadata:
         Use-case: Resolving syntax sugar on StepTemplate before creating Step.
     """
 
+    extends_symtab: Optional[Callable[["OpenJDModel", SymbolTable], SymbolTable]] = field(
+        default=None
+    )
+    """A callable that returns the symbol table to use when instantiating this
+    model and its subtree, given the enclosing symbol table. The returned table
+    is used for all of the model's fields; the enclosing table is unaffected.
+        arg0 - The model being instantiated.
+        arg1 - The enclosing symbol table.
+        Use-case: A StepTemplate seeds Step.Name and evaluates its step-level
+            EXPR `let` bindings (RFC 0007 §3.6) so the step's parameter space,
+            host requirements, and script instantiate against them — mirroring
+            openjd-rs's per-step symbol table in instantiate_step.
+    """
+
 
 class OpenJDModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -342,6 +369,23 @@ class OpenJDModel(BaseModel):
     #       "<fieldname>" provides the field's exported variables.
     #       "__self__" provides the variables exported by this model via `__template_variable_definitions`.
     _template_variable_sources: ClassVar[dict[str, set[str]]] = {}
+
+    # Per-field variable-scope overrides: fields listed here (and their
+    # submodels) validate their format-string references at the given scope
+    # instead of the model's ambient scope. Used for fields that resolve at
+    # job creation while their siblings resolve at run time — e.g. an
+    # Action's `timeout` and `cancelation` are creation-time fields
+    # (template scope: no Session.*, no Env.File.*/Task.File.*, no host
+    # functions) while its `command`/`args` resolve in the session.
+    _template_field_scopes: ClassVar[dict[str, ResolutionScope]] = {}
+
+    # Per-field extra symbol injection: symbols listed here are visible in
+    # every scope, but only within the named field's subtree. Names use the
+    # DefinesTemplateVariables.inject spelling (a "|" prefix discards the
+    # parent scope prefix). Used for the RFC 0008 wrap hooks, whose
+    # WrappedAction.* / WrappedEnv.* / WrappedStep.* variables exist only
+    # within their hook's action.
+    _template_field_inject: ClassVar[dict[str, set[str]]] = {}
 
     # ----
     # Metadata used in the creation of a Job from a Job Template

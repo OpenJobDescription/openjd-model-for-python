@@ -66,8 +66,17 @@ class Node(ABC):
         EXPR-backed nodes override this to use the engine's own spec-defined
         coercion (RFC 0005), so e.g. ``true``/``false``/``null`` and lists
         render per the specification rather than as Python reprs.
+
+        A ``None`` value interpolates as the empty string, matching the EXPR
+        engine's null rendering (RFC 0005) — relevant for nullable injected
+        symbols such as ``WrappedAction.Cancelation.NotifyPeriodInSeconds``
+        (RFC 0008 follow-up), which is ``None`` when no notify period
+        applies.
         """
-        return str(self.evaluate(symtab=symtab, path_format=path_format))
+        value = self.evaluate(symtab=symtab, path_format=path_format)
+        if value is None:
+            return ""
+        return str(value)
 
     @abstractmethod
     def __repr__(self) -> str:  # pragma: no cover
@@ -187,7 +196,15 @@ class ExprNode(Node):
         # accessed_symbols are the free variable references in full dotted
         # spelling (e.g. "Param.X"); local let-bound names are excluded by the
         # engine. Compare against the set of symbols visible at this location.
-        missing = accessed - symbols
+        # A reference is defined when any dotted prefix of it is a defined
+        # symbol: the remaining segments are property/method access on that
+        # symbol's value (e.g. `work_dir.name` on a `let`-bound path), whose
+        # type-correctness is checked by the typed validation above when the
+        # types are known, and at evaluation time otherwise — mirroring the
+        # Rust engine's treatment of unknown-typed symbols.
+        from ._expr_support import longest_defined_prefix
+
+        missing = {name for name in accessed if longest_defined_prefix(name, symbols) is None}
         if missing:
             raise _missing_symbol_error(sorted(missing)[0], symbols)
         self._check_comprehension_shadowing(symbols)
@@ -212,6 +229,7 @@ class ExprNode(Node):
         """
         from ._expr_support import (
             ExprProfile,
+            HostContext,
             map_eval_error,
             symtab_to_expr_values,
         )
@@ -219,15 +237,35 @@ class ExprNode(Node):
         values = symtab_to_expr_values(
             symtab, types=symtab.expr_types or None, path_format=path_format
         )
+        profile = ExprProfile.current()
+        # A symbol table carrying host-context path mapping rules (session
+        # scope) enables host-context functions such as apply_path_mapping,
+        # applying those rules — mirroring openjd-rs's session-scope
+        # HostContext::WithRules. None means template scope (no host context).
+        host_rules = getattr(symtab, "expr_host_rules", None)
+        if host_rules is not None:
+            profile = profile.with_host_context(HostContext.with_rules(host_rules))
         try:
-            return self._parsed.evaluate(
-                values=values, profile=ExprProfile.current(), path_format=path_format
-            )
+            return self._parsed.evaluate(values=values, profile=profile, path_format=path_format)
         except Exception as exc:  # noqa: BLE001 - boundary; re-raise as model error
             raise map_eval_error(exc)
 
     def evaluate(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
         return self._evaluate_raw(symtab=symtab, path_format=path_format).item()
+
+    def evaluate_value(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
+        """Evaluate and return the engine's ``ExprValue`` (not unwrapped to a
+        native Python value).
+
+        Callers that re-seed the result into a symbol table (e.g. the session
+        runtime's ``let`` bindings, RFC 0007) should use this form: the typed
+        symbol-table builder passes an ``ExprValue`` through unchanged, so the
+        bound value keeps its EXPR type (a path stays a path for property
+        access) and its rendering fidelity (a float's declared trailing zeros
+        are preserved), matching the Rust runtime's natively typed symbol
+        table.
+        """
+        return self._evaluate_raw(symtab=symtab, path_format=path_format)
 
     def evaluate_to_str(self, *, symtab: SymbolTable, path_format: Any = None) -> str:
         # ``str(ExprValue)`` applies the engine's RFC 0005 format-string

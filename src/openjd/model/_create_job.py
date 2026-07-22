@@ -7,6 +7,7 @@ from typing import Optional, cast
 from pydantic import ValidationError
 
 from ._errors import CompatibilityError, DecodeValidationError
+from ._format_strings import FormatStringError
 from ._symbol_table import SymbolTable
 from ._internal import instantiate_model
 from ._merge_job_parameter import merge_job_parameter_definitions
@@ -31,6 +32,20 @@ __all__ = ("preprocess_job_parameters",)
 # the LIST[*] variants) are carried natively instead so the typed EXPR symbol
 # table can coerce them.
 _LEGACY_SCALAR_TYPE_NAMES = frozenset({"STRING", "INT", "FLOAT", "PATH"})
+
+
+def _is_uri(value: str) -> bool:
+    """Whether ``value`` is a URI (``scheme://...`` with an RFC 3986 scheme).
+    Mirrors openjd-rs's ``uri_path::is_uri``: the scheme must start with an
+    ASCII letter and contain only ASCII alphanumerics, ``+``, ``.``, or ``-``.
+    """
+    scheme_end = value.find("://")
+    if scheme_end <= 0:
+        return False
+    scheme = value[:scheme_end]
+    if not scheme[0].isascii() or not scheme[0].isalpha():
+        return False
+    return all(c.isascii() and (c.isalnum() or c in "+.-") for c in scheme)
 
 
 # =======================================================================
@@ -67,6 +82,7 @@ def _collect_defaults_2023_09(
     job_template_dir: Path,
     current_working_dir: Path,
     allow_job_template_dir_walk_up: bool,
+    allow_uri_path_values: bool = False,
 ) -> JobParameterValues:
     if not allow_job_template_dir_walk_up and not job_template_dir.is_absolute():
         raise ValueError(
@@ -89,6 +105,20 @@ def _collect_defaults_2023_09(
                     )
                     continue
                 default = str(param.default)
+                # RFC 0006 (EXPR): URI-form PATH defaults ("s3://...") are
+                # preserved verbatim — they are not filesystem paths, so the
+                # template-dir join and walk-up enforcement do not apply.
+                # Mirrors openjd-rs's preprocess_job_parameters URI handling.
+                if (
+                    param.type.name == "PATH"
+                    and allow_uri_path_values
+                    and default != ""
+                    and _is_uri(default)
+                ):
+                    return_value[param.name] = ParameterValue(
+                        type=ParameterValueType(param.type), value=default
+                    )
+                    continue
                 # Make PATH defaults relative to job_template_dir, and
                 # enforce the `allow_job_template_dir_walk_up` parameter request.
                 if param.type.name == "PATH" and default != "":
@@ -126,8 +156,14 @@ def _collect_defaults_2023_09(
                     type=ParameterValueType(param.type), value=value
                 )
                 continue
-            # Join any provided relative PATH parameter value with the current_working_directory (except the empty value "")
-            if param.type.name == "PATH" and value != "" and not Path(value).is_absolute():
+            # Join any provided relative PATH parameter value with the current_working_directory
+            # (except the empty value "" and, under EXPR, URI values which are preserved verbatim)
+            if (
+                param.type.name == "PATH"
+                and value != ""
+                and not (allow_uri_path_values and _is_uri(str(value)))
+                and not Path(value).is_absolute()
+            ):
                 value = str(current_working_dir / value)
             return_value[param.name] = ParameterValue(
                 type=ParameterValueType(param.type), value=str(value)
@@ -265,6 +301,12 @@ def preprocess_job_parameters(
                     job_template_dir,
                     current_working_dir,
                     allow_job_template_dir_walk_up,
+                    # RFC 0006: URI-form PATH values are only meaningful with
+                    # the EXPR extension (path ops and mapping understand
+                    # URIs). Matches the openjd-rs CLI, which enables URI
+                    # path values for EXPR templates.
+                    allow_uri_path_values="EXPR"
+                    in (getattr(job_template, "extensions", None) or []),
                 )
                 _check_2023_09(parameterDefinitions, return_value)
             else:
@@ -342,10 +384,16 @@ def create_job(
     if job_template.specificationVersion == TemplateSpecificationVersion.JOBTEMPLATE_v2023_09:
         from .v2023_09 import ValueReferenceConstants as ValueReferenceConstants_2023_09
 
-        # EXPR-extension typed params (BOOL / RANGE_EXPR / LIST[*]) carry native
-        # values; record their OpenJD type so the typed symbol-table builder
-        # coerces them to the right ExprType during expression evaluation. The
-        # original scalar types keep their existing string-based handling.
+        # Record each parameter's OpenJD type so the typed symbol-table
+        # builder coerces its (stringly carried) value to the right ExprType
+        # during EXPR expression evaluation — matching openjd-rs, whose
+        # create_job symbol table carries typed ExprValues for every
+        # parameter (an INT param is an int, so `{{ Param.X + 3 }}` works).
+        # STRING needs no coercion, and PATH stays string-typed in template
+        # scope: openjd-rs excludes Param.* for PATH here (host-context only)
+        # and seeds RawParam.* for PATH as a plain string.
+        # The typing only affects the EXPR evaluation path; non-EXPR
+        # templates keep their existing string-based interpolation.
         expr_types: dict[str, str] = {}
         for name, param in all_job_parameter_values.items():
             prefix = ValueReferenceConstants_2023_09.JOB_PARAMETER_PREFIX.value
@@ -353,10 +401,20 @@ def create_job(
             if param.type != "PATH":
                 symtab[f"{prefix}.{name}"] = all_job_parameter_values[name].value
             symtab[f"{raw_prefix}.{name}"] = all_job_parameter_values[name].value
-            if param.type.name not in _LEGACY_SCALAR_TYPE_NAMES:
+            if param.type.name not in ("STRING", "PATH"):
                 expr_types[f"{prefix}.{name}"] = param.type.value
                 expr_types[f"{raw_prefix}.{name}"] = param.type.value
         symtab.expr_types.update(expr_types)
+        # RFC 0007 §7.3.1 (EXPR): Job.Name is the job's resolved name,
+        # available to the job's steps and environments. Seeded before
+        # instantiation so step fields (including step-level `let` bindings)
+        # can reference it — mirroring openjd-rs's instantiate_job, which
+        # resolves the name first and seeds it into the symbol table.
+        if "EXPR" in (getattr(job_template, "extensions", None) or []):
+            try:
+                symtab["Job.Name"] = job_template.name.resolve(symtab=symtab)
+            except FormatStringError as exc:
+                raise DecodeValidationError(f"Failed to resolve the job's name: {exc}")
     else:
         raise NotImplementedError(
             f"Spec version {job_template.specificationVersion} not implemented."

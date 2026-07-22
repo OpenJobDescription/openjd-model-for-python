@@ -11,7 +11,41 @@ from .._symbol_table import SymbolTable
 from .._format_strings import FormatString
 from .._types import OpenJDModel
 
-__all__ = ("instantiate_model",)
+__all__ = ("instantiate_model", "resolve_whole_field_typed_list")
+
+
+def resolve_whole_field_typed_list(value: FormatString, symtab: SymbolTable) -> Any:
+    """RFC 0006 typed whole-field resolution to a native list, or ``None``.
+
+    When ``value`` is a single whole-field ``{{ ... }}`` expression (only
+    whitespace outside the expression) that evaluates to a list, return the
+    native Python list. Any other shape or result — multi-segment format
+    strings, scalar results, or evaluation errors — returns ``None`` so the
+    caller falls back to ordinary string resolution, mirroring the
+    typed-then-string fallback in openjd-rs's range instantiation.
+    """
+    expressions = value.expressions
+    if len(expressions) != 1:
+        return None
+    info = expressions[0]
+    expression = info.expression
+    if expression is None:
+        return None
+    original = value.original_value
+    if original[: info.start_pos].strip() or original[info.end_pos :].strip():
+        return None
+    try:
+        result = expression.evaluate_value(symtab=symtab)
+    except Exception:  # noqa: BLE001 - fall back to string resolution
+        return None
+    # EXPR-backed evaluation returns the engine's ExprValue; unwrap lists.
+    result_type = getattr(result, "type", None)
+    if result_type is not None and str(result_type).startswith("list["):
+        return result.item()
+    if isinstance(result, list):
+        return result
+    return None
+
 
 # Cache for TypeAdapter instances
 _type_adapter_cache: Dict[int, TypeAdapter] = {}
@@ -92,6 +126,15 @@ def instantiate_model(  # noqa: C901
     errors = list[InitErrorDetails]()
     instantiated_fields = dict[str, Any]()
 
+    # Extend the symbol table for this model's subtree if defined (e.g. a
+    # step's Step.Name and step-level EXPR `let` bindings). This runs before
+    # the transform: StepTemplate's syntax-sugar transform folds step-level
+    # `let` bindings into the script (their runtime channel), so the original
+    # model is the one that still carries them for create_job-time fields
+    # (parameter space, host requirements).
+    if model._job_creation_metadata.extends_symtab is not None:
+        symtab = model._job_creation_metadata.extends_symtab(model, symtab)
+
     # Apply pre-transform if defined
     if model._job_creation_metadata.transform is not None:
         model = model._job_creation_metadata.transform(model)
@@ -103,7 +146,7 @@ def instantiate_model(  # noqa: C901
         if create_as_metadata.model is not None:
             target_model = create_as_metadata.model
         elif create_as_metadata.callable is not None:
-            target_model = create_as_metadata.callable(model)
+            target_model = create_as_metadata.callable(model, symtab)
 
     for field_name in model.__class__.model_fields.keys():
         if field_name in model._job_creation_metadata.exclude_fields:
@@ -124,6 +167,7 @@ def instantiate_model(  # noqa: C901
         with capture_validation_errors(output_errors=errors, loc=(field_name,), input=field_value):
             # Instantiate and resolve format string expressions
             needs_resolve = field_name in model._job_creation_metadata.resolve_fields
+            typed_resolve = field_name in model._job_creation_metadata.typed_resolve_fields
             if isinstance(field_value, list):
                 if field_name in model._job_creation_metadata.reshape_field_to_dict:
                     key_field = model._job_creation_metadata.reshape_field_to_dict[field_name]
@@ -137,7 +181,9 @@ def instantiate_model(  # noqa: C901
             elif isinstance(field_value, dict):
                 instantiated = _instantiate_dict_field(field_value, symtab, needs_resolve)
             else:
-                instantiated = _instantiate_noncollection_value(field_value, symtab, needs_resolve)
+                instantiated = _instantiate_noncollection_value(
+                    field_value, symtab, needs_resolve, typed_resolve=typed_resolve
+                )
 
             # Validate as the target field type using cached TypeAdapter
             type_adapter = get_type_adapter(target_field_type)
@@ -164,6 +210,8 @@ def _instantiate_noncollection_value(
     value: Any,
     symtab: SymbolTable,
     needs_resolve: bool,
+    *,
+    typed_resolve: bool = False,
 ) -> Any:
     """Instantiate a single value that must not be a collection type (list, dict, etc).
 
@@ -172,10 +220,17 @@ def _instantiate_noncollection_value(
         value (Any): Value to process.
         symtab (SymbolTable): Symbol table for format string value lookups.
         needs_resolve (bool): Whether to resolve the value as a format string.
+        typed_resolve (bool): Whether to first attempt RFC 0006 typed
+            whole-field resolution to a native list (task-parameter ``range``
+            fields), falling back to string resolution.
     """
     if isinstance(value, OpenJDModel):
         return instantiate_model(value, symtab)
     elif isinstance(value, FormatString) and needs_resolve:
+        if typed_resolve:
+            typed_value = resolve_whole_field_typed_list(value, symtab)
+            if typed_value is not None:
+                return typed_value
         value = value.resolve(symtab=symtab)
 
     return value

@@ -86,6 +86,27 @@ class InterpolationExpression:
 
         raise ExpressionError(f"Nonvalid result type: {result} of type {type(result)}")
 
+    def evaluate_value(self, *, symtab: SymbolTable, path_format: Optional[Any] = None) -> Any:
+        """Evaluate the expression, preferring the engine's typed value form.
+
+        For EXPR-backed expressions this returns the engine ``ExprValue``,
+        which keeps the result's EXPR type (path/int/float/list/...) and its
+        string-rendering fidelity when re-seeded into a symbol table — the
+        session runtime's ``let`` bindings (RFC 0007) rely on this. Legacy
+        (non-EXPR) expressions return their native value, identical to
+        :meth:`evaluate`.
+
+        Raises:
+            ExpressionError: If the expression could not be evaluated.
+        """
+        evaluate_value = getattr(self._expresion_tree, "evaluate_value", None)
+        if evaluate_value is None:
+            return self.evaluate(symtab=symtab, path_format=path_format)
+        try:
+            return evaluate_value(symtab=symtab, path_format=path_format)
+        except ValueError as exc:
+            raise ExpressionError(f"Expression failed validation: {str(exc)}")
+
     def evaluate_to_str(self, *, symtab: SymbolTable, path_format: Optional[Any] = None) -> str:
         """Evaluate the expression and coerce the result to the string form that
         is substituted into the surrounding format string.

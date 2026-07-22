@@ -20,6 +20,14 @@ class SymbolTable:
     # (rather than stashed dynamically) so it is preserved across copies and
     # unions; empty for non-EXPR symbol tables.
     expr_types: dict[str, str]
+    # Optional host-context path mapping rules (``openjd.expr.PathMappingRule``
+    # values). When set (even to an empty list), EXPR expressions evaluated
+    # against this symbol table run with a host context: host-context
+    # functions such as ``apply_path_mapping`` are available and apply these
+    # rules — the v0 equivalent of openjd-rs's session-scope
+    # ``HostContext::WithRules``. ``None`` means no host context (template
+    # scope).
+    expr_host_rules: Optional[list[Any]]
 
     def __init__(self, *, source: Optional[Union[SymbolTable, dict[str, Any]]] = None):
         """Initialize the SymbolTable
@@ -30,10 +38,13 @@ class SymbolTable:
         """
         self._table = dict()
         self.expr_types = dict()
+        self.expr_host_rules = None
         if source is not None:
             if isinstance(source, SymbolTable):
                 self._table.update(source._table)
                 self.expr_types.update(source.expr_types)
+                if source.expr_host_rules is not None:
+                    self.expr_host_rules = list(source.expr_host_rules)
             elif isinstance(source, dict):
                 self._table.update(source)
             else:
@@ -74,10 +85,14 @@ class SymbolTable:
         retval = SymbolTable()
         retval._table.update(self._table)
         retval.expr_types.update(self.expr_types)
+        if self.expr_host_rules is not None:
+            retval.expr_host_rules = list(self.expr_host_rules)
         for symtab in symtabs:
             if isinstance(symtab, SymbolTable):
                 retval._table.update(symtab._table)
                 retval.expr_types.update(symtab.expr_types)
+                if symtab.expr_host_rules is not None:
+                    retval.expr_host_rules = list(symtab.expr_host_rules)
             elif isinstance(symtab, dict):
                 retval._table.update(symtab)
             else:
