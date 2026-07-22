@@ -66,8 +66,17 @@ class Node(ABC):
         EXPR-backed nodes override this to use the engine's own spec-defined
         coercion (RFC 0005), so e.g. ``true``/``false``/``null`` and lists
         render per the specification rather than as Python reprs.
+
+        A ``None`` value interpolates as the empty string, matching the EXPR
+        engine's null rendering (RFC 0005) — relevant for nullable injected
+        symbols such as ``WrappedAction.Cancelation.NotifyPeriodInSeconds``
+        (RFC 0008 follow-up), which is ``None`` when no notify period
+        applies.
         """
-        return str(self.evaluate(symtab=symtab, path_format=path_format))
+        value = self.evaluate(symtab=symtab, path_format=path_format)
+        if value is None:
+            return ""
+        return str(value)
 
     @abstractmethod
     def __repr__(self) -> str:  # pragma: no cover
