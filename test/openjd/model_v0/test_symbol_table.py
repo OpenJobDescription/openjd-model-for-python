@@ -137,3 +137,35 @@ class TestSymbolTable:
         assert result["Test.Symtab3"] == "Three"
         assert result["Overlap1"] == 2, "Later arguments win duplicates"
         assert result["Overlap2"] == 3, "Later arguments win duplicates"
+
+
+class TestSymbolTableExprHostRules:
+    """``expr_host_rules`` (the v0 host-context marker) is copied by
+    both the copy constructor and ``union`` so a derived table keeps the
+    session's host context."""
+
+    def test_copy_constructor_copies_host_rules(self) -> None:
+        source = SymbolTable()
+        source["Param.X"] = "10"
+        source.expr_host_rules = []
+        copied = SymbolTable(source=source)
+        assert copied.expr_host_rules == []
+        # It's a copy, not a shared list.
+        assert copied.expr_host_rules is not source.expr_host_rules
+
+    def test_union_copies_host_rules_from_self(self) -> None:
+        left = SymbolTable()
+        left.expr_host_rules = []
+        merged = left.union(SymbolTable())
+        assert merged.expr_host_rules == []
+
+    def test_union_copies_host_rules_from_operand(self) -> None:
+        right = SymbolTable()
+        right.expr_host_rules = []
+        merged = SymbolTable().union(right)
+        assert merged.expr_host_rules == []
+
+    def test_repr(self) -> None:
+        symtab = SymbolTable()
+        symtab["Param.X"] = "10"
+        assert repr(symtab) == "SymbolTable({'Param.X': '10'})"

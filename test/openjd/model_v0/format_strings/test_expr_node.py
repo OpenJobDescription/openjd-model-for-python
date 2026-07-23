@@ -308,3 +308,81 @@ class TestSymbolTableExprTypesPreserved:
 
     def test_default_expr_types_is_empty(self):
         assert SymbolTable().expr_types == {}
+
+
+class TestExprNodeStaticValidation:
+    """Symbol-free expressions are statically validated at parse (`check`)
+    time so literal/semantic errors surface before instantiation."""
+
+    @pytest.mark.parametrize(
+        "expr,fragment",
+        [
+            pytest.param("1 / 0", "Division by zero", id="division-by-zero"),
+            pytest.param("nosuchfunc(1)", "Unknown function", id="unknown-function"),
+            pytest.param("1 + 'a'", "'+' operator", id="type-mismatch"),
+        ],
+    )
+    def test_symbol_free_semantic_error_raises_at_parse(self, expr, fragment):
+        with pytest.raises(ExpressionError) as excinfo:
+            ExprNode(expr)
+        assert fragment in str(excinfo.value)
+
+    def test_repr(self):
+        assert repr(ExprNode("1 + 2")) == "Expr(1 + 2)"
+
+
+class TestInterpolationExpressionEvaluateValue:
+    """`InterpolationExpression.evaluate_value` (the typed-value form used by
+    let bindings) wraps engine ValueErrors as the model's ExpressionError,
+    mirroring `evaluate`."""
+
+    def test_evaluate_value_error_is_wrapped(self):
+        from openjd.model._format_strings._expression import InterpolationExpression
+
+        expression = InterpolationExpression("Undefined.X + 1", context=_ctx(["EXPR"]))
+        with pytest.raises(ExpressionError) as excinfo:
+            expression.evaluate_value(symtab=SymbolTable())
+        msg = str(excinfo.value)
+        assert msg.startswith("Expression failed validation:")
+        assert "Undefined variable: 'Undefined.X'" in msg
+
+    def test_evaluate_value_returns_typed_engine_value(self):
+        from openjd.model._format_strings._expression import InterpolationExpression
+
+        expression = InterpolationExpression("1.50", context=_ctx(["EXPR"]))
+        value = expression.evaluate_value(symtab=SymbolTable())
+        # Rendering fidelity is preserved on the engine value.
+        assert str(value) == "1.50"
+
+
+class TestFormatStringResolveValue:
+    """`FormatString.resolve_value` (RFC 0005/0006 typed resolution): a
+    whole-field `{{ ... }}` EXPR expression resolves to the engine's typed
+    value; anything else falls back to ordinary string resolution."""
+
+    def test_whole_field_returns_typed_value(self):
+        fs = FormatString("{{ [1, 2, 3] }}", context=_ctx(["EXPR"]))
+        value = fs.resolve_value(symtab=SymbolTable())
+        assert value.item() == [1, 2, 3]
+
+    def test_whole_field_with_surrounding_whitespace(self):
+        # Only-whitespace outside the braces still counts as whole-field.
+        fs = FormatString("  {{ 1 + 2 }}  ", context=_ctx(["EXPR"]))
+        assert fs.resolve_value(symtab=SymbolTable()).item() == 3
+
+    def test_multi_segment_falls_back_to_string_resolution(self):
+        fs = FormatString("a={{ 1 + 2 }}", context=_ctx(["EXPR"]))
+        assert fs.resolve_value(symtab=SymbolTable()) == "a=3"
+
+    def test_no_expression_falls_back_to_string_resolution(self):
+        fs = FormatString("plain text", context=_ctx(["EXPR"]))
+        assert fs.resolve_value(symtab=SymbolTable()) == "plain text"
+
+    def test_evaluation_error_raises_format_string_error(self):
+        from openjd.model._format_strings._format_string import FormatStringError
+
+        fs = FormatString("{{ Undefined.X + 1 }}", context=_ctx(["EXPR"]))
+        with pytest.raises(FormatStringError) as excinfo:
+            fs.resolve_value(symtab=SymbolTable())
+        msg = str(excinfo.value)
+        assert "Undefined.X" in msg

@@ -216,3 +216,62 @@ class TestTypedResolutionSingleEvaluation:
         tpd = step.parameterSpace.taskParameterDefinitions
         tp = tpd["V"] if isinstance(tpd, dict) else tpd[0]
         assert list(tp.range) == [1, 2, 3]
+
+
+class TestVersionedDictMutationsBumpVersion:
+    """Every ``_VersionedDict`` mutation method must bump the owning
+    SymbolTable's version, or the EXPR evaluation cache would serve a stale
+    engine table after that mutation. ``__setitem__``/``update``/``__ior__``
+    are covered above via cache invalidation; this pins the remaining
+    mutators directly against the version counter."""
+
+    def test_delitem_bumps_version(self) -> None:
+        symtab = SymbolTable()
+        symtab.expr_types["Param.X"] = "INT"
+        before = symtab._version
+        del symtab.expr_types["Param.X"]
+        assert symtab._version > before
+        assert "Param.X" not in symtab.expr_types
+
+    def test_setdefault_bumps_version(self) -> None:
+        symtab = SymbolTable()
+        before = symtab._version
+        assert symtab.expr_types.setdefault("Param.X", "INT") == "INT"
+        assert symtab._version > before
+        # setdefault on an existing key still bumps (conservative: a no-op
+        # bump only invalidates a cache entry, never poisons one).
+        before = symtab._version
+        assert symtab.expr_types.setdefault("Param.X", "FLOAT") == "INT"
+        assert symtab._version > before
+
+    def test_pop_bumps_version(self) -> None:
+        symtab = SymbolTable()
+        symtab.expr_types["Param.X"] = "INT"
+        before = symtab._version
+        assert symtab.expr_types.pop("Param.X") == "INT"
+        assert symtab._version > before
+
+    def test_popitem_bumps_version(self) -> None:
+        symtab = SymbolTable()
+        symtab.expr_types["Param.X"] = "INT"
+        before = symtab._version
+        assert symtab.expr_types.popitem() == ("Param.X", "INT")
+        assert symtab._version > before
+
+    def test_clear_bumps_version(self) -> None:
+        symtab = SymbolTable()
+        symtab.expr_types["Param.X"] = "INT"
+        before = symtab._version
+        symtab.expr_types.clear()
+        assert symtab._version > before
+        assert symtab.expr_types == {}
+
+    def test_delitem_invalidates_engine_table_cache(self) -> None:
+        # End-to-end: a deletion mutation must be observed by the cache.
+        symtab = SymbolTable()
+        symtab["Param.X"] = "10"
+        symtab.expr_types["Param.X"] = "INT"
+        first = symtab_to_expr_values(symtab, types=symtab.expr_types or None)
+        del symtab.expr_types["Param.X"]
+        second = symtab_to_expr_values(symtab, types=symtab.expr_types or None)
+        assert first is not second
