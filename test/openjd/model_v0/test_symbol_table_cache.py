@@ -158,7 +158,7 @@ class TestProfileCache:
 
 class TestTypedResolutionSingleEvaluation:
     def test_range_expression_evaluated_once_per_definition(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: "Path"
     ) -> None:
         """RFC 0006 typed whole-field range resolution: the expression is
         evaluated exactly once per task-parameter definition — the create_as
@@ -202,8 +202,8 @@ class TestTypedResolutionSingleEvaluation:
         params = preprocess_job_parameters(
             job_template=template,
             job_parameter_values={},
-            job_template_dir=Path("/tmp"),
-            current_working_dir=Path("/tmp"),
+            job_template_dir=tmp_path,
+            current_working_dir=tmp_path,
         )
         job = create_job(job_template=template, job_parameter_values=params)
 
@@ -236,26 +236,30 @@ class TestVersionedDictMutationsBumpVersion:
     def test_setdefault_bumps_version(self) -> None:
         symtab = SymbolTable()
         before = symtab._version
-        assert symtab.expr_types.setdefault("Param.X", "INT") == "INT"
+        inserted = symtab.expr_types.setdefault("Param.X", "INT")
+        assert inserted == "INT"
         assert symtab._version > before
         # setdefault on an existing key still bumps (conservative: a no-op
         # bump only invalidates a cache entry, never poisons one).
         before = symtab._version
-        assert symtab.expr_types.setdefault("Param.X", "FLOAT") == "INT"
+        existing = symtab.expr_types.setdefault("Param.X", "FLOAT")
+        assert existing == "INT"
         assert symtab._version > before
 
     def test_pop_bumps_version(self) -> None:
         symtab = SymbolTable()
         symtab.expr_types["Param.X"] = "INT"
         before = symtab._version
-        assert symtab.expr_types.pop("Param.X") == "INT"
+        popped = symtab.expr_types.pop("Param.X")
+        assert popped == "INT"
         assert symtab._version > before
 
     def test_popitem_bumps_version(self) -> None:
         symtab = SymbolTable()
         symtab.expr_types["Param.X"] = "INT"
         before = symtab._version
-        assert symtab.expr_types.popitem() == ("Param.X", "INT")
+        popped_item = symtab.expr_types.popitem()
+        assert popped_item == ("Param.X", "INT")
         assert symtab._version > before
 
     def test_clear_bumps_version(self) -> None:

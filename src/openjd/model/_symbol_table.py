@@ -29,6 +29,15 @@ class _VersionedDict(dict):
         # Backref to the owning SymbolTable; internal to this module.
         self._owner = owner
 
+    def __eq__(self, other: object) -> bool:
+        # The owner backref is bookkeeping, not value state: equality is
+        # plain dict equality (two tables' expr_types with the same contents
+        # compare equal regardless of which SymbolTable owns them).
+        return super().__eq__(other)
+
+    # dict subclasses are unhashable; keep that explicit alongside __eq__.
+    __hash__ = None  # type: ignore[assignment]
+
     def __setitem__(self, key: Any, value: Any) -> None:
         super().__setitem__(key, value)
         self._owner._bump_version()
