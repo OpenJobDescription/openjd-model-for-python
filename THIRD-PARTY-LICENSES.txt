@@ -1,6 +1,6 @@
 
 
-** annotated-types; version 0.7.0 -- https://pypi.org/project/annotated-types/
+** annotated-types; version 0.8.0 -- https://pypi.org/project/annotated-types/
 The MIT License (MIT)
 
 Copyright (c) 2022 the contributors
