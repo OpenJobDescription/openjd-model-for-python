@@ -10,6 +10,8 @@ expression — and so any mutation (``__setitem__``, ``expr_types``,
 ``expr_host_rules``) invalidates the cache.
 """
 
+from pathlib import Path
+
 import pytest
 
 from openjd.model import SymbolTable
@@ -67,6 +69,42 @@ class TestSymtabEngineTableCache:
         symtab.expr_types.update({"Param.X": "INT"})
         second = symtab_to_expr_values(symtab, types=symtab.expr_types or None)
         assert first is not second
+
+    def test_untyped_prime_does_not_poison_typed_call(self) -> None:
+        # Regression: priming the cache with types=None on a symbol table
+        # whose expr_types is non-empty must NOT cache an untyped engine
+        # table — a later typed call at the same mutation version would be
+        # served the stale untyped table and lose the type coercions.
+        from openjd.expr import ExprProfile
+
+        from openjd.model._format_strings._expr_support import parse_expr_or_raise
+
+        symtab = SymbolTable()
+        symtab["Param.X"] = "10"
+        symtab.expr_types["Param.X"] = "INT"
+
+        # WHEN: prime with an untyped build on the typed symtab.
+        untyped = symtab_to_expr_values(symtab, types=None)
+
+        # THEN: the subsequent typed call is not served the stale table...
+        typed = symtab_to_expr_values(symtab, types=symtab.expr_types or None)
+        assert typed is not untyped
+
+        # ...and coerces correctly: arithmetic sees the int 10, not "10".
+        parsed = parse_expr_or_raise("Param.X + 1")
+        result = parsed.evaluate(values=typed, profile=ExprProfile.current())
+        assert result.item() == 11
+
+        # The typed build is the one cached for the standard call form.
+        assert symtab_to_expr_values(symtab, types=symtab.expr_types or None) is typed
+
+    def test_untyped_call_still_cached_when_symtab_has_no_types(self) -> None:
+        # types=None on a symtab without expr_types remains cacheable (this
+        # is the evaluation layer's call form for untyped tables).
+        symtab = SymbolTable()
+        symtab["Param.X"] = "10"
+        first = symtab_to_expr_values(symtab, types=symtab.expr_types or None)
+        assert symtab_to_expr_values(symtab, types=symtab.expr_types or None) is first
 
     def test_foreign_types_mapping_bypasses_cache(self) -> None:
         # A caller-supplied types mapping that is not the table's own
@@ -158,12 +196,11 @@ class TestProfileCache:
 
 class TestTypedResolutionSingleEvaluation:
     def test_range_expression_evaluated_once_per_definition(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: "Path"
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """RFC 0006 typed whole-field range resolution: the expression is
         evaluated exactly once per task-parameter definition — the create_as
         target-model decision and the field value share the result."""
-        from pathlib import Path
 
         from openjd.model import create_job, decode_job_template, preprocess_job_parameters
         from openjd.model._internal import _create_job as internal_create_job

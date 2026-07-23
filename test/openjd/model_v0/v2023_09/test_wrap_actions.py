@@ -295,6 +295,57 @@ class TestWrapActionsCreateJob:
         step_env_actions = job.steps[0].stepEnvironments[0].script.actions
         assert step_env_actions.onWrapTaskRun is not None
 
+    def test_create_job_with_full_forwarding_defers_runtime_fields(self):
+        # Regression: a wrap hook forwarding the wrapped action's timeout and
+        # cancelation ("{{WrappedAction.Timeout}}",
+        # "{{WrappedAction.Cancelation.*}}") decoded cleanly but crashed
+        # create_job with "Undefined variable" — those symbols only exist at
+        # run time. Like openjd-rs (job/create_job/instantiate.rs clones
+        # timeout+cancelation unresolved into the Job), the fields must be
+        # carried through job instantiation as raw FormatStrings and left for
+        # the session to resolve.
+        from openjd.model._format_strings import FormatString
+
+        hook = {
+            "command": "{{WrappedAction.Command}}",
+            "args": ["{{WrappedAction.Args}}"],
+            "timeout": "{{WrappedAction.Timeout}}",
+            "cancelation": {
+                "mode": "{{WrappedAction.Cancelation.Mode}}",
+                "notifyPeriodInSeconds": ("{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"),
+            },
+        }
+        wrap_env = {
+            "name": "W",
+            "script": {
+                "actions": {
+                    "onWrapEnvEnter": dict(hook),
+                    "onWrapTaskRun": dict(hook),
+                    "onWrapEnvExit": dict(hook),
+                }
+            },
+        }
+        exts = ("WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1")
+        jt = _decode_job(_job_template(job_environments=[wrap_env], extensions=exts))
+
+        # WHEN
+        job = create_job(job_template=jt, job_parameter_values={})
+
+        # THEN: creation succeeds and every run-time-resolvable field on the
+        # instantiated hook action is the raw, unresolved FormatString.
+        action = job.jobEnvironments[0].script.actions.onWrapTaskRun
+        assert isinstance(action.timeout, FormatString)
+        assert str(action.timeout) == "{{WrappedAction.Timeout}}"
+        assert isinstance(action.cancelation.mode, FormatString)
+        assert str(action.cancelation.mode) == "{{WrappedAction.Cancelation.Mode}}"
+        assert isinstance(action.cancelation.notifyPeriodInSeconds, FormatString)
+        assert (
+            str(action.cancelation.notifyPeriodInSeconds)
+            == "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+        )
+        assert isinstance(action.command, FormatString)
+        assert str(action.command) == "{{WrappedAction.Command}}"
+
 
 class TestCancelationRoundTripForwarding:
     """Cancelation round-trip forwarding (openjd-rs PR #261 review,
@@ -314,10 +365,11 @@ class TestCancelationRoundTripForwarding:
     Mirrors ``cancelation_round_trip_*`` in openjd-rs
     ``crates/openjd-model/tests/integration/test_wrap_actions.rs``.
 
-    Note: the review example also forwards ``timeout:``; that is
-    deliberately out of scope pending the WrappedAction.Timeout
-    int-vs-int? question (the 0-when-unset sentinel is not a valid
-    ``<posinteger>``).
+    Note: the review example also forwards ``timeout:``; that works too —
+    see TestWrapActionsCreateJob
+    .test_create_job_with_full_forwarding_defers_runtime_fields, which
+    covers full forwarding (command/args/timeout/cancelation) through
+    create_job.
     """
 
     _ROUND_TRIP_EXTS = ["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]

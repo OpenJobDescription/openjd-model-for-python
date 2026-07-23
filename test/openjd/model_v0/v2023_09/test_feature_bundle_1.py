@@ -620,6 +620,94 @@ class TestCreateJobWithFormatStrings:
             )
         assert "max" in str(excinfo.value).lower()
 
+    def test_timeout_and_notify_period_carried_through_unresolved(self) -> None:
+        """timeout and notifyPeriodInSeconds format strings are NOT resolved
+        at job creation: they are carried through the instantiated Job as raw
+        FormatStrings and resolved at run time by the session, matching
+        openjd-rs (job/create_job/instantiate.rs clones timeout+cancelation
+        unresolved into the Job). This is what allows RFC 0008 wrap hooks to
+        forward run-time-only symbols such as WrappedAction.Timeout."""
+        from openjd.model import create_job, decode_job_template
+        from openjd.model._format_strings import FormatString
+        from openjd.model._types import ParameterValue, ParameterValueType
+
+        template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "name": "Test",
+                "parameterDefinitions": [{"name": "TO", "type": "INT", "default": 30}],
+                "steps": [
+                    {
+                        "name": "Step1",
+                        "script": {
+                            "actions": {
+                                "onRun": {
+                                    "command": "echo",
+                                    "timeout": "{{Param.TO}}",
+                                    "cancelation": {
+                                        "mode": "NOTIFY_THEN_TERMINATE",
+                                        "notifyPeriodInSeconds": "{{Param.TO}}",
+                                    },
+                                }
+                            }
+                        },
+                    }
+                ],
+            },
+            supported_extensions=[ExtensionName.FEATURE_BUNDLE_1],
+        )
+
+        # WHEN
+        job = create_job(
+            job_template=template,
+            job_parameter_values={"TO": ParameterValue(type=ParameterValueType.INT, value="30")},
+        )
+
+        # THEN: creation succeeds and both fields carry the raw FormatString.
+        on_run = job.steps[0].script.actions.onRun
+        assert isinstance(on_run.timeout, FormatString)
+        assert str(on_run.timeout) == "{{Param.TO}}"
+        assert on_run.cancelation is not None
+        assert isinstance(on_run.cancelation.notifyPeriodInSeconds, FormatString)
+        assert str(on_run.cancelation.notifyPeriodInSeconds) == "{{Param.TO}}"
+
+    def test_literal_timeout_and_notify_period_stay_ints_through_create_job(self) -> None:
+        """Literal integer timeout/notifyPeriodInSeconds are unaffected by
+        the run-time deferral of format-string values."""
+        from openjd.model import create_job, decode_job_template
+
+        template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "name": "Test",
+                "steps": [
+                    {
+                        "name": "Step1",
+                        "script": {
+                            "actions": {
+                                "onRun": {
+                                    "command": "echo",
+                                    "timeout": 30,
+                                    "cancelation": {
+                                        "mode": "NOTIFY_THEN_TERMINATE",
+                                        "notifyPeriodInSeconds": 15,
+                                    },
+                                }
+                            }
+                        },
+                    }
+                ],
+            },
+            supported_extensions=[ExtensionName.FEATURE_BUNDLE_1],
+        )
+        job = create_job(job_template=template, job_parameter_values={})
+        on_run = job.steps[0].script.actions.onRun
+        assert on_run.timeout == 30
+        assert on_run.cancelation is not None
+        assert on_run.cancelation.notifyPeriodInSeconds == 15
+
 
 class TestAmountRequirementEdgeCases:
     """Edge case tests for AmountRequirementTemplate."""

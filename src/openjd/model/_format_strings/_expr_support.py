@@ -83,10 +83,15 @@ def symtab_to_expr_values(
     embedded-file ``data``) against one unchanged table — without the cache
     the whole table is rebuilt across the Rust boundary per expression.
     Caching requires ``types`` to be the symbol table's own ``expr_types``
-    (or ``None``), which is what the evaluation layer passes; any other
-    ``types`` object bypasses the cache.
+    (which is what the evaluation layer passes), or ``None`` when the symbol
+    table has no ``expr_types``; any other combination bypasses the cache.
+    In particular an untyped (``types=None``) build on a symbol table that
+    *has* ``expr_types`` is never cached — otherwise a later typed call at
+    the same mutation version would be served the stale untyped table and
+    lose the type coercions (typed/untyped cache-key collision).
     """
-    cacheable = types is None or types is getattr(symtab, "expr_types", None)
+    symtab_expr_types = getattr(symtab, "expr_types", None)
+    cacheable = types is symtab_expr_types or (types is None and not symtab_expr_types)
     version = getattr(symtab, "_version", None)
     cache_key = ("engine_table", str(path_format))
     if cacheable and version is not None:

@@ -344,7 +344,13 @@ class CancelationMethodNotifyThenTerminate(OpenJDModel_v2023_09):
     mode: Literal[CancelationMode.NOTIFY_THEN_TERMINATE]
     notifyPeriodInSeconds: Optional[Union[NotifyPeriodType, FormatString]] = None  # noqa: N815
 
-    _job_creation_metadata = JobCreationMetadata(resolve_fields={"notifyPeriodInSeconds"})
+    # A FormatString notifyPeriodInSeconds is NOT resolved at job creation:
+    # it is carried through unresolved and resolved at run time by the
+    # session, matching openjd-rs (job/create_job/instantiate.rs clones the
+    # cancelation object unresolved into the Job). This is what lets RFC 0008
+    # wrap hooks forward "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}",
+    # whose symbols only exist at run time.
+    _job_creation_metadata = JobCreationMetadata()
 
     @field_validator("notifyPeriodInSeconds", mode="before")
     @classmethod
@@ -432,7 +438,13 @@ class CancelationMethodDeferred(OpenJDModel_v2023_09):
     mode: FormatString
     notifyPeriodInSeconds: Optional[Union[NotifyPeriodType, FormatString]] = None  # noqa: N815
 
-    _job_creation_metadata = JobCreationMetadata(resolve_fields={"notifyPeriodInSeconds"})
+    # Neither `mode` nor a FormatString `notifyPeriodInSeconds` is resolved
+    # at job creation: the whole deferred cancelation object is carried
+    # through unresolved and resolved at run time by the session, matching
+    # openjd-rs (job/create_job/instantiate.rs). Run-time-only symbols such
+    # as WrappedAction.Cancelation.* are how RFC 0008 wrap hooks forward the
+    # wrapped action's cancelation.
+    _job_creation_metadata = JobCreationMetadata()
 
     @field_validator("mode", mode="before")
     @classmethod
@@ -584,16 +596,23 @@ class Action(OpenJDModel_v2023_09):
     timeout: Optional[Union[PositiveInt, FormatString]] = None
     cancelation: Optional[CancelationMethod] = None
 
-    _job_creation_metadata = JobCreationMetadata(resolve_fields={"timeout"})
+    # A FormatString `timeout` is NOT resolved at job creation: it is carried
+    # through job instantiation unresolved and resolved at run time by the
+    # session, matching openjd-rs (job/create_job/instantiate.rs clones
+    # timeout and cancelation unresolved into the Job, and the session
+    # resolves them right before the action runs). This is what lets RFC 0008
+    # wrap hooks forward "{{WrappedAction.Timeout}}" — those symbols only
+    # exist at run time.
+    _job_creation_metadata = JobCreationMetadata()
 
     # `timeout` and `cancelation` (its notifyPeriodInSeconds and a deferred
-    # format-string mode) are plain @fmtstring fields resolved at job
-    # creation, before any session exists — unlike `command`/`args`, which
-    # resolve in the session. They therefore validate at template scope: no
-    # Session.*, no Env.File.*/Task.File.*, and no host-context functions.
-    # The RFC 0008 wrap hooks may still forward the wrapped action's values
-    # ("{{WrappedAction.Timeout}}"): the WrappedAction.* symbols are injected
-    # per-hook at every scope via EnvironmentActions._template_field_inject.
+    # format-string mode) still VALIDATE at template scope: no Session.*, no
+    # Env.File.*/Task.File.*, and no host-context functions (matching
+    # openjd-rs format_strings.rs). The RFC 0008 wrap hooks may forward the
+    # wrapped action's values ("{{WrappedAction.Timeout}}"): the
+    # WrappedAction.* symbols are injected per-hook at every scope via
+    # EnvironmentActions._template_field_inject, and openjd-rs's
+    # symtab-filter preserves them for run time.
     _template_field_scopes = {
         "timeout": ResolutionScope.TEMPLATE,
         "cancelation": ResolutionScope.TEMPLATE,
