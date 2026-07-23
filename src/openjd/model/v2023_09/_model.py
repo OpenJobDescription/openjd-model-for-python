@@ -1214,6 +1214,16 @@ class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
     # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
     chunks: Optional[TaskChunksDefinition] = None
 
+    @field_validator("range")
+    @classmethod
+    def _validate_range_len(cls, value: Any) -> Any:
+        # §3.4: enforce the range cap on the instantiation target as well, so
+        # ranges produced by RFC 0006 typed whole-field resolution (e.g.
+        # `range: "{{Param.Values}}"` with a LIST[*] parameter) are subject to
+        # the same limit as literal template ranges — matching openjd-rs's
+        # resolve-time checks in create_job (ranges.rs).
+        return validate_task_param_range_list_len(value)
+
 
 class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
     # element type of items in the range
@@ -1221,6 +1231,69 @@ class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
     range: IntRangeExpr
     # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
     chunks: Optional[TaskChunksDefinition] = None
+
+    @field_validator("range")
+    @classmethod
+    def _validate_range_len(cls, value: Any) -> Any:
+        # §3.4: a range expression that arrives via format-string resolution
+        # (e.g. `range: "{{RawParam.Frames}}"` with a RANGE_EXPR parameter) is
+        # only parsed at instantiation, so the expansion cap must be enforced
+        # here too — matching openjd-rs's resolve-time checks in create_job.
+        if isinstance(value, IntRangeExpr):
+            _check_range_expr_len(value)
+        return value
+
+
+def _check_range_expr_len(parsed_range: IntRangeExpr) -> None:
+    """§3.4: a range expression may expand to at most 1024 values."""
+    if len(parsed_range) > _MAX_TASK_PARAM_RANGE_LEN:
+        raise ValueError(
+            f"range expression expands to {len(parsed_range)} elements "
+            f"(max {_MAX_TASK_PARAM_RANGE_LEN})."
+        )
+
+
+def _range_task_param_target(model: Any, typed_values: dict) -> Type[OpenJDModel]:
+    """``create_as`` target-model selector shared by the INT and CHUNK[INT]
+    task-parameter definitions.
+
+    RFC 0006 typed whole-field resolution: a ``range`` that is a single
+    whole-field expression evaluating to a list instantiates as a literal
+    value list (matching openjd-rs); otherwise the resolved string is parsed
+    as a range expression. ``typed_values`` holds the typed resolutions that
+    ``instantiate_model`` computed once for this model's
+    ``typed_resolve_fields`` — the same values the field instantiation will
+    use — so the target decision and the field value never disagree, and the
+    expression is not evaluated a second time here.
+    """
+    if isinstance(model.range, RangeString):
+        if "range" in typed_values:
+            return RangeListTaskParameterDefinition
+        return RangeExpressionTaskParameterDefinition
+    return RangeListTaskParameterDefinition
+
+
+def _validate_int_range_elements(value: Any) -> Any:
+    """Shared ``range`` post-validator for the INT and CHUNK[INT]
+    task-parameter definitions: a literal range-expression string must parse
+    and may expand to at most 1024 values (§3.4); a list-form range is
+    length-capped. Ranges containing format expressions defer to the
+    RangeExpressionTaskParameterDefinition model once they are resolved.
+    """
+    if isinstance(value, FormatString):
+        # If there are no format expressions, we can validate the range expression.
+        # otherwise we defer to the RangeExressionTaskParameter model when
+        # they've all been evaluated
+        if len(value.expressions) == 0:
+            try:
+                parsed_range = IntRangeExpr.from_str(value)
+            except Exception as e:
+                raise ValueError(str(e))
+            # §3.4: the range may take on at most 1024 values.
+            _check_range_expr_len(parsed_range)
+    else:
+        validate_task_param_range_list_len(value)
+    return value
 
 
 class IntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09):
@@ -1247,21 +1320,8 @@ class IntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09
     )
     _template_variable_sources = {"__export__": {"__self__"}}
 
-    def _get_range_task_param_type(self: Any, symtab: SymbolTable) -> Type[OpenJDModel]:
-        if isinstance(self.range, RangeString):
-            # RFC 0006 typed whole-field resolution: a range that is a single
-            # whole-field expression evaluating to a list instantiates as a
-            # literal value list (matching openjd-rs); otherwise the resolved
-            # string is parsed as a range expression.
-            from .._internal._create_job import resolve_whole_field_typed_list
-
-            if resolve_whole_field_typed_list(self.range, symtab) is not None:
-                return RangeListTaskParameterDefinition
-            return RangeExpressionTaskParameterDefinition
-        return RangeListTaskParameterDefinition
-
     _job_creation_metadata = JobCreationMetadata(
-        create_as=JobCreateAsMetadata(callable=_get_range_task_param_type),
+        create_as=JobCreateAsMetadata(callable=_range_task_param_target),
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
         exclude_fields={"name"},
@@ -1287,24 +1347,7 @@ class IntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09
     @field_validator("range")
     @classmethod
     def _validate_range_elements(cls, value: Any) -> Any:
-        if isinstance(value, FormatString):
-            # If there are no format expressions, we can validate the range expression.
-            # otherwise we defer to the RangeExressionTaskParameter model when
-            # they've all been evaluated
-            if len(value.expressions) == 0:
-                try:
-                    parsed_range = IntRangeExpr.from_str(value)
-                except Exception as e:
-                    raise ValueError(str(e))
-                # §3.4: the range may take on at most 1024 values.
-                if len(parsed_range) > _MAX_TASK_PARAM_RANGE_LEN:
-                    raise ValueError(
-                        f"range expression expands to {len(parsed_range)} elements "
-                        f"(max {_MAX_TASK_PARAM_RANGE_LEN})."
-                    )
-        else:
-            validate_task_param_range_list_len(value)
-        return value
+        return _validate_int_range_elements(value)
 
 
 def _validate_range_expr_requires_expr(value: Any, info: ValidationInfo) -> Any:
@@ -1477,21 +1520,8 @@ class ChunkIntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v20
     )
     _template_variable_sources = {"__export__": {"__self__"}}
 
-    def _get_range_task_param_type(self: Any, symtab: SymbolTable) -> Type[OpenJDModel]:
-        if isinstance(self.range, RangeString):
-            # RFC 0006 typed whole-field resolution: a range that is a single
-            # whole-field expression evaluating to a list instantiates as a
-            # literal value list (matching openjd-rs); otherwise the resolved
-            # string is parsed as a range expression.
-            from .._internal._create_job import resolve_whole_field_typed_list
-
-            if resolve_whole_field_typed_list(self.range, symtab) is not None:
-                return RangeListTaskParameterDefinition
-            return RangeExpressionTaskParameterDefinition
-        return RangeListTaskParameterDefinition
-
     _job_creation_metadata = JobCreationMetadata(
-        create_as=JobCreateAsMetadata(callable=_get_range_task_param_type),
+        create_as=JobCreateAsMetadata(callable=_range_task_param_target),
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
         exclude_fields={"name"},
@@ -1530,24 +1560,7 @@ class ChunkIntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v20
     @field_validator("range")
     @classmethod
     def _validate_range_elements(cls, value: Any) -> Any:
-        if isinstance(value, FormatString):
-            # If there are no format expressions, we can validate the range expression.
-            # otherwise we defer to the RangeExressionTaskParameter model when
-            # they've all been evaluated
-            if len(value.expressions) == 0:
-                try:
-                    parsed_range = IntRangeExpr.from_str(value)
-                except Exception as e:
-                    raise ValueError(str(e))
-                # §3.4: the range may take on at most 1024 values.
-                if len(parsed_range) > _MAX_TASK_PARAM_RANGE_LEN:
-                    raise ValueError(
-                        f"range expression expands to {len(parsed_range)} elements "
-                        f"(max {_MAX_TASK_PARAM_RANGE_LEN})."
-                    )
-        else:
-            validate_task_param_range_list_len(value)
-        return value
+        return _validate_int_range_elements(value)
 
 
 TaskParameterDefinition = Union[
@@ -3326,24 +3339,9 @@ class StepTemplate(OpenJDModel_v2023_09):
         step_symtab = SymbolTable(source=symtab)
         step_symtab["Step.Name"] = str(self.name)
         if self.let:
-            # Deferred import to keep the Rust expr surface off the non-EXPR
-            # path; `let` fields only exist when EXPR is declared.
-            from .._format_strings._nodes import ExprNode
+            from .._let_bindings import evaluate_let_bindings
 
-            for binding in self.let:
-                name, sep, rhs = binding.partition("=")
-                name = name.strip()
-                rhs = rhs.strip()
-                if not sep or not name or not rhs:
-                    # Malformed bindings are rejected by the `let` validator.
-                    continue
-                try:
-                    # evaluate_value keeps the engine's typed value (paths
-                    # stay paths, float rendering fidelity is preserved) when
-                    # the binding is later referenced.
-                    step_symtab[name] = ExprNode(rhs).evaluate_value(symtab=step_symtab)
-                except ValueError as exc:
-                    raise ValueError(f"let binding {name!r}: {exc}")
+            evaluate_let_bindings(symtab=step_symtab, let_bindings=self.let)
         return step_symtab
 
     _template_variable_sources = {

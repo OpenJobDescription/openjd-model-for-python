@@ -14,6 +14,18 @@ from .._types import OpenJDModel
 __all__ = ("instantiate_model", "resolve_whole_field_typed_list")
 
 
+def _expr_value_is_list(result: Any) -> bool:
+    """Whether an EXPR engine ``ExprValue`` result carries a list.
+
+    The binding does not (yet) expose an ``is_list`` predicate, so the check
+    inspects the value's EXPR type string. Kept in exactly one place so the
+    interface-sniffing has a single seam to replace with a typed binding
+    predicate later.
+    """
+    result_type = getattr(result, "type", None)
+    return result_type is not None and str(result_type).startswith("list[")
+
+
 def resolve_whole_field_typed_list(value: FormatString, symtab: SymbolTable) -> Any:
     """RFC 0006 typed whole-field resolution to a native list, or ``None``.
 
@@ -22,29 +34,48 @@ def resolve_whole_field_typed_list(value: FormatString, symtab: SymbolTable) -> 
     native Python list. Any other shape or result — multi-segment format
     strings, scalar results, or evaluation errors — returns ``None`` so the
     caller falls back to ordinary string resolution, mirroring the
-    typed-then-string fallback in openjd-rs's range instantiation.
+    typed-then-string fallback in openjd-rs's range instantiation. An
+    evaluation error is deliberately not raised here: the string-resolution
+    fallback re-evaluates and surfaces it with full format-string context.
     """
-    expressions = value.expressions
-    if len(expressions) != 1:
+    info = value.whole_field_expression()
+    if info is None:
         return None
-    info = expressions[0]
     expression = info.expression
-    if expression is None:
-        return None
-    original = value.original_value
-    if original[: info.start_pos].strip() or original[info.end_pos :].strip():
+    if expression is None:  # pragma: no cover - excluded by whole_field_expression
         return None
     try:
         result = expression.evaluate_value(symtab=symtab)
-    except Exception:  # noqa: BLE001 - fall back to string resolution
+    except ValueError:
+        # ExpressionError/FormatStringError (both ValueError subclasses):
+        # fall back to string resolution, which re-raises with context.
         return None
     # EXPR-backed evaluation returns the engine's ExprValue; unwrap lists.
-    result_type = getattr(result, "type", None)
-    if result_type is not None and str(result_type).startswith("list["):
+    if _expr_value_is_list(result):
         return result.item()
     if isinstance(result, list):
         return result
     return None
+
+
+def _compute_typed_resolutions(model: "OpenJDModel", symtab: SymbolTable) -> dict[str, Any]:
+    """RFC 0006 typed whole-field resolutions for the model's
+    ``typed_resolve_fields``, computed exactly once per field.
+
+    The result feeds both the ``create_as`` target-model decision and the
+    field instantiation in :func:`instantiate_model`, so the (Rust-boundary)
+    expression evaluation is not repeated and the two consumers cannot
+    disagree. Fields whose typed resolution does not apply are absent from
+    the mapping (the caller falls back to normal string resolution).
+    """
+    typed_resolved: dict[str, Any] = {}
+    for field_name in model._job_creation_metadata.typed_resolve_fields:
+        field_value = getattr(model, field_name, None)
+        if isinstance(field_value, FormatString):
+            typed_value = resolve_whole_field_typed_list(field_value, symtab)
+            if typed_value is not None:
+                typed_resolved[field_name] = typed_value
+    return typed_resolved
 
 
 # Cache for TypeAdapter instances
@@ -139,6 +170,8 @@ def instantiate_model(  # noqa: C901
     if model._job_creation_metadata.transform is not None:
         model = model._job_creation_metadata.transform(model)
 
+    typed_resolved = _compute_typed_resolutions(model, symtab)
+
     # Determine the target model to create as
     target_model = model.__class__
     if model._job_creation_metadata.create_as is not None:
@@ -146,7 +179,7 @@ def instantiate_model(  # noqa: C901
         if create_as_metadata.model is not None:
             target_model = create_as_metadata.model
         elif create_as_metadata.callable is not None:
-            target_model = create_as_metadata.callable(model, symtab)
+            target_model = create_as_metadata.callable(model, typed_resolved)
 
     for field_name in model.__class__.model_fields.keys():
         if field_name in model._job_creation_metadata.exclude_fields:
@@ -167,8 +200,10 @@ def instantiate_model(  # noqa: C901
         with capture_validation_errors(output_errors=errors, loc=(field_name,), input=field_value):
             # Instantiate and resolve format string expressions
             needs_resolve = field_name in model._job_creation_metadata.resolve_fields
-            typed_resolve = field_name in model._job_creation_metadata.typed_resolve_fields
-            if isinstance(field_value, list):
+            if field_name in typed_resolved:
+                # RFC 0006 typed whole-field resolution (computed above).
+                instantiated = typed_resolved[field_name]
+            elif isinstance(field_value, list):
                 if field_name in model._job_creation_metadata.reshape_field_to_dict:
                     key_field = model._job_creation_metadata.reshape_field_to_dict[field_name]
                     instantiated = _instantiate_list_field_as_dict(
@@ -181,9 +216,7 @@ def instantiate_model(  # noqa: C901
             elif isinstance(field_value, dict):
                 instantiated = _instantiate_dict_field(field_value, symtab, needs_resolve)
             else:
-                instantiated = _instantiate_noncollection_value(
-                    field_value, symtab, needs_resolve, typed_resolve=typed_resolve
-                )
+                instantiated = _instantiate_noncollection_value(field_value, symtab, needs_resolve)
 
             # Validate as the target field type using cached TypeAdapter
             type_adapter = get_type_adapter(target_field_type)
@@ -210,8 +243,6 @@ def _instantiate_noncollection_value(
     value: Any,
     symtab: SymbolTable,
     needs_resolve: bool,
-    *,
-    typed_resolve: bool = False,
 ) -> Any:
     """Instantiate a single value that must not be a collection type (list, dict, etc).
 
@@ -220,17 +251,14 @@ def _instantiate_noncollection_value(
         value (Any): Value to process.
         symtab (SymbolTable): Symbol table for format string value lookups.
         needs_resolve (bool): Whether to resolve the value as a format string.
-        typed_resolve (bool): Whether to first attempt RFC 0006 typed
-            whole-field resolution to a native list (task-parameter ``range``
-            fields), falling back to string resolution.
+
+    Note: fields named in ``typed_resolve_fields`` whose RFC 0006 typed
+    whole-field resolution succeeded never reach this function —
+    ``instantiate_model`` resolves them once up front.
     """
     if isinstance(value, OpenJDModel):
         return instantiate_model(value, symtab)
     elif isinstance(value, FormatString) and needs_resolve:
-        if typed_resolve:
-            typed_value = resolve_whole_field_typed_list(value, symtab)
-            if typed_value is not None:
-                return typed_value
         value = value.resolve(symtab=symtab)
 
     return value

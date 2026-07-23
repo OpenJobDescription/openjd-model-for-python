@@ -128,6 +128,27 @@ class FormatString(DynamicConstrainedStr):
 
         return "".join(resolved_list)
 
+    def whole_field_expression(self) -> Optional["ExpressionInfo"]:
+        """The format string's single whole-field expression, or ``None``.
+
+        A format string is *whole-field* when it consists of exactly one
+        ``{{ ... }}`` expression with only whitespace outside the braces
+        (Template Schemas: fields with ``string?``/typed null semantics).
+        Single-sourced here so every whole-field check (typed value
+        resolution, RFC 0006 typed list instantiation) agrees on the rule.
+        """
+        expressions = self.expressions
+        if len(expressions) != 1:
+            return None
+        info = expressions[0]
+        if info.expression is None:
+            return None
+        prefix = self.original_value[: info.start_pos]
+        suffix = self.original_value[info.end_pos :]
+        if prefix.strip() or suffix.strip():
+            return None
+        return info
+
     def resolve_value(self, *, symtab: SymbolTable, path_format: Optional[object] = None) -> Any:
         """Typed resolution of this format string (RFC 0005/0006).
 
@@ -143,23 +164,20 @@ class FormatString(DynamicConstrainedStr):
         Raises:
             FormatStringError: if the expression cannot be evaluated.
         """
-        expressions = self.expressions
-        if len(expressions) == 1:
-            info = expressions[0]
+        info = self.whole_field_expression()
+        if info is not None:
             expression = info.expression
-            prefix = self.original_value[: info.start_pos]
-            suffix = self.original_value[info.end_pos :]
-            if expression is not None and not prefix.strip() and not suffix.strip():
-                try:
-                    return expression.evaluate_value(symtab=symtab, path_format=path_format)
-                except ExpressionError as exc:
-                    raise FormatStringError(
-                        string=self.original_value,
-                        start=info.start_pos,
-                        end=info.end_pos,
-                        expr=expression.expr,
-                        details=str(exc),
-                    )
+            assert expression is not None  # guaranteed by whole_field_expression
+            try:
+                return expression.evaluate_value(symtab=symtab, path_format=path_format)
+            except ExpressionError as exc:
+                raise FormatStringError(
+                    string=self.original_value,
+                    start=info.start_pos,
+                    end=info.end_pos,
+                    expr=expression.expr,
+                    details=str(exc),
+                )
         return self.resolve(symtab=symtab, path_format=path_format)
 
     def _preprocess(

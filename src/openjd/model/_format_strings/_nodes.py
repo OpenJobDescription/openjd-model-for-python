@@ -228,23 +228,19 @@ class ExprNode(Node):
         coercion). Re-raises engine errors as the model's ``ExpressionError``.
         """
         from ._expr_support import (
-            ExprProfile,
-            HostContext,
             map_eval_error,
+            profile_for_symtab,
             symtab_to_expr_values,
         )
 
+        # Both the engine symbol table and the evaluation profile (which
+        # carries the session's host-context path mapping rules, if any) are
+        # cached on the symbol table per mutation version — see
+        # _expr_support for why (per-expression Rust-boundary rebuilds).
         values = symtab_to_expr_values(
             symtab, types=symtab.expr_types or None, path_format=path_format
         )
-        profile = ExprProfile.current()
-        # A symbol table carrying host-context path mapping rules (session
-        # scope) enables host-context functions such as apply_path_mapping,
-        # applying those rules — mirroring openjd-rs's session-scope
-        # HostContext::WithRules. None means template scope (no host context).
-        host_rules = getattr(symtab, "expr_host_rules", None)
-        if host_rules is not None:
-            profile = profile.with_host_context(HostContext.with_rules(host_rules))
+        profile = profile_for_symtab(symtab)
         try:
             return self._parsed.evaluate(values=values, profile=profile, path_format=path_format)
         except Exception as exc:  # noqa: BLE001 - boundary; re-raise as model error

@@ -243,12 +243,14 @@ class DefinesTemplateVariables:
 
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)
 class JobCreateAsMetadata:
-    # Only one of the following may be non-None
-    # model: Union[Type["OpenJDModel"], Callable[["OpenJDModel", SymbolTable], Type["OpenJDModel"]]]
+    # Only one of the following may be non-None.
     model: Optional[Type["OpenJDModel"]] = field(default=None)
-    callable: Optional[Callable[["OpenJDModel", SymbolTable], Type["OpenJDModel"]]] = field(
-        default=None
-    )
+    # The callable receives the model and the mapping of typed whole-field
+    # resolutions (field name -> native value) that instantiate_model computed
+    # for the model's typed_resolve_fields — the same values the field
+    # instantiation uses — so target-model selection can depend on a typed
+    # resolution without re-evaluating the expression.
+    callable: Optional[Callable[["OpenJDModel", dict], Type["OpenJDModel"]]] = field(default=None)
 
 
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)
@@ -277,6 +279,9 @@ class JobCreationMetadata:
     instantiates to the literal value list, matching openjd-rs. Fields whose
     typed resolution does not apply (multi-segment format strings, non-list
     results, or evaluation errors) fall back to normal string resolution.
+
+    ``instantiate_model`` evaluates each such field at most once; the result
+    is shared with the ``create_as`` callable (see JobCreateAsMetadata).
     """
 
     create_as: Optional[JobCreateAsMetadata] = field(default=None)

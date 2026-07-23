@@ -74,14 +74,79 @@ def symtab_to_expr_values(
     expects (``"int"``, ``"list[int]"``) via :func:`expr_type_for_openjd_type`.
     Names whose type has no confident EXPR mapping (e.g. ``RANGE_EXPR``) are
     omitted so the engine infers them from the value.
+
+    The built engine table is cached on the symbol table, keyed on its
+    mutation version and the path format: the construction (flattening every
+    symbol, one type-spec lookup per typed symbol, and the ``build_symbol_table``
+    boundary call) is invariant between symbol-table mutations, but a session
+    action evaluates many expressions (command, each arg, timeout, each
+    embedded-file ``data``) against one unchanged table — without the cache
+    the whole table is rebuilt across the Rust boundary per expression.
+    Caching requires ``types`` to be the symbol table's own ``expr_types``
+    (or ``None``), which is what the evaluation layer passes; any other
+    ``types`` object bypasses the cache.
     """
+    cacheable = types is None or types is getattr(symtab, "expr_types", None)
+    version = getattr(symtab, "_version", None)
+    cache_key = ("engine_table", str(path_format))
+    if cacheable and version is not None:
+        cache = symtab._expr_eval_cache
+        if cache is not None:
+            hit = cache.get(cache_key)
+            if hit is not None and hit[0] == version:
+                return hit[1]
+
     flat = {name: symtab[name] for name in symtab.symbols}
     expr_types: dict[str, str] = {}
     for name, openjd_type in (types or {}).items():
         spec = expr_type_for_openjd_type(openjd_type)
         if spec is not None:
             expr_types[name] = spec
-    return build_symbol_table(flat, expr_types or None, path_format=path_format)
+    built = build_symbol_table(flat, expr_types or None, path_format=path_format)
+
+    if cacheable and version is not None:
+        if symtab._expr_eval_cache is None:
+            symtab._expr_eval_cache = {}
+        symtab._expr_eval_cache[cache_key] = (version, built)
+    return built
+
+
+def profile_for_symtab(symtab: SymbolTable) -> ExprProfile:
+    """The EXPR evaluation profile for expressions evaluated against
+    ``symtab``.
+
+    A symbol table carrying host-context path mapping rules (session scope,
+    ``expr_host_rules``) yields a profile with
+    ``HostContext.with_rules(...)`` so host-context functions such as
+    ``apply_path_mapping`` are available and apply those rules — mirroring
+    openjd-rs's session-scope ``HostContext::WithRules``. ``None`` rules mean
+    template scope (no host context).
+
+    Cached on the symbol table per mutation version alongside the engine
+    table: the profile + host-context construction is a per-evaluation Rust
+    object build otherwise. The rules list itself must not be mutated in
+    place (assign a new list through ``expr_host_rules`` instead), which is
+    how the session runtime uses it.
+    """
+    version = getattr(symtab, "_version", None)
+    cache_key = "host_profile"
+    if version is not None:
+        cache = symtab._expr_eval_cache
+        if cache is not None:
+            hit = cache.get(cache_key)
+            if hit is not None and hit[0] == version:
+                return hit[1]
+
+    profile = ExprProfile.current()
+    host_rules = getattr(symtab, "expr_host_rules", None)
+    if host_rules is not None:
+        profile = profile.with_host_context(HostContext.with_rules(host_rules))
+
+    if version is not None:
+        if symtab._expr_eval_cache is None:
+            symtab._expr_eval_cache = {}
+        symtab._expr_eval_cache[cache_key] = (version, profile)
+    return profile
 
 
 def parse_expr_or_raise(expr: str) -> Any:

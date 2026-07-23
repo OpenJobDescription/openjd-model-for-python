@@ -76,6 +76,53 @@ def _collect_missing_job_parameter_names(
     return available_parameters.difference(set(job_parameter_values.keys()))
 
 
+def _resolve_path_default_2023_09(
+    param_name: str,
+    default: str,
+    *,
+    job_template_dir: Path,
+    allow_job_template_dir_walk_up: bool,
+    allow_uri_path_values: bool,
+) -> str:
+    """Resolve a PATH parameter's default value string.
+
+    - RFC 0006 (EXPR): URI-form defaults ("s3://...") are preserved verbatim —
+      they are not filesystem paths, so the template-dir join and walk-up
+      enforcement do not apply. Mirrors openjd-rs's preprocess_job_parameters
+      URI handling.
+    - Otherwise the default is made relative to ``job_template_dir``, with the
+      ``allow_job_template_dir_walk_up`` request enforced.
+
+    Raises:
+        ValueError: If the default violates the walk-up restrictions.
+    """
+    if default == "":
+        return default
+    if allow_uri_path_values and _is_uri(default):
+        return default
+    default_path = Path(default)
+    if default_path.is_absolute():
+        # While we could permit absolute paths within the job template dir,
+        # we choose not to do so. A job template using absolute paths as path defaults
+        # within the template's directory isn't portable and it's easier to make
+        # them relative early in the creating a job.
+        if not allow_job_template_dir_walk_up:
+            raise ValueError(
+                f"The default value of PATH parameter {param_name} is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+            )
+    elif job_template_dir.is_absolute():
+        # Note: Using os.path.normpath instead of Path.resolve, since
+        #       Path.resolve makes changes to the path unexpected by users,
+        #       like switching Windows drive letters to UNC paths.
+        default_path = Path(normpath(job_template_dir / default_path))
+        if not allow_job_template_dir_walk_up and not default_path.is_relative_to(job_template_dir):
+            raise ValueError(
+                f"The default value of PATH parameter {param_name} references a path outside of the template directory. Walking up from the template directory is not permitted."
+            )
+        default = str(default_path)
+    return default
+
+
 def _collect_defaults_2023_09(
     job_parameter_definitions: list[JobParameterDefinition],
     job_parameter_values: JobParameterInputValues,
@@ -105,45 +152,14 @@ def _collect_defaults_2023_09(
                     )
                     continue
                 default = str(param.default)
-                # RFC 0006 (EXPR): URI-form PATH defaults ("s3://...") are
-                # preserved verbatim — they are not filesystem paths, so the
-                # template-dir join and walk-up enforcement do not apply.
-                # Mirrors openjd-rs's preprocess_job_parameters URI handling.
-                if (
-                    param.type.name == "PATH"
-                    and allow_uri_path_values
-                    and default != ""
-                    and _is_uri(default)
-                ):
-                    return_value[param.name] = ParameterValue(
-                        type=ParameterValueType(param.type), value=default
+                if param.type.name == "PATH":
+                    default = _resolve_path_default_2023_09(
+                        param.name,
+                        default,
+                        job_template_dir=job_template_dir,
+                        allow_job_template_dir_walk_up=allow_job_template_dir_walk_up,
+                        allow_uri_path_values=allow_uri_path_values,
                     )
-                    continue
-                # Make PATH defaults relative to job_template_dir, and
-                # enforce the `allow_job_template_dir_walk_up` parameter request.
-                if param.type.name == "PATH" and default != "":
-                    default_path = Path(default)
-                    if default_path.is_absolute():
-                        # While we could permit absolute paths within the job template dir,
-                        # we choose not to do so. A job template using absolute paths as path defaults
-                        # within the template's directory isn't portable and it's easier to make
-                        # them relative early in the creating a job.
-                        if not allow_job_template_dir_walk_up:
-                            raise ValueError(
-                                f"The default value of PATH parameter {param.name} is an absolute path. Default paths must be relative, and are joined to the job template's directory."
-                            )
-                    elif job_template_dir.is_absolute():
-                        # Note: Using os.path.normpath instead of Path.resolve, since
-                        #       Path.resolve makes changes to the path unexpected by users,
-                        #       like switching Windows drive letters to UNC paths.
-                        default_path = Path(normpath(job_template_dir / default_path))
-                        if not allow_job_template_dir_walk_up and not default_path.is_relative_to(
-                            job_template_dir
-                        ):
-                            raise ValueError(
-                                f"The default value of PATH parameter {param.name} references a path outside of the template directory. Walking up from the template directory is not permitted."
-                            )
-                        default = str(default_path)
                 return_value[param.name] = ParameterValue(
                     type=ParameterValueType(param.type), value=default
                 )
