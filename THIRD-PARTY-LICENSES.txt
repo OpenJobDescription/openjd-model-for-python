@@ -611,7 +611,7 @@ PERFORMANCE OF THIS SOFTWARE.
 ** encoding_rs; version 0.8.35 -- https://crates.io/crates/encoding_rs
 ** nohash-hasher; version 0.2.0 -- https://crates.io/crates/nohash-hasher
 ** static_assertions; version 1.1.0 -- https://crates.io/crates/static_assertions
-** tinyvec; version 1.11.0 -- https://crates.io/crates/tinyvec
+** tinyvec; version 1.12.0 -- https://crates.io/crates/tinyvec
 
                                  Apache License
                            Version 2.0, January 2004
@@ -1447,7 +1447,7 @@ PERFORMANCE OF THIS SOFTWARE.
 
 
 ------
-** zerocopy; version 0.8.52 -- https://crates.io/crates/zerocopy
+** zerocopy; version 0.8.55 -- https://crates.io/crates/zerocopy
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -1860,11 +1860,11 @@ PERFORMANCE OF THIS SOFTWARE.
 
 
 ------
-** futures-core; version 0.3.32 -- https://crates.io/crates/futures-core
-** futures-macro; version 0.3.32 -- https://crates.io/crates/futures-macro
-** futures-sink; version 0.3.32 -- https://crates.io/crates/futures-sink
-** futures-task; version 0.3.32 -- https://crates.io/crates/futures-task
-** futures-util; version 0.3.32 -- https://crates.io/crates/futures-util
+** futures-core; version 0.3.33 -- https://crates.io/crates/futures-core
+** futures-macro; version 0.3.33 -- https://crates.io/crates/futures-macro
+** futures-sink; version 0.3.33 -- https://crates.io/crates/futures-sink
+** futures-task; version 0.3.33 -- https://crates.io/crates/futures-task
+** futures-util; version 0.3.33 -- https://crates.io/crates/futures-util
                               Apache License
                         Version 2.0, January 2004
                      http://www.apache.org/licenses/
@@ -2071,10 +2071,10 @@ limitations under the License.
 
 ------
 ** ahash; version 0.8.12 -- https://crates.io/crates/ahash
-** arc-swap; version 1.9.1 -- https://crates.io/crates/arc-swap
+** arc-swap; version 1.9.2 -- https://crates.io/crates/arc-swap
 ** base64; version 0.22.1 -- https://crates.io/crates/base64
-** bitflags; version 2.13.0 -- https://crates.io/crates/bitflags
-** bstr; version 1.12.1 -- https://crates.io/crates/bstr
+** bitflags; version 2.13.1 -- https://crates.io/crates/bitflags
+** bstr; version 1.13.0 -- https://crates.io/crates/bstr
 ** bumpalo; version 3.20.3 -- https://crates.io/crates/bumpalo
 ** cfg-if; version 1.0.4 -- https://crates.io/crates/cfg-if
 ** either; version 1.16.0 -- https://crates.io/crates/either
@@ -2086,28 +2086,28 @@ limitations under the License.
 ** heck; version 0.5.0 -- https://crates.io/crates/heck
 ** indexmap; version 2.14.0 -- https://crates.io/crates/indexmap
 ** itertools; version 0.14.0 -- https://crates.io/crates/itertools
-** js-sys; version 0.3.102 -- https://crates.io/crates/js-sys
-** log; version 0.4.32 -- https://crates.io/crates/log
+** js-sys; version 0.3.103 -- https://crates.io/crates/js-sys
+** log; version 0.4.33 -- https://crates.io/crates/log
 ** num-traits; version 0.2.19 -- https://crates.io/crates/num-traits
 ** once_cell; version 1.21.4 -- https://crates.io/crates/once_cell
 ** ordermap; version 1.2.0 -- https://crates.io/crates/ordermap
 ** pyo3-log; version 0.13.4 -- https://crates.io/crates/pyo3-log
-** regex-automata; version 0.4.14 -- https://crates.io/crates/regex-automata
+** regex-automata; version 0.4.16 -- https://crates.io/crates/regex-automata
 ** regex-syntax; version 0.8.11 -- https://crates.io/crates/regex-syntax
-** regex; version 1.12.4 -- https://crates.io/crates/regex
+** regex; version 1.13.1 -- https://crates.io/crates/regex
 ** signal-hook-registry; version 1.4.8 -- https://crates.io/crates/signal-hook-registry
 ** smallvec; version 1.15.2 -- https://crates.io/crates/smallvec
 ** unicode-normalization; version 0.1.25 -- https://crates.io/crates/unicode-normalization
 ** unicode-width; version 0.2.2 -- https://crates.io/crates/unicode-width
 ** unicode_names2; version 1.3.0 -- https://crates.io/crates/unicode_names2
-** uuid; version 1.23.3 -- https://crates.io/crates/uuid
-** value-bag; version 1.12.0 -- https://crates.io/crates/value-bag
+** uuid; version 1.24.0 -- https://crates.io/crates/uuid
+** value-bag; version 1.13.1 -- https://crates.io/crates/value-bag
 ** wasi; version 0.11.1+wasi-snapshot-preview1 -- https://crates.io/crates/wasi
 ** wasip2; version 1.0.4+wasi-0.2.12 -- https://crates.io/crates/wasip2
-** wasm-bindgen-macro-support; version 0.2.125 -- https://crates.io/crates/wasm-bindgen-macro-support
-** wasm-bindgen-macro; version 0.2.125 -- https://crates.io/crates/wasm-bindgen-macro
-** wasm-bindgen-shared; version 0.2.125 -- https://crates.io/crates/wasm-bindgen-shared
-** wasm-bindgen; version 0.2.125 -- https://crates.io/crates/wasm-bindgen
+** wasm-bindgen-macro-support; version 0.2.126 -- https://crates.io/crates/wasm-bindgen-macro-support
+** wasm-bindgen-macro; version 0.2.126 -- https://crates.io/crates/wasm-bindgen-macro
+** wasm-bindgen-shared; version 0.2.126 -- https://crates.io/crates/wasm-bindgen-shared
+** wasm-bindgen; version 0.2.126 -- https://crates.io/crates/wasm-bindgen
 ** wit-bindgen; version 0.57.1 -- https://crates.io/crates/wit-bindgen
                               Apache License
                         Version 2.0, January 2004
@@ -2522,36 +2522,37 @@ limitations under the License.
 ** arraydeque; version 0.5.1 -- https://crates.io/crates/arraydeque
 ** get-size-derive2; version 0.7.4 -- https://crates.io/crates/get-size-derive2
 ** get-size2; version 0.7.4 -- https://crates.io/crates/get-size2
-** granit-parser; version 0.0.3 -- https://crates.io/crates/granit-parser
+** granit-parser; version 0.0.7 -- https://crates.io/crates/granit-parser
 ** itoa; version 1.0.18 -- https://crates.io/crates/itoa
-** libc; version 0.2.186 -- https://crates.io/crates/libc
+** libc; version 0.2.189 -- https://crates.io/crates/libc
 ** manyhow-macros; version 0.11.4 -- https://crates.io/crates/manyhow-macros
-** openjd-expr; version 0.1.2 -- https://crates.io/crates/openjd-expr
-** openjd-model; version 0.3.0 -- https://crates.io/crates/openjd-model
-** openjd-sessions; version 0.3.1 -- https://crates.io/crates/openjd-sessions
+** openjd-expr; version 0.2.1 -- https://crates.io/crates/openjd-expr
+** openjd-model; version 0.4.0 -- https://crates.io/crates/openjd-model
+** openjd-sessions; version 0.4.0 -- https://crates.io/crates/openjd-sessions
 ** pin-project-lite; version 0.2.17 -- https://crates.io/crates/pin-project-lite
-** portable-atomic; version 1.13.1 -- https://crates.io/crates/portable-atomic
-** proc-macro2; version 1.0.106 -- https://crates.io/crates/proc-macro2
+** portable-atomic; version 1.14.0 -- https://crates.io/crates/portable-atomic
+** proc-macro2; version 1.0.107 -- https://crates.io/crates/proc-macro2
 ** pyo3-ffi; version 0.29.0 -- https://crates.io/crates/pyo3-ffi
 ** pyo3-macros-backend; version 0.29.0 -- https://crates.io/crates/pyo3-macros-backend
 ** pyo3-macros; version 0.29.0 -- https://crates.io/crates/pyo3-macros
 ** pyo3; version 0.29.0 -- https://crates.io/crates/pyo3
-** quote; version 1.0.45 -- https://crates.io/crates/quote
+** quote; version 1.0.47 -- https://crates.io/crates/quote
 ** r-efi; version 5.3.0 -- https://crates.io/crates/r-efi
 ** r-efi; version 6.0.0 -- https://crates.io/crates/r-efi
-** rustc-hash; version 2.1.2 -- https://crates.io/crates/rustc-hash
-** rustversion; version 1.0.22 -- https://crates.io/crates/rustversion
+** rustc-hash; version 2.1.3 -- https://crates.io/crates/rustc-hash
+** rustversion; version 1.0.23 -- https://crates.io/crates/rustversion
 ** ryu; version 1.0.23 -- https://crates.io/crates/ryu
-** serde-saphyr; version 0.0.27 -- https://crates.io/crates/serde-saphyr
-** serde; version 1.0.228 -- https://crates.io/crates/serde
-** serde_core; version 1.0.228 -- https://crates.io/crates/serde_core
-** serde_derive; version 1.0.228 -- https://crates.io/crates/serde_derive
-** serde_json; version 1.0.150 -- https://crates.io/crates/serde_json
+** serde-saphyr; version 0.0.29 -- https://crates.io/crates/serde-saphyr
+** serde; version 1.0.229 -- https://crates.io/crates/serde
+** serde_core; version 1.0.229 -- https://crates.io/crates/serde_core
+** serde_derive; version 1.0.229 -- https://crates.io/crates/serde_derive
+** serde_json; version 1.0.151 -- https://crates.io/crates/serde_json
 ** shlex; version 2.0.1 -- https://crates.io/crates/shlex
 ** siphasher; version 1.0.3 -- https://crates.io/crates/siphasher
-** syn; version 2.0.118 -- https://crates.io/crates/syn
-** thiserror-impl; version 2.0.18 -- https://crates.io/crates/thiserror-impl
-** thiserror; version 2.0.18 -- https://crates.io/crates/thiserror
+** syn; version 2.0.119 -- https://crates.io/crates/syn
+** syn; version 3.0.3 -- https://crates.io/crates/syn
+** thiserror-impl; version 2.0.19 -- https://crates.io/crates/thiserror-impl
+** thiserror; version 2.0.19 -- https://crates.io/crates/thiserror
 ** unicode-ident; version 1.0.24 -- https://crates.io/crates/unicode-ident
 Apache License
 Version 2.0, January 2004
@@ -2659,7 +2660,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
 ------
-** mio; version 1.2.1 -- https://crates.io/crates/mio
+** mio; version 1.2.2 -- https://crates.io/crates/mio
 Copyright (c) 2014 Carl Lerche and other MIO contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -2682,7 +2683,7 @@ THE SOFTWARE.
 
 
 ------
-** which; version 8.0.4 -- https://crates.io/crates/which
+** which; version 8.0.5 -- https://crates.io/crates/which
 Copyright (c) 2015 fangyuanziti
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -2705,7 +2706,7 @@ THE SOFTWARE.
 
 
 ------
-** bytes; version 1.11.1 -- https://crates.io/crates/bytes
+** bytes; version 1.12.1 -- https://crates.io/crates/bytes
 Copyright (c) 2018 Carl Lerche
 
 Permission is hereby granted, free of charge, to any
@@ -2792,7 +2793,7 @@ DEALINGS IN THE SOFTWARE.
 
 
 ------
-** tokio-macros; version 2.7.0 -- https://crates.io/crates/tokio-macros
+** tokio-macros; version 2.7.1 -- https://crates.io/crates/tokio-macros
 MIT License
 
 Copyright (c) 2019 Yoshua Wuyts
@@ -2921,8 +2922,8 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 ------
-** tokio-util; version 0.7.18 -- https://crates.io/crates/tokio-util
-** tokio; version 1.52.3 -- https://crates.io/crates/tokio
+** tokio-util; version 0.7.19 -- https://crates.io/crates/tokio-util
+** tokio; version 1.53.1 -- https://crates.io/crates/tokio
 MIT License
 
 Copyright (c) Tokio Contributors
@@ -2947,7 +2948,7 @@ SOFTWARE.
 
 
 ------
-** zmij; version 1.0.21 -- https://crates.io/crates/zmij
+** zmij; version 1.0.23 -- https://crates.io/crates/zmij
 Permission is hereby granted, free of charge, to any
 person obtaining a copy of this software and associated
 documentation files (the "Software"), to deal in the
@@ -3000,7 +3001,7 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------
 ** aho-corasick; version 1.1.4 -- https://crates.io/crates/aho-corasick
-** memchr; version 2.8.2 -- https://crates.io/crates/memchr
+** memchr; version 2.8.3 -- https://crates.io/crates/memchr
 The MIT License (MIT)
 
 Copyright (c) 2015 Andrew Gallant
