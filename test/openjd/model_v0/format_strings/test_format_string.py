@@ -108,6 +108,27 @@ class TestFormatStringResolve:
         # THEN
         assert format_string.resolve(symtab=symtab) == expected
 
+    @pytest.mark.parametrize(
+        "input, expected",
+        [
+            pytest.param("MODE=<{{Test.val}}>", "MODE=<>", id="none-only"),
+            pytest.param("{{Test.val}}", "", id="whole-string-none"),
+        ],
+    )
+    def test_none_value_renders_as_empty(self, input: str, expected: str) -> None:
+        # A None value interpolates as the empty string, matching the EXPR
+        # engine's null rendering (RFC 0005). Relevant for the nullable
+        # WrappedAction.Cancelation.* injected symbols (RFC 0008 follow-up).
+        # GIVEN
+        symtab = SymbolTable()
+
+        # WHEN
+        format_string = FormatString(input, context=ModelParsingContext_v2023_09())
+        symtab["Test.val"] = None
+
+        # THEN
+        assert format_string.resolve(symtab=symtab) == expected
+
     def test_without_entry_in_table(self):
         # GIVEN
         input = " {{ Test.val }}-{{    Test.end}}  "
