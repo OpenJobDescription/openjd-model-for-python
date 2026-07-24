@@ -265,6 +265,11 @@ pub(crate) struct PySession {
     session: Arc<Mutex<Option<Session>>>,
     /// Snapshot updated after each state change, readable without blocking on the session.
     snapshot: Arc<Mutex<StateSnapshot>>,
+    /// Thread-safe cancel handle, obtained at construction. Delivers a cancel
+    /// to whichever action is running even while the `Session` value is owned
+    /// by a background action thread — the case where `Session::cancel_action`
+    /// is unreachable (it needs `&mut Session`).
+    cancel_handle: openjd_sessions::session::SessionCancelHandle,
 }
 
 impl PySession {
@@ -360,9 +365,11 @@ impl PySession {
             snap.files_directory = session.files_directory().to_string_lossy().to_string();
             snap.action_status = session.action_status();
         }
+        let cancel_handle = session.cancel_handle();
         Ok(PySession {
             session: Arc::new(Mutex::new(Some(session))),
             snapshot,
+            cancel_handle,
         })
     }
 
@@ -643,19 +650,36 @@ impl PySession {
         time_limit: Option<f64>,
         mark_action_failed: Option<bool>,
     ) -> PyResult<()> {
-        // cancel_action can be called while an action is running (session is taken).
-        // The Rust Session supports this via CancellationToken which is checked by the
-        // subprocess runner. But we don't have access to &mut Session here.
-        // For now, this is a limitation — cancel requires the session to not be taken.
         let duration = time_limit.map(std::time::Duration::from_secs_f64);
+        let mark_failed = mark_action_failed.unwrap_or(false);
+        // Direct path when the session is not taken (e.g. between actions):
+        // Session::cancel_action also performs the Running -> Canceling state
+        // transition, which the handle cannot (it doesn't own the Session).
         let mut guard = lock_recover(&self.session);
-        match guard.as_mut() {
-            Some(session) => session
-                .cancel_action(duration, mark_action_failed.unwrap_or(false))
-                .map_err(session_err_to_py),
-            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "Cannot cancel: session is busy with an action",
-            )),
+        if let Some(session) = guard.as_mut() {
+            let result = session
+                .cancel_action(duration, mark_failed)
+                .map_err(session_err_to_py);
+            Self::update_snapshot(session, &self.snapshot);
+            return result;
+        }
+        drop(guard);
+
+        // Session is owned by a background action thread: deliver through the
+        // thread-safe cancel handle. Cancellation follows the action's own
+        // cancelation method (including cross-user helper delivery), exactly
+        // like Session::cancel_action.
+        if self.cancel_handle.cancel(duration, mark_failed) {
+            // The handle cannot set the session's transient Canceling state;
+            // reflect it in the snapshot so Python-side pollers observe the
+            // cancel-in-progress phase until the terminal state lands.
+            let mut snap = lock_recover(&self.snapshot);
+            snap.state = SessionState::Canceling;
+            Ok(())
+        } else {
+            Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "Cannot cancel: no action is running",
+            ))
         }
     }
 
