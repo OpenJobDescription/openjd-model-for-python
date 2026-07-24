@@ -415,15 +415,26 @@ def _validate_model_template_variable_references(
         # Per-field extra symbols (e.g. the RFC 0008 WrappedAction.* variables
         # within their wrap hook's action). Added at TEMPLATE scope so they
         # are visible in every scope within the field's subtree, including
-        # creation-time fields such as the action's timeout — a wrap hook's
-        # timeout may forward "{{WrappedAction.Timeout}}".
+        # the template-scoped timeout/cancelation fields — a wrap hook's
+        # timeout may forward "{{WrappedAction.Timeout}}" for run-time
+        # resolution.
         for symbol in model._template_field_inject.get(field_name, set()):
             symbol_name = symbol[1:] if symbol.startswith("|") else f"{symbol_prefix}{symbol}"
             _add_symbol(validation_symbols, ResolutionScope.TEMPLATE, symbol_name)
 
-        # Per-field scope override: fields that resolve at job creation (e.g.
-        # an Action's timeout/cancelation) validate at their declared scope
-        # rather than the model's ambient scope.
+        # Per-field SESSION-scoped symbols (e.g. the RFC 0008
+        # WrappedEnv.Name / WrappedStep.Name variables): visible to the
+        # field subtree's session/task-scoped fields (a hook's command/args)
+        # but not to its template-scoped fields (timeout/cancelation),
+        # matching openjd-rs's wrap-hook validation.
+        for symbol in model._template_field_inject_session.get(field_name, set()):
+            symbol_name = symbol[1:] if symbol.startswith("|") else f"{symbol_prefix}{symbol}"
+            _add_symbol(validation_symbols, ResolutionScope.SESSION, symbol_name)
+
+        # Per-field scope override: fields such as an Action's
+        # timeout/cancelation validate at their declared (template) scope
+        # rather than the model's ambient scope, even though their values are
+        # carried through job creation unresolved and resolve at run time.
         field_scope = model._template_field_scopes.get(field_name, current_scope)
 
         errors.extend(

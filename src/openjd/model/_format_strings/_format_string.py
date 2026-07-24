@@ -7,7 +7,18 @@ from .._errors import ExpressionError, TokenError
 from .._symbol_table import SymbolTable
 from ._dyn_constrained_str import DynamicConstrainedStr
 from ._expression import InterpolationExpression
-from .._types import ModelParsingContextInterface
+from .._types import ModelParsingContextInterface, SpecificationRevision
+
+
+class _ReconstructionContext(ModelParsingContextInterface):
+    """Minimal parsing context used when a FormatString is reconstructed by
+    pickle or the copy module (see ``FormatString.__getnewargs_ex__``).
+
+    It carries only the parse-relevant snapshot (specification revision and
+    extension set) that the FormatString recorded at construction time, so
+    the reconstructed instance is re-parsed under the same grammar (EXPR vs
+    legacy) as the original.
+    """
 
 
 @dataclass
@@ -31,6 +42,13 @@ class FormatStringError(ValueError):
 
 class FormatString(DynamicConstrainedStr):
     _processed_list: list[Union[str, ExpressionInfo]]
+    # Parse-relevant snapshot of the construction context, recorded so that
+    # pickle/copy reconstruction re-parses the string under the same grammar
+    # (EXPR vs legacy). The context object itself is not retained: it is
+    # shared and mutable (its extension set is narrowed while the template's
+    # `extensions` field is validated), so we snapshot at construction time.
+    _parse_spec_rev: SpecificationRevision
+    _parse_extensions: frozenset[str]
 
     def __new__(cls, value: str, *, context: ModelParsingContextInterface):
         """
@@ -53,8 +71,34 @@ class FormatString(DynamicConstrainedStr):
         FormatStringError: if the original string is nonvalid.
         """
         self = super().__new__(cls, value, context=context)
+        self._parse_spec_rev = context.spec_rev
+        self._parse_extensions = frozenset(context.extensions)
         self._processed_list = self._preprocess(context=context)
         return self
+
+    def __getnewargs_ex__(self) -> tuple[tuple[str], dict[str, Any]]:
+        """Support for pickling and copying (``pickle``, ``copy.copy``,
+        ``copy.deepcopy``, and pydantic's ``model_copy(deep=True)``).
+
+        ``str.__getnewargs__`` supplies only the string value, which cannot
+        satisfy the keyword-only ``context`` argument of ``__new__`` — and for
+        subclasses that default the argument, it would re-parse an
+        EXPR-grammar string with the legacy parser. Reconstruct through
+        ``__new__`` with a context carrying the recorded parse snapshot so
+        the copy is parsed exactly as the original was.
+        """
+        context = _ReconstructionContext(
+            spec_rev=self._parse_spec_rev,
+            supported_extensions=self._parse_extensions,
+        )
+        return ((str(self),), {"context": context})
+
+    def __getstate__(self) -> None:
+        """No instance state is serialized: ``_processed_list`` holds
+        engine-backed parse trees that cannot be pickled, and ``__new__``
+        fully rebuilds it (and the parse snapshot) from the string value and
+        the reconstruction context (see ``__getnewargs_ex__``)."""
+        return None
 
     @property
     def original_value(self) -> str:

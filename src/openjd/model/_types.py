@@ -377,20 +377,30 @@ class OpenJDModel(BaseModel):
 
     # Per-field variable-scope overrides: fields listed here (and their
     # submodels) validate their format-string references at the given scope
-    # instead of the model's ambient scope. Used for fields that resolve at
-    # job creation while their siblings resolve at run time — e.g. an
-    # Action's `timeout` and `cancelation` are creation-time fields
-    # (template scope: no Session.*, no Env.File.*/Task.File.*, no host
-    # functions) while its `command`/`args` resolve in the session.
+    # instead of the model's ambient scope. Used for fields that VALIDATE at
+    # template scope (no Session.*, no Env.File.*/Task.File.*, no host
+    # functions) while their siblings validate at the ambient session/task
+    # scope — e.g. an Action's `timeout` and `cancelation`, which are carried
+    # through job creation unresolved and resolve at run time, but may only
+    # reference template-scope symbols (plus per-field injections below).
     _template_field_scopes: ClassVar[dict[str, ResolutionScope]] = {}
 
     # Per-field extra symbol injection: symbols listed here are visible in
     # every scope, but only within the named field's subtree. Names use the
     # DefinesTemplateVariables.inject spelling (a "|" prefix discards the
-    # parent scope prefix). Used for the RFC 0008 wrap hooks, whose
-    # WrappedAction.* / WrappedEnv.* / WrappedStep.* variables exist only
-    # within their hook's action.
+    # parent scope prefix). Used for the RFC 0008 wrap hooks' WrappedAction.*
+    # variables, which exist only within their hook's action but must be
+    # visible even to the hook's template-scoped fields (timeout/cancelation)
+    # for round-trip forwarding.
     _template_field_inject: ClassVar[dict[str, set[str]]] = {}
+
+    # As _template_field_inject, but the symbols are injected at SESSION
+    # scope: visible to the field subtree's session/task-scoped fields
+    # (e.g. a wrap hook's command/args) but NOT to its template-scoped
+    # fields (timeout/cancelation). Used for the RFC 0008 WrappedEnv.Name /
+    # WrappedStep.Name variables, which openjd-rs excludes from hook
+    # timeout/cancelation validation.
+    _template_field_inject_session: ClassVar[dict[str, set[str]]] = {}
 
     # ----
     # Metadata used in the creation of a Job from a Job Template

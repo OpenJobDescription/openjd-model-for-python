@@ -683,10 +683,16 @@ class EnvironmentActions(OpenJDModel_v2023_09):
     # hook's action, seeded by the runtime when the hook runs in place of the
     # wrapped action. WrappedAction.* is available in all three hooks;
     # WrappedEnv.Name only in the env-enter/exit hooks; WrappedStep.Name only
-    # in the task-run hook. Injected per-field at every scope so a hook's
-    # creation-scoped fields (timeout/cancelation) can round-trip forward
-    # the wrapped action's values ("{{WrappedAction.Timeout}}",
-    # "{{WrappedAction.Cancelation.Mode}}").
+    # in the task-run hook.
+    #
+    # WrappedAction.* is injected at every scope so a hook's template-scoped
+    # fields (timeout/cancelation) can round-trip forward the wrapped
+    # action's values ("{{WrappedAction.Timeout}}",
+    # "{{WrappedAction.Cancelation.Mode}}"). WrappedEnv.Name /
+    # WrappedStep.Name are injected at SESSION scope only: a hook's
+    # command/args may reference them, but its timeout/cancelation may not —
+    # matching openjd-rs (format_strings.rs validates hook
+    # timeout/cancelation against template symbols + WrappedAction.* only).
     _WRAPPED_ACTION_SYMBOLS: ClassVar[set[str]] = {
         "|WrappedAction.Command",
         "|WrappedAction.Args",
@@ -696,9 +702,14 @@ class EnvironmentActions(OpenJDModel_v2023_09):
         "|WrappedAction.Cancelation.NotifyPeriodInSeconds",
     }
     _template_field_inject = {
-        "onWrapEnvEnter": _WRAPPED_ACTION_SYMBOLS | {"|WrappedEnv.Name"},
-        "onWrapEnvExit": _WRAPPED_ACTION_SYMBOLS | {"|WrappedEnv.Name"},
-        "onWrapTaskRun": _WRAPPED_ACTION_SYMBOLS | {"|WrappedStep.Name"},
+        "onWrapEnvEnter": _WRAPPED_ACTION_SYMBOLS,
+        "onWrapEnvExit": _WRAPPED_ACTION_SYMBOLS,
+        "onWrapTaskRun": _WRAPPED_ACTION_SYMBOLS,
+    }
+    _template_field_inject_session = {
+        "onWrapEnvEnter": {"|WrappedEnv.Name"},
+        "onWrapEnvExit": {"|WrappedEnv.Name"},
+        "onWrapTaskRun": {"|WrappedStep.Name"},
     }
 
     @model_validator(mode="before")
@@ -1040,6 +1051,17 @@ class SimpleAction(OpenJDModel_v2023_09):
         "args": {"__self__"},
     }
 
+    # Parity with Action: `timeout` and `cancelation` VALIDATE at template
+    # scope (no Session.*, no Env.File.*/Task.File.*, no host-context
+    # functions) even though the desugared SimpleAction is otherwise
+    # TASK-scoped. The desugared form is an ordinary Action, whose identical
+    # fields validate at template scope — matching openjd-rs
+    # (format_strings.rs validates these fields against the template symtab).
+    _template_field_scopes = {
+        "timeout": ResolutionScope.TEMPLATE,
+        "cancelation": ResolutionScope.TEMPLATE,
+    }
+
     @field_validator("let")
     @classmethod
     def _validate_let(cls, v: Any, info: ValidationInfo) -> Any:
@@ -1242,6 +1264,22 @@ class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
         # the same limit as literal template ranges — matching openjd-rs's
         # resolve-time checks in create_job (ranges.rs).
         return validate_task_param_range_list_len(value)
+
+    @field_validator("range")
+    @classmethod
+    def _validate_no_empty_path_values(cls, value: Any, info: ValidationInfo) -> Any:
+        # §3.4.2: an empty string is not a valid path on any OS, so a PATH
+        # task parameter's range may not contain one. The template model's
+        # parse-time validator cannot see values that arrive via RFC 0006
+        # typed whole-field resolution (e.g. `range: "{{Param.Paths}}"` with
+        # a LIST[PATH] job parameter), so the check is enforced on the
+        # instantiation target as well — matching openjd-rs's resolve-time
+        # check in create_job (ranges.rs).
+        if info.data.get("type") == TaskParameterType.PATH and isinstance(value, list):
+            for i, item in enumerate(value):
+                if str(item) == "":
+                    raise ValueError(f"range[{i}] must not be an empty string.")
+        return value
 
 
 class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):

@@ -16,6 +16,7 @@ from openjd.model import (
     decode_environment_template,
     decode_job_template,
 )
+from openjd.model._format_strings import FormatString
 
 _ALL_EXTS = ["TASK_CHUNKING", "REDACTED_ENV_VARS", "FEATURE_BUNDLE_1", "EXPR", "WRAP_ACTIONS"]
 
@@ -265,6 +266,64 @@ class TestWrappedVariableScopeInvalid:
         _decode(_env_template(actions, extensions=["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]))
 
 
+class TestWrapHookTimeoutCancelationScope:
+    """A wrap hook's timeout/cancelation validate against template symbols +
+    WrappedAction.* ONLY — WrappedEnv.Name / WrappedStep.Name are session
+    symbols visible to the hook's command/args but not to its
+    template-scoped fields, matching openjd-rs
+    (validate_v2023_09/format_strings.rs). Regression: all per-hook symbols
+    used to be injected at TEMPLATE scope, so timeout could reference
+    WrappedEnv.Name."""
+
+    _FB1_EXTS = ["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]
+
+    def test_wrapped_env_name_in_hook_timeout_rejected(self):
+        actions = dict(_ALL_THREE)
+        actions["onWrapEnvEnter"] = {
+            "command": "echo",
+            "timeout": "{{ WrappedEnv.Name }}",
+        }
+        with pytest.raises(
+            DecodeValidationError, match=r"WrappedEnv\.Name does not exist at this location"
+        ):
+            _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+    def test_wrapped_step_name_in_hook_cancelation_mode_rejected(self):
+        actions = dict(_ALL_THREE)
+        actions["onWrapTaskRun"] = {
+            "command": "echo",
+            "cancelation": {"mode": "{{ WrappedStep.Name }}"},
+        }
+        with pytest.raises(
+            DecodeValidationError, match=r"WrappedStep\.Name does not exist at this location"
+        ):
+            _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+    def test_wrapped_env_name_in_hook_args_still_accepted(self):
+        # command/args validate at the ambient session scope, where
+        # WrappedEnv.Name / WrappedStep.Name remain visible.
+        actions = dict(_ALL_THREE)
+        actions["onWrapEnvExit"] = {
+            "command": "echo",
+            "args": ["{{ WrappedEnv.Name }}"],
+        }
+        _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+    def test_wrapped_action_round_trip_forwarding_still_accepted(self):
+        # The round-trip forwarding case must not regress: WrappedAction.*
+        # stays visible to the hook's timeout/cancelation.
+        actions = dict(_ALL_THREE)
+        actions["onWrapTaskRun"] = {
+            "command": "{{ WrappedAction.Command }}",
+            "timeout": "{{ WrappedAction.Timeout }}",
+            "cancelation": {
+                "mode": "{{ WrappedAction.Cancelation.Mode }}",
+                "notifyPeriodInSeconds": "{{ WrappedAction.Cancelation.NotifyPeriodInSeconds }}",
+            },
+        }
+        _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+
 # ── RFC 0008 create_job instantiation ──────────────────────────────────
 #
 # create_job re-validates the instantiated Job submodels without a parsing
@@ -304,8 +363,6 @@ class TestWrapActionsCreateJob:
         # timeout+cancelation unresolved into the Job), the fields must be
         # carried through job instantiation as raw FormatStrings and left for
         # the session to resolve.
-        from openjd.model._format_strings import FormatString
-
         hook = {
             "command": "{{WrappedAction.Command}}",
             "args": ["{{WrappedAction.Args}}"],

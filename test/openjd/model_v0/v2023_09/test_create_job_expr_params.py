@@ -95,3 +95,64 @@ class TestRangeExprTypedValidation:
         # catches it (it previously slipped through name-only validation).
         with pytest.raises(DecodeValidationError, match=r"range_expr"):
             self._decode_with_expr("Param.Frames + 1")
+
+
+class TestTypedPathRangeEmptyValues:
+    """§3.4.2: an empty string is not a valid path on any OS. The template
+    model rejects literal empty items in a PATH task parameter's range at
+    parse time, but a range that arrives via RFC 0006 typed whole-field
+    resolution (``range: "{{Param.Paths}}"`` with a LIST[PATH] job parameter)
+    is only seen at instantiation — the target model must reject it there,
+    matching openjd-rs's resolve-time check in create_job (ranges.rs).
+    """
+
+    def _create_with_typed_range(self, list_type, task_type, default):
+        jt = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "extensions": ["EXPR"],
+                "parameterDefinitions": [{"name": "Items", "type": list_type, "default": default}],
+                "steps": [
+                    {
+                        "name": "S",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {"name": "V", "type": task_type, "range": "{{Param.Items}}"}
+                            ]
+                        },
+                        "script": {
+                            "actions": {"onRun": {"command": "echo", "args": ["{{Task.Param.V}}"]}}
+                        },
+                    }
+                ],
+            },
+            supported_extensions=["EXPR"],
+        )
+        return create_job(job_template=jt, job_parameter_values={})
+
+    def test_empty_path_in_typed_range_rejected(self):
+        # A LIST[PATH] parameter containing "" must not flow into the
+        # instantiated Job's PATH task-parameter range.
+        with pytest.raises(DecodeValidationError, match=r"must not be an empty string"):
+            self._create_with_typed_range("LIST[PATH]", "PATH", ["/a", "", "/b"])
+
+    def test_valid_paths_in_typed_range_accepted(self):
+        # Positive polarity: valid paths still instantiate.
+        job = self._create_with_typed_range("LIST[PATH]", "PATH", ["/a", "/b"])
+        steps = job.steps
+        step = steps["S"] if isinstance(steps, dict) else steps[0]
+        assert step.parameterSpace is not None
+        tpd = step.parameterSpace.taskParameterDefinitions
+        tp = tpd["V"] if isinstance(tpd, dict) else tpd[0]
+        assert [str(v) for v in tp.range] == ["/a", "/b"]
+
+    def test_empty_string_in_typed_string_range_accepted(self):
+        # No over-rejection: STRING task parameters legitimately allow "".
+        job = self._create_with_typed_range("LIST[STRING]", "STRING", ["a", "", "b"])
+        steps = job.steps
+        step = steps["S"] if isinstance(steps, dict) else steps[0]
+        assert step.parameterSpace is not None
+        tpd = step.parameterSpace.taskParameterDefinitions
+        tp = tpd["V"] if isinstance(tpd, dict) else tpd[0]
+        assert [str(v) for v in tp.range] == ["a", "", "b"]
