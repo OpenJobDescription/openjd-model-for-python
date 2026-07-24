@@ -9,6 +9,8 @@ natively (lists/bools) into the instantiated ``JobParameter`` so the typed EXPR
 symbol table can coerce them.
 """
 
+import sys
+
 import pytest
 
 from openjd.model import (
@@ -145,7 +147,10 @@ class TestTypedPathRangeEmptyValues:
         assert step.parameterSpace is not None
         tpd = step.parameterSpace.taskParameterDefinitions
         tp = tpd["V"] if isinstance(tpd, dict) else tpd[0]
-        assert [str(v) for v in tp.range] == ["/a", "/b"]
+        # PATH range values are normalized to the host's native separator
+        # (same convention as test_lists.py's path coercion tests).
+        expected = ["\\a", "\\b"] if sys.platform == "win32" else ["/a", "/b"]
+        assert [str(v) for v in tp.range] == expected
 
     def test_empty_string_in_typed_string_range_accepted(self):
         # No over-rejection: STRING task parameters legitimately allow "".
