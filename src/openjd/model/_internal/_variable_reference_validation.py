@@ -426,6 +426,8 @@ def _validate_model_template_variable_references(
         for symbol in variable_defs.expr_inject:
             sym_name = symbol[1:] if symbol.startswith("|") else f"{symbol_prefix}{symbol}"
             _add_symbol(value_symbols["__self__"], current_scope, sym_name)
+            if sym_name in _BUILTIN_SYMBOL_EXPR_TYPES:
+                value_symbols["__self__"].set_type(sym_name, _BUILTIN_SYMBOL_EXPR_TYPES[sym_name])
 
         errors.extend(_validate_let_bindings(value, current_scope, symbols, value_symbols, loc))
 
@@ -459,6 +461,8 @@ def _validate_model_template_variable_references(
         for symbol in model._template_field_inject.get(field_name, set()):
             symbol_name = symbol[1:] if symbol.startswith("|") else f"{symbol_prefix}{symbol}"
             _add_symbol(validation_symbols, ResolutionScope.TEMPLATE, symbol_name)
+            if expr_enabled and symbol_name in _BUILTIN_SYMBOL_EXPR_TYPES:
+                validation_symbols.set_type(symbol_name, _BUILTIN_SYMBOL_EXPR_TYPES[symbol_name])
 
         # Per-field SESSION-scoped symbols (e.g. the RFC 0008
         # WrappedEnv.Name / WrappedStep.Name variables): visible to the
@@ -468,6 +472,8 @@ def _validate_model_template_variable_references(
         for symbol in model._template_field_inject_session.get(field_name, set()):
             symbol_name = symbol[1:] if symbol.startswith("|") else f"{symbol_prefix}{symbol}"
             _add_symbol(validation_symbols, ResolutionScope.SESSION, symbol_name)
+            if expr_enabled and symbol_name in _BUILTIN_SYMBOL_EXPR_TYPES:
+                validation_symbols.set_type(symbol_name, _BUILTIN_SYMBOL_EXPR_TYPES[symbol_name])
 
         # Per-field scope override: fields such as an Action's
         # timeout/cancelation validate at their declared (template) scope
@@ -495,6 +501,29 @@ def _validate_model_template_variable_references(
 # rules / host OS), so they are only available at runtime — not at
 # submission/template-resolution (TEMPLATE) time.
 _HOST_CONTEXT_FUNCTIONS = {"apply_path_mapping"}
+
+# EXPR types of the runtime-injected built-in symbols, mirroring the typed
+# symtabs openjd-rs validates against (format_strings.rs
+# build_task_scope_symtab and add_wrapped_*_scope): without these,
+# expressions such as ``Job.Name + 1`` or ``Session.WorkingDirectory + 1``
+# fall back to name-only validation and only fail on a worker. The nullable
+# wrap-forwarding symbols use the engine's ``T?`` union spelling, exactly as
+# Rust types them (``ExprType::union(vec![INT, NULLTYPE])``).
+_BUILTIN_SYMBOL_EXPR_TYPES: dict[str, str] = {
+    "Job.Name": "string",
+    "Step.Name": "string",
+    "Session.WorkingDirectory": "path",
+    "Session.HasPathMappingRules": "bool",
+    "Session.PathMappingRulesFile": "path",
+    "WrappedEnv.Name": "string",
+    "WrappedStep.Name": "string",
+    "WrappedAction.Command": "string",
+    "WrappedAction.Args": "list[string]",
+    "WrappedAction.Environment": "list[string]",
+    "WrappedAction.Timeout": "int?",
+    "WrappedAction.Cancelation.Mode": "string?",
+    "WrappedAction.Cancelation.NotifyPeriodInSeconds": "int?",
+}
 
 
 def _check_format_string(
@@ -599,6 +628,21 @@ def _validate_let_bindings(
     # symbols + its embedded-file symbols, minus the let names themselves
     # (added progressively below).
     accumulated: set = (enclosing | self_symbols | file_symbols) - let_names
+    # Known EXPR types for the visible symbols (enclosing + this model's own
+    # + embedded files) so a binding's RHS is type-checked like any other
+    # expression (e.g. `x = Step.Name + 1` is rejected, matching openjd-rs).
+    # Let-bound names themselves stay untyped: any expression touching one
+    # falls back to name-only validation (no false rejects).
+    accumulated_types: dict[str, str] = dict(symbols.types)
+    for source_symtab in (
+        value_symbols.get("__self__", None),
+        value_symbols.get("embeddedFiles", None),
+    ):
+        if source_symtab is not None:
+            for type_name, expr_type in source_symtab.types.items():
+                accumulated_types.setdefault(type_name, expr_type)
+    for let_name in let_names:
+        accumulated_types.pop(let_name, None)
     for index, binding in enumerate(let_value):
         if not isinstance(binding, str):
             continue
@@ -654,7 +698,7 @@ def _validate_let_bindings(
             accumulated.add(name)
             continue
         try:
-            node.validate_symbol_refs(symbols=accumulated)
+            node.validate_symbol_refs(symbols=accumulated, symbol_types=accumulated_types or None)
         except ValueError as exc:
             errors.append(
                 InitErrorDetails(
@@ -913,6 +957,8 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             else:
                 symbol_name = f"{symbol_prefix}{symbol}"
             _add_symbol(symbols["__self__"], current_scope, symbol_name)
+            if collect_types and symbol_name in _BUILTIN_SYMBOL_EXPR_TYPES:
+                symbols["__self__"].set_type(symbol_name, _BUILTIN_SYMBOL_EXPR_TYPES[symbol_name])
 
     # EXPR `let` bindings (RFC 0007 §3.6) define bare-name symbols at this
     # model's scope, available to the model's other fields and to subsequent

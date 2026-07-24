@@ -1,8 +1,9 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+import json
 from os.path import normpath
 from pathlib import Path
-from typing import Optional, cast
+from typing import Any, Optional, cast
 
 from pydantic import ValidationError
 
@@ -32,6 +33,38 @@ __all__ = ("preprocess_job_parameters",)
 # the LIST[*] variants) are carried natively instead so the typed EXPR symbol
 # table can coerce them.
 _LEGACY_SCALAR_TYPE_NAMES = frozenset({"STRING", "INT", "FLOAT", "PATH"})
+
+
+def _coerce_expr_param_value(param_type_name: str, value: Any) -> Any:
+    """Coerce a SUBMITTED string value for an EXPR-typed job parameter to its
+    native form, mirroring openjd-rs's ``coerce_from_str``
+    (job/create_job/parameters.rs): BOOL accepts the spec's boolean strings,
+    and LIST[*] values may be supplied as JSON — the public input type is
+    ``dict[str, str]``, so string forms must be accepted. Native values
+    (bool, list) pass through unchanged.
+
+    Raises:
+        ValueError: If a string value cannot be coerced (message shapes match
+            the Rust implementation).
+    """
+    if param_type_name == "BOOL" and isinstance(value, str):
+        lowered = value.lower()
+        if lowered in ("true", "yes", "on", "1"):
+            return True
+        if lowered in ("false", "no", "off", "0"):
+            return False
+        raise ValueError(
+            f"Value '{value}' is not a valid boolean. Accepted: true/false, 1/0, yes/no, on/off."
+        )
+    if param_type_name.startswith("LIST") and isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            raise ValueError(f"Value '{value}' is not valid JSON for a list parameter.")
+        if not isinstance(parsed, list):
+            raise ValueError(f"Value '{value}' is not valid JSON for a list parameter.")
+        return parsed
+    return value
 
 
 def _is_uri(value: str) -> bool:
@@ -167,7 +200,12 @@ def _collect_defaults_2023_09(
             # Check the parameter against the constraints
             value = job_parameter_values[param.name]
             if not is_legacy_scalar:
-                # EXPR types: carry the provided native value through.
+                # EXPR types: coerce submitted string forms (BOOL strings,
+                # JSON lists — the public input type is dict[str, str]) to
+                # their native values, then carry through; mirrors
+                # openjd-rs's coerce_from_str.
+                # Raises ValueError (collected by the caller) on bad input.
+                value = _coerce_expr_param_value(param.type.name, value)
                 return_value[param.name] = ParameterValue(
                     type=ParameterValueType(param.type), value=value
                 )

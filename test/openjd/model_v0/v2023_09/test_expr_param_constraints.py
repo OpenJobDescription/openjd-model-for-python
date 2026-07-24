@@ -84,9 +84,16 @@ class TestListParameterValueConstraints:
         with pytest.raises(ValueError, match=r"list items must be integers"):
             _preprocess({"name": "Nums", "type": "LIST[INT]"}, {"Nums": ["not-an-int"]})
 
-    def test_non_list_value_rejected(self):
-        with pytest.raises(ValueError, match=r"value must be a list"):
+    def test_non_list_string_value_rejected(self):
+        # String inputs are JSON-coerced (dict[str, str] public input type,
+        # mirroring openjd-rs coerce_from_str); JSON that is not a list is
+        # rejected there.
+        with pytest.raises(ValueError, match=r"not valid JSON for a list parameter"):
             _preprocess({"name": "Nums", "type": "LIST[INT]"}, {"Nums": "5"})
+
+    def test_non_list_native_value_rejected(self):
+        with pytest.raises(ValueError, match=r"value must be a list"):
+            _preprocess({"name": "Nums", "type": "LIST[INT]"}, {"Nums": 5})
 
     def test_list_list_int_inner_constraint_enforced(self):
         with pytest.raises(ValueError, match=r"item 99 is above item\.maxValue 10"):
