@@ -197,6 +197,11 @@ class TemplateVariableDef:
 
     prefix: str
     resolves: ResolutionScope
+    # Whether the variable holds the raw, unprocessed template value
+    # (RawParam.* / Task.RawParam.*). Raw path-typed values are plain strings
+    # (RFC 0005): type-aware validation maps a raw PATH to "string" and a raw
+    # LIST[PATH] to "list[string]", matching openjd-rs's build_param_symtab.
+    raw: bool = False
 
 
 class DefinesTemplateVariables:
@@ -282,6 +287,19 @@ class JobCreationMetadata:
 
     ``instantiate_model`` evaluates each such field at most once; the result
     is shared with the ``create_as`` callable (see JobCreateAsMetadata).
+    """
+
+    typed_resolve_coerce: Optional[Callable[["OpenJDModel", str, Any], Any]] = field(default=None)
+    """Optional element-coercion hook for typed whole-field resolutions
+    (RFC 0006). When set, ``instantiate_model`` calls it for each field whose
+    typed resolution succeeded — arguments are the model, the field name, and
+    the raw resolution result (the engine's list ``ExprValue`` with element
+    type variants preserved, or a native Python list on the non-engine
+    fallback path) — and uses its return value as the instantiated field
+    value. The hook may raise ``ValueError`` to reject an element (e.g. a
+    bool in an INT task-parameter range); the error is aggregated into the
+    model's validation errors. When unset, the raw result is unwrapped to a
+    native Python list unchanged.
     """
 
     create_as: Optional[JobCreateAsMetadata] = field(default=None)

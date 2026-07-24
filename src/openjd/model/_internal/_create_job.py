@@ -50,12 +50,25 @@ def resolve_whole_field_typed_list(value: FormatString, symtab: SymbolTable) -> 
         # ExpressionError/FormatStringError (both ValueError subclasses):
         # fall back to string resolution, which re-raises with context.
         return None
-    # EXPR-backed evaluation returns the engine's ExprValue; unwrap lists.
+    # EXPR-backed evaluation returns the engine's ExprValue. List results are
+    # returned RAW (not unwrapped) so the element type variants survive to the
+    # coercion hook (JobCreationMetadata.typed_resolve_coerce) — unwrapping
+    # via .item() erases them (a bool becomes int 1/0), which is how typed
+    # ranges diverged from openjd-rs's per-variant checks (ranges.rs).
     if _expr_value_is_list(result):
-        return result.item()
+        return result
     if isinstance(result, list):
         return result
     return None
+
+
+def unwrap_typed_resolution(raw: Any) -> Any:
+    """Unwrap a typed whole-field resolution result to native Python: the
+    engine's list ``ExprValue`` becomes a plain list; native results pass
+    through. Used when a model defines no ``typed_resolve_coerce`` hook."""
+    if _expr_value_is_list(raw):
+        return raw.item()
+    return raw
 
 
 def _compute_typed_resolutions(model: "OpenJDModel", symtab: SymbolTable) -> dict[str, Any]:
@@ -201,8 +214,16 @@ def instantiate_model(  # noqa: C901
             # Instantiate and resolve format string expressions
             needs_resolve = field_name in model._job_creation_metadata.resolve_fields
             if field_name in typed_resolved:
-                # RFC 0006 typed whole-field resolution (computed above).
-                instantiated = typed_resolved[field_name]
+                # RFC 0006 typed whole-field resolution (computed above). The
+                # model's coercion hook (when set) enforces element/target
+                # type agreement on the engine's typed elements — errors
+                # raised here aggregate into the model's validation errors.
+                raw_typed = typed_resolved[field_name]
+                coerce = model._job_creation_metadata.typed_resolve_coerce
+                if coerce is not None:
+                    instantiated = coerce(model, field_name, raw_typed)
+                else:
+                    instantiated = unwrap_typed_resolution(raw_typed)
             elif isinstance(field_value, list):
                 if field_name in model._job_creation_metadata.reshape_field_to_dict:
                     key_field = model._job_creation_metadata.reshape_field_to_dict[field_name]

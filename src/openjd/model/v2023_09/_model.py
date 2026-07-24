@@ -1330,6 +1330,85 @@ def _range_task_param_target(model: Any, typed_values: dict) -> Type[OpenJDModel
     return RangeListTaskParameterDefinition
 
 
+def _range_element_type_name(elem: Any) -> str:
+    """The engine type name of a range element for error messages, in the
+    shape openjd-rs uses (nested lists report as plain "list")."""
+    type_str = str(getattr(elem, "type", type(elem).__name__))
+    return "list" if type_str.startswith("list[") else type_str
+
+
+def _coerce_typed_range_elements(model: Any, field_name: str, raw: Any) -> list:
+    """``typed_resolve_coerce`` hook for task-parameter ``range`` fields.
+
+    Enforces element/target type agreement on RFC 0006 typed whole-field
+    range resolutions, mirroring openjd-rs's per-variant checks in create_job
+    (ranges.rs): an INT (or CHUNK[INT]) range accepts only int elements, a
+    FLOAT range accepts int or float, and STRING/PATH ranges take every
+    element's spec display form (a bool renders ``true``/``false``, a nested
+    list ``[1, 2]``) — without this, unwrapping the engine list erases the
+    variants and e.g. a LIST[BOOL] parameter silently becomes 1/0 task values
+    that the Rust implementation rejects outright.
+
+    ``raw`` is the engine's list ``ExprValue`` (elements keep their typed
+    variants) or, on the non-engine fallback path, a native Python list.
+    """
+    target = model.type
+    out: list = []
+    for elem in raw:
+        elem_type = getattr(elem, "type", None)
+        if elem_type is not None:
+            # Engine element ExprValue.
+            type_str = str(elem_type)
+            if target in (TaskParameterType.INT, TaskParameterType.CHUNK_INT):
+                if type_str != "int":
+                    raise ValueError(f"Expected int in range, got {_range_element_type_name(elem)}")
+                out.append(elem.item())
+            elif target == TaskParameterType.FLOAT:
+                if type_str not in ("int", "float"):
+                    raise ValueError(
+                        f"Expected float in range, got {_range_element_type_name(elem)}"
+                    )
+                out.append(elem.item())
+            else:  # STRING / PATH: spec display coercion.
+                out.append(str(elem))
+        else:
+            # Native Python element (non-engine fallback). bool subclasses
+            # int, so it is checked first.
+            if target in (TaskParameterType.INT, TaskParameterType.CHUNK_INT):
+                if isinstance(elem, bool) or not isinstance(elem, int):
+                    raise ValueError(
+                        f"Expected int in range, got {_native_element_type_name(elem)}"
+                    )
+                out.append(elem)
+            elif target == TaskParameterType.FLOAT:
+                if isinstance(elem, bool) or not isinstance(elem, (int, float)):
+                    raise ValueError(
+                        f"Expected float in range, got {_native_element_type_name(elem)}"
+                    )
+                out.append(elem)
+            else:
+                if isinstance(elem, bool):
+                    out.append("true" if elem else "false")
+                else:
+                    out.append(str(elem))
+    return out
+
+
+def _native_element_type_name(elem: Any) -> str:
+    """Engine-style type name for a native Python range element."""
+    if isinstance(elem, bool):
+        return "bool"
+    if isinstance(elem, int):
+        return "int"
+    if isinstance(elem, float):
+        return "float"
+    if isinstance(elem, str):
+        return "string"
+    if isinstance(elem, list):
+        return "list"
+    return type(elem).__name__
+
+
 def _validate_int_range_elements(value: Any) -> Any:
     """Shared ``range`` post-validator for the INT and CHUNK[INT]
     task-parameter definitions: a literal range-expression string must parse
@@ -1371,7 +1450,7 @@ class IntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Task.Param.", resolves=ResolutionScope.TASK),
-            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK),
+            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK, raw=True),
         },
         field="name",
     )
@@ -1381,6 +1460,7 @@ class IntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09
         create_as=JobCreateAsMetadata(callable=_range_task_param_target),
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
+        typed_resolve_coerce=_coerce_typed_range_elements,
         exclude_fields={"name"},
     )
 
@@ -1439,7 +1519,7 @@ class FloatTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Task.Param.", resolves=ResolutionScope.TASK),
-            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK),
+            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK, raw=True),
         },
         field="name",
     )
@@ -1448,6 +1528,7 @@ class FloatTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_
         create_as=JobCreateAsMetadata(model=RangeListTaskParameterDefinition),
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
+        typed_resolve_coerce=_coerce_typed_range_elements,
         exclude_fields={"name"},
     )
 
@@ -1484,7 +1565,7 @@ class StringTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Task.Param.", resolves=ResolutionScope.TASK),
-            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK),
+            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK, raw=True),
         },
         field="name",
     )
@@ -1493,6 +1574,7 @@ class StringTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023
         create_as=JobCreateAsMetadata(model=RangeListTaskParameterDefinition),
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
+        typed_resolve_coerce=_coerce_typed_range_elements,
         exclude_fields={"name"},
     )
 
@@ -1518,7 +1600,7 @@ class PathTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_0
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Task.Param.", resolves=ResolutionScope.TASK),
-            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK),
+            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK, raw=True),
         },
         field="name",
     )
@@ -1527,6 +1609,7 @@ class PathTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_0
         create_as=JobCreateAsMetadata(model=RangeListTaskParameterDefinition),
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
+        typed_resolve_coerce=_coerce_typed_range_elements,
         exclude_fields={"name"},
     )
 
@@ -1571,7 +1654,7 @@ class ChunkIntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v20
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Task.Param.", resolves=ResolutionScope.TASK),
-            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK),
+            TemplateVariableDef(prefix="|Task.RawParam.", resolves=ResolutionScope.TASK, raw=True),
         },
         field="name",
     )
@@ -1581,6 +1664,7 @@ class ChunkIntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v20
         create_as=JobCreateAsMetadata(callable=_range_task_param_target),
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
+        typed_resolve_coerce=_coerce_typed_range_elements,
         exclude_fields={"name"},
     )
 
@@ -1999,7 +2083,7 @@ class JobStringParameterDefinition(
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE),
-            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE),
+            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE, raw=True),
         },
         field="name",
     )
@@ -2246,7 +2330,7 @@ class JobPathParameterDefinition(
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.SESSION),
-            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE),
+            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE, raw=True),
         },
         field="name",
     )
@@ -2474,7 +2558,7 @@ class JobIntParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09)
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE),
-            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE),
+            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE, raw=True),
         },
         field="name",
     )
@@ -2751,7 +2835,7 @@ class JobFloatParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_0
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE),
-            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE),
+            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE, raw=True),
         },
         field="name",
     )
@@ -3658,7 +3742,7 @@ class JobBoolParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09
     _template_variable_definitions = DefinesTemplateVariables(
         defines={
             TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE),
-            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE),
+            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE, raw=True),
         },
         field="name",
     )
@@ -3851,7 +3935,7 @@ def _normalize_parameter_type_case(value: Any, info: ValidationInfo) -> Any:
 _LIST_PARAM_VARS = DefinesTemplateVariables(
     defines={
         TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.TEMPLATE),
-        TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE),
+        TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE, raw=True),
     },
     field="name",
 )
@@ -3957,6 +4041,21 @@ class JobListPathParameterDefinition(_JobListParameterDefinitionBase):
     objectType: Optional[JobPathParameterDefinitionObjectType] = None  # noqa: N815
     dataFlow: Optional[JobPathParameterDefinitionDataFlow] = None  # noqa: N815
     item: Optional[_ListStringItemConstraint] = None
+
+    # Path-typed parameters follow the scalar PATH scoping contract, not the
+    # shared _LIST_PARAM_VARS: the processed Param.* value (list[path], with
+    # path mapping applied) only exists at host/session scope, while the raw
+    # RawParam.* value is a template-scope list[string] (RFC 0005 "Job
+    # Parameter Types"; Template Schemas §2.12/§7.3.1). Mirrors openjd-rs's
+    # build_template_scope_symtab, which excludes Param.* for PATH and
+    # LIST[PATH] alike.
+    _template_variable_definitions = DefinesTemplateVariables(
+        defines={
+            TemplateVariableDef(prefix="|Param.", resolves=ResolutionScope.SESSION),
+            TemplateVariableDef(prefix="|RawParam.", resolves=ResolutionScope.TEMPLATE, raw=True),
+        },
+        field="name",
+    )
 
     def _check_item(self, item: Any) -> None:
         _check_string_item(self.name, item, self.item)

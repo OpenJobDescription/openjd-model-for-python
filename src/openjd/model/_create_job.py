@@ -405,20 +405,27 @@ def create_job(
         # during EXPR expression evaluation — matching openjd-rs, whose
         # create_job symbol table carries typed ExprValues for every
         # parameter (an INT param is an int, so `{{ Param.X + 3 }}` works).
-        # STRING needs no coercion, and PATH stays string-typed in template
-        # scope: openjd-rs excludes Param.* for PATH here (host-context only)
-        # and seeds RawParam.* for PATH as a plain string.
+        # STRING needs no coercion. Path-typed parameters (PATH and
+        # LIST[PATH]) have no template-scope Param.* symbol at all: the
+        # processed value (with path mapping) only exists at host/session
+        # scope, so openjd-rs excludes Param.* for both here and seeds only
+        # RawParam.* — as a plain string for PATH and a list[string] for
+        # LIST[PATH] (RFC 0005 "Job Parameter Types"; parameters.rs
+        # build_symbol_table).
         # The typing only affects the EXPR evaluation path; non-EXPR
         # templates keep their existing string-based interpolation.
         expr_types: dict[str, str] = {}
         for name, param in all_job_parameter_values.items():
             prefix = ValueReferenceConstants_2023_09.JOB_PARAMETER_PREFIX.value
             raw_prefix = ValueReferenceConstants_2023_09.JOB_PARAMETER_RAWPREFIX.value
-            if param.type != "PATH":
+            if param.type.name not in ("PATH", "LIST_PATH"):
                 symtab[f"{prefix}.{name}"] = all_job_parameter_values[name].value
+                if param.type.name != "STRING":
+                    expr_types[f"{prefix}.{name}"] = param.type.value
             symtab[f"{raw_prefix}.{name}"] = all_job_parameter_values[name].value
-            if param.type.name not in ("STRING", "PATH"):
-                expr_types[f"{prefix}.{name}"] = param.type.value
+            if param.type.name == "LIST_PATH":
+                expr_types[f"{raw_prefix}.{name}"] = ParameterValueType.LIST_STRING.value
+            elif param.type.name not in ("STRING", "PATH"):
                 expr_types[f"{raw_prefix}.{name}"] = param.type.value
         symtab.expr_types.update(expr_types)
         # RFC 0007 §7.3.1 (EXPR): Job.Name is the job's resolved name,

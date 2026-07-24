@@ -126,12 +126,45 @@ __all__ = ["prevalidate_model_template_variable_references"]
 class ScopedSymtabs(defaultdict):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(set, **kwargs)
+        # Symbol name -> EXPR type string (e.g. "Param.X" -> "int") for
+        # type-aware expression validation (EXPR extension). Populated from
+        # each defining model's sibling `type` field as the definitions are
+        # collected, and threaded through the traversal alongside the symbol
+        # sets — so each step's Task.Param.* types stay local to that step,
+        # mirroring openjd-rs's per-step symtabs (format_strings.rs
+        # build_task_scope_symtab). Names without a confident type mapping
+        # are absent; expressions touching them fall back to name-only checks.
+        self.types: dict[str, str] = {}
+        # Names whose merged type definitions conflicted (same symbol defined
+        # with different types). Dropped from `types` so the validator falls
+        # back to name-only checking rather than validating against an
+        # arbitrary winner.
+        self._type_conflicts: set[str] = set()
 
     def update_self(self, other: "ScopedSymtabs") -> "ScopedSymtabs":
         """Union the other's contents into self."""
         for k, v in other.items():
             self[k] |= v
+        for name in other._type_conflicts:
+            self._mark_type_conflict(name)
+        for name, expr_type in other.types.items():
+            self.set_type(name, expr_type)
         return self
+
+    def set_type(self, name: str, expr_type: str) -> None:
+        """Record a symbol's EXPR type; conflicting definitions drop the
+        entry (name-only fallback) rather than last-writer-wins."""
+        if name in self._type_conflicts:
+            return
+        existing = self.types.get(name)
+        if existing is not None and existing != expr_type:
+            self._mark_type_conflict(name)
+            return
+        self.types[name] = expr_type
+
+    def _mark_type_conflict(self, name: str) -> None:
+        self._type_conflicts.add(name)
+        self.types.pop(name, None)
 
 
 def prevalidate_model_template_variable_references(
@@ -167,10 +200,6 @@ def prevalidate_model_template_variable_references(
     )
     if context is not None:
         context._prevalidation_expr_enabled = expr_enabled  # type: ignore[attr-defined]
-        # Build a map of job-parameter symbol -> EXPR type (for type-aware
-        # expression validation). Only job parameters are mapped; expressions
-        # referencing other symbols fall back to name-only validation.
-        context._symbol_types = _build_job_parameter_symbol_types(values) if expr_enabled else {}  # type: ignore[attr-defined]
 
     return _validate_model_template_variable_references(
         cls,
@@ -369,18 +398,27 @@ def _validate_model_template_variable_references(
         # If the node doesn't modify the variable prefix, then symbol_prefix will be the empty string
         symbol_prefix += variable_defs.symbol_prefix
 
-    # Recursively collect all of the variable definitions at this node and its child nodes.
+    expr_enabled = bool(
+        context is not None and getattr(context, "_prevalidation_expr_enabled", False)
+    )
+
+    # Recursively collect all of the variable definitions at this node and its
+    # child nodes. Symbol EXPR types are collected only when the EXPR
+    # extension is active, keeping the Rust expr surface off the non-EXPR
+    # parse path.
     value_symbols = _collect_variable_definitions(
-        model, value, current_scope, symbol_prefix, recursive_pruning=False
+        model,
+        value,
+        current_scope,
+        symbol_prefix,
+        recursive_pruning=False,
+        collect_types=expr_enabled,
     )
 
     # Validate EXPR `let` bindings defined by this model: each binding's RHS
     # expression is checked against the enclosing scope plus the bindings that
     # precede it (chained references), and a binding may not shadow a variable
     # from the enclosing scope (RFC 0007 §3.6).
-    expr_enabled = bool(
-        context is not None and getattr(context, "_prevalidation_expr_enabled", False)
-    )
     if expr_enabled:
         # EXPR-conditional symbol injection (e.g. Step.Name). Added to the
         # model's own scope so it flows to fields whose sources include
@@ -459,33 +497,6 @@ def _validate_model_template_variable_references(
 _HOST_CONTEXT_FUNCTIONS = {"apply_path_mapping"}
 
 
-def _build_job_parameter_symbol_types(values: dict) -> dict:
-    """Map job-parameter symbols (``Param.<name>`` and ``RawParam.<name>``) to
-    their EXPR type strings, derived from the template's ``parameterDefinitions``.
-    Used for type-aware expression validation; parameters whose type has no
-    confident EXPR mapping are omitted (callers fall back to name-only checks).
-    """
-    from openjd.model._format_strings._expr_support import expr_type_for_openjd_type
-
-    result: dict[str, str] = {}
-    defs = values.get("parameterDefinitions")
-    if not isinstance(defs, list):
-        return result
-    for entry in defs:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("name")
-        type_name = entry.get("type")
-        if not isinstance(name, str) or not isinstance(type_name, str):
-            continue
-        expr_type = expr_type_for_openjd_type(type_name)
-        if expr_type is None:
-            continue
-        result[f"Param.{name}"] = expr_type
-        result[f"RawParam.{name}"] = expr_type
-    return result
-
-
 def _check_format_string(
     value: FormatString,
     current_scope: ResolutionScope,
@@ -506,7 +517,12 @@ def _check_format_string(
         # Improperly formed string. Later validation passes will catch and flag this.
         return errors
 
-    symbol_types = getattr(context, "_symbol_types", None) if context is not None else None
+    # Symbol EXPR types threaded through the traversal alongside the symbol
+    # sets (populated only when the EXPR extension is active). Per-step typed
+    # symbols (Task.Param.*/Task.RawParam.*) are visible only within their
+    # own step, so same-named task parameters with different types across
+    # steps validate independently.
+    symbol_types = symbols.types or None
     for expr in f_value.expressions:
         if expr.expression:
             try:
@@ -713,6 +729,39 @@ def _get_model_for_singleton_value(
 ## =============================================
 
 
+def _symbol_expr_type(value: dict, raw: bool) -> Optional[str]:
+    """The EXPR type string for a symbol defined by a model whose raw
+    ``value`` dict carries a sibling ``type`` field (e.g. a job- or
+    task-parameter definition), or ``None`` when no confident mapping exists.
+
+    When ``raw`` is set (RawParam.*/Task.RawParam.*), path types map to their
+    raw string forms — a raw PATH is a plain string and a raw LIST[PATH] a
+    list[string] (RFC 0005; openjd-rs build_param_symtab).
+
+    ``expr_type_for_openjd_type`` returns ``None`` for types with no
+    confident EXPR mapping — notably CHUNK[INT], which openjd-rs types as
+    RANGE_EXPR in its task-scope symtab (format_strings.rs
+    build_task_scope_symtab). It is deliberately omitted here (name-only
+    fallback) because Python's session runtime also skips typing CHUNK task
+    parameters; typing it at validation without runtime support would be a
+    Rust-parity question to revisit alongside the runtime.
+    """
+    type_field_value = value.get("type")
+    if not isinstance(type_field_value, str):
+        return None
+    # Imported lazily: only reached when the EXPR extension is active, so the
+    # non-EXPR parse path never loads the Rust expr surface.
+    from openjd.model._format_strings._expr_support import expr_type_for_openjd_type
+
+    expr_type = expr_type_for_openjd_type(type_field_value)
+    if raw:
+        if expr_type == "path":
+            expr_type = "string"
+        elif expr_type == "list[path]":
+            expr_type = "list[string]"
+    return expr_type
+
+
 def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
     model: Type,
     value: Any,
@@ -720,6 +769,7 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
     symbol_prefix: str,
     recursive_pruning: bool = True,
     discriminator: Union[str, Discriminator, None] = None,
+    collect_types: bool = False,
 ) -> dict[str, ScopedSymtabs]:
     """Collects the names of variables that each field of this model object provides.
 
@@ -743,6 +793,7 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             current_scope,
             symbol_prefix,
             discriminator=discriminator,
+            collect_types=collect_types,
         )
 
     # Unwrap the Annotated type, and get the discriminator while doing so
@@ -752,7 +803,12 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             if isinstance(annotation, FieldInfo):
                 discriminator = annotation.discriminator
         return _collect_variable_definitions(
-            model_args[0], value, current_scope, symbol_prefix, discriminator=discriminator
+            model_args[0],
+            value,
+            current_scope,
+            symbol_prefix,
+            discriminator=discriminator,
+            collect_types=collect_types,
         )
 
     # Aggregate all the collected variable definitions from a list
@@ -764,9 +820,9 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             item_model = typing.get_args(model)[0]
             for item in value:
                 symtab.update_self(
-                    _collect_variable_definitions(item_model, item, current_scope, symbol_prefix)[
-                        "__export__"
-                    ]
+                    _collect_variable_definitions(
+                        item_model, item, current_scope, symbol_prefix, collect_types=collect_types
+                    )["__export__"]
                 )
         return {"__export__": symtab}
 
@@ -775,9 +831,9 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
         symtab = ScopedSymtabs()
         for sub_type in typing.get_args(model):
             symtab.update_self(
-                _collect_variable_definitions(sub_type, value, current_scope, symbol_prefix)[
-                    "__export__"
-                ]
+                _collect_variable_definitions(
+                    sub_type, value, current_scope, symbol_prefix, collect_types=collect_types
+                )["__export__"]
             )
         return {"__export__": symtab}
 
@@ -790,6 +846,7 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
                 value,
                 current_scope,
                 symbol_prefix,
+                collect_types=collect_types,
             )
         else:
             return {"__export__": ScopedSymtabs()}
@@ -837,6 +894,16 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
                     else:
                         symbol_name = f"{symbol_prefix}{vardef.prefix}{name}"
                     _add_symbol(symbols["__self__"], vardef.resolves, symbol_name)
+                    if collect_types:
+                        # Record the symbol's EXPR type from the defining
+                        # model's sibling `type` field (job- and task-parameter
+                        # definitions), honoring the raw-variable string
+                        # semantics (RFC 0005) — per-step Task.Param.* types
+                        # stay local to their step because they ride the same
+                        # per-field symbol threading as the names.
+                        symbol_type = _symbol_expr_type(value, vardef.raw)
+                        if symbol_type is not None:
+                            symbols["__self__"].set_type(symbol_name, symbol_type)
 
         # If this object injects any template variables then those are injected at the
         # current model's scope.
@@ -870,7 +937,12 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
         discriminator = field_info.discriminator
 
         symbols[field_name] = _collect_variable_definitions(
-            field_model, field_value, current_scope, symbol_prefix, discriminator=discriminator
+            field_model,
+            field_value,
+            current_scope,
+            symbol_prefix,
+            discriminator=discriminator,
+            collect_types=collect_types,
         )["__export__"]
 
     # Collect the exported symbols as specified by the metadata
