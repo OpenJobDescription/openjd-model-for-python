@@ -1,3 +1,12 @@
+## 0.11.1 (2026-07-24)
+
+
+### Features
+* EXPR and WRAP_ACTIONS v0 model parity via Rust bindings (#318) ([`a2cc32f`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/a2cc32f02853e9b90662a12ca09a5eb7b46431b4))
+* enable Claude PR review (#280) ([`9d8f7b8`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/9d8f7b865d254c5174eb3bd490eafb35683e04c1))
+
+
+
 ## 0.11.0 (2026-07-09)
 
 
