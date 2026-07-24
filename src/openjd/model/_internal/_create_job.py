@@ -11,7 +11,85 @@ from .._symbol_table import SymbolTable
 from .._format_strings import FormatString
 from .._types import OpenJDModel
 
-__all__ = ("instantiate_model",)
+__all__ = ("instantiate_model", "resolve_whole_field_typed_list")
+
+
+def _expr_value_is_list(result: Any) -> bool:
+    """Whether an EXPR engine ``ExprValue`` result carries a list.
+
+    The binding does not (yet) expose an ``is_list`` predicate, so the check
+    inspects the value's EXPR type string. Kept in exactly one place so the
+    interface-sniffing has a single seam to replace with a typed binding
+    predicate later.
+    """
+    result_type = getattr(result, "type", None)
+    return result_type is not None and str(result_type).startswith("list[")
+
+
+def resolve_whole_field_typed_list(value: FormatString, symtab: SymbolTable) -> Any:
+    """RFC 0006 typed whole-field resolution to a native list, or ``None``.
+
+    When ``value`` is a single whole-field ``{{ ... }}`` expression (only
+    whitespace outside the expression) that evaluates to a list, return the
+    native Python list. Any other shape or result — multi-segment format
+    strings, scalar results, or evaluation errors — returns ``None`` so the
+    caller falls back to ordinary string resolution, mirroring the
+    typed-then-string fallback in openjd-rs's range instantiation. An
+    evaluation error is deliberately not raised here: the string-resolution
+    fallback re-evaluates and surfaces it with full format-string context.
+    """
+    info = value.whole_field_expression()
+    if info is None:
+        return None
+    expression = info.expression
+    if expression is None:  # pragma: no cover - excluded by whole_field_expression
+        return None
+    try:
+        result = expression.evaluate_value(symtab=symtab)
+    except ValueError:
+        # ExpressionError/FormatStringError (both ValueError subclasses):
+        # fall back to string resolution, which re-raises with context.
+        return None
+    # EXPR-backed evaluation returns the engine's ExprValue. List results are
+    # returned RAW (not unwrapped) so the element type variants survive to the
+    # coercion hook (JobCreationMetadata.typed_resolve_coerce) — unwrapping
+    # via .item() erases them (a bool becomes int 1/0), which is how typed
+    # ranges diverged from openjd-rs's per-variant checks (ranges.rs).
+    if _expr_value_is_list(result):
+        return result
+    if isinstance(result, list):
+        return result
+    return None
+
+
+def unwrap_typed_resolution(raw: Any) -> Any:
+    """Unwrap a typed whole-field resolution result to native Python: the
+    engine's list ``ExprValue`` becomes a plain list; native results pass
+    through. Used when a model defines no ``typed_resolve_coerce`` hook."""
+    if _expr_value_is_list(raw):
+        return raw.item()
+    return raw
+
+
+def _compute_typed_resolutions(model: "OpenJDModel", symtab: SymbolTable) -> dict[str, Any]:
+    """RFC 0006 typed whole-field resolutions for the model's
+    ``typed_resolve_fields``, computed exactly once per field.
+
+    The result feeds both the ``create_as`` target-model decision and the
+    field instantiation in :func:`instantiate_model`, so the (Rust-boundary)
+    expression evaluation is not repeated and the two consumers cannot
+    disagree. Fields whose typed resolution does not apply are absent from
+    the mapping (the caller falls back to normal string resolution).
+    """
+    typed_resolved: dict[str, Any] = {}
+    for field_name in model._job_creation_metadata.typed_resolve_fields:
+        field_value = getattr(model, field_name, None)
+        if isinstance(field_value, FormatString):
+            typed_value = resolve_whole_field_typed_list(field_value, symtab)
+            if typed_value is not None:
+                typed_resolved[field_name] = typed_value
+    return typed_resolved
+
 
 # Cache for TypeAdapter instances
 _type_adapter_cache: Dict[int, TypeAdapter] = {}
@@ -92,9 +170,20 @@ def instantiate_model(  # noqa: C901
     errors = list[InitErrorDetails]()
     instantiated_fields = dict[str, Any]()
 
+    # Extend the symbol table for this model's subtree if defined (e.g. a
+    # step's Step.Name and step-level EXPR `let` bindings). This runs before
+    # the transform: StepTemplate's syntax-sugar transform folds step-level
+    # `let` bindings into the script (their runtime channel), so the original
+    # model is the one that still carries them for create_job-time fields
+    # (parameter space, host requirements).
+    if model._job_creation_metadata.extends_symtab is not None:
+        symtab = model._job_creation_metadata.extends_symtab(model, symtab)
+
     # Apply pre-transform if defined
     if model._job_creation_metadata.transform is not None:
         model = model._job_creation_metadata.transform(model)
+
+    typed_resolved = _compute_typed_resolutions(model, symtab)
 
     # Determine the target model to create as
     target_model = model.__class__
@@ -103,7 +192,7 @@ def instantiate_model(  # noqa: C901
         if create_as_metadata.model is not None:
             target_model = create_as_metadata.model
         elif create_as_metadata.callable is not None:
-            target_model = create_as_metadata.callable(model)
+            target_model = create_as_metadata.callable(model, typed_resolved)
 
     for field_name in model.__class__.model_fields.keys():
         if field_name in model._job_creation_metadata.exclude_fields:
@@ -124,7 +213,18 @@ def instantiate_model(  # noqa: C901
         with capture_validation_errors(output_errors=errors, loc=(field_name,), input=field_value):
             # Instantiate and resolve format string expressions
             needs_resolve = field_name in model._job_creation_metadata.resolve_fields
-            if isinstance(field_value, list):
+            if field_name in typed_resolved:
+                # RFC 0006 typed whole-field resolution (computed above). The
+                # model's coercion hook (when set) enforces element/target
+                # type agreement on the engine's typed elements — errors
+                # raised here aggregate into the model's validation errors.
+                raw_typed = typed_resolved[field_name]
+                coerce = model._job_creation_metadata.typed_resolve_coerce
+                if coerce is not None:
+                    instantiated = coerce(model, field_name, raw_typed)
+                else:
+                    instantiated = unwrap_typed_resolution(raw_typed)
+            elif isinstance(field_value, list):
                 if field_name in model._job_creation_metadata.reshape_field_to_dict:
                     key_field = model._job_creation_metadata.reshape_field_to_dict[field_name]
                     instantiated = _instantiate_list_field_as_dict(
@@ -172,6 +272,10 @@ def _instantiate_noncollection_value(
         value (Any): Value to process.
         symtab (SymbolTable): Symbol table for format string value lookups.
         needs_resolve (bool): Whether to resolve the value as a format string.
+
+    Note: fields named in ``typed_resolve_fields`` whose RFC 0006 typed
+    whole-field resolution succeeded never reach this function —
+    ``instantiate_model`` resolves them once up front.
     """
     if isinstance(value, OpenJDModel):
         return instantiate_model(value, symtab)

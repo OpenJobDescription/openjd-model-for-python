@@ -16,6 +16,7 @@ from openjd.model import (
     decode_environment_template,
     decode_job_template,
 )
+from openjd.model._format_strings import FormatString
 
 _ALL_EXTS = ["TASK_CHUNKING", "REDACTED_ENV_VARS", "FEATURE_BUNDLE_1", "EXPR", "WRAP_ACTIONS"]
 
@@ -265,6 +266,64 @@ class TestWrappedVariableScopeInvalid:
         _decode(_env_template(actions, extensions=["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]))
 
 
+class TestWrapHookTimeoutCancelationScope:
+    """A wrap hook's timeout/cancelation validate against template symbols +
+    WrappedAction.* ONLY — WrappedEnv.Name / WrappedStep.Name are session
+    symbols visible to the hook's command/args but not to its
+    template-scoped fields, matching openjd-rs
+    (validate_v2023_09/format_strings.rs). Regression: all per-hook symbols
+    used to be injected at TEMPLATE scope, so timeout could reference
+    WrappedEnv.Name."""
+
+    _FB1_EXTS = ["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]
+
+    def test_wrapped_env_name_in_hook_timeout_rejected(self):
+        actions = dict(_ALL_THREE)
+        actions["onWrapEnvEnter"] = {
+            "command": "echo",
+            "timeout": "{{ WrappedEnv.Name }}",
+        }
+        with pytest.raises(
+            DecodeValidationError, match=r"WrappedEnv\.Name does not exist at this location"
+        ):
+            _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+    def test_wrapped_step_name_in_hook_cancelation_mode_rejected(self):
+        actions = dict(_ALL_THREE)
+        actions["onWrapTaskRun"] = {
+            "command": "echo",
+            "cancelation": {"mode": "{{ WrappedStep.Name }}"},
+        }
+        with pytest.raises(
+            DecodeValidationError, match=r"WrappedStep\.Name does not exist at this location"
+        ):
+            _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+    def test_wrapped_env_name_in_hook_args_still_accepted(self):
+        # command/args validate at the ambient session scope, where
+        # WrappedEnv.Name / WrappedStep.Name remain visible.
+        actions = dict(_ALL_THREE)
+        actions["onWrapEnvExit"] = {
+            "command": "echo",
+            "args": ["{{ WrappedEnv.Name }}"],
+        }
+        _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+    def test_wrapped_action_round_trip_forwarding_still_accepted(self):
+        # The round-trip forwarding case must not regress: WrappedAction.*
+        # stays visible to the hook's timeout/cancelation.
+        actions = dict(_ALL_THREE)
+        actions["onWrapTaskRun"] = {
+            "command": "{{ WrappedAction.Command }}",
+            "timeout": "{{ WrappedAction.Timeout }}",
+            "cancelation": {
+                "mode": "{{ WrappedAction.Cancelation.Mode }}",
+                "notifyPeriodInSeconds": "{{ WrappedAction.Cancelation.NotifyPeriodInSeconds }}",
+            },
+        }
+        _decode(_env_template(actions, extensions=self._FB1_EXTS))
+
+
 # ── RFC 0008 create_job instantiation ──────────────────────────────────
 #
 # create_job re-validates the instantiated Job submodels without a parsing
@@ -294,3 +353,158 @@ class TestWrapActionsCreateJob:
         job = create_job(job_template=jt, job_parameter_values={})
         step_env_actions = job.steps[0].stepEnvironments[0].script.actions
         assert step_env_actions.onWrapTaskRun is not None
+
+    def test_create_job_with_full_forwarding_defers_runtime_fields(self):
+        # Regression: a wrap hook forwarding the wrapped action's timeout and
+        # cancelation ("{{WrappedAction.Timeout}}",
+        # "{{WrappedAction.Cancelation.*}}") decoded cleanly but crashed
+        # create_job with "Undefined variable" — those symbols only exist at
+        # run time. Like openjd-rs (job/create_job/instantiate.rs clones
+        # timeout+cancelation unresolved into the Job), the fields must be
+        # carried through job instantiation as raw FormatStrings and left for
+        # the session to resolve.
+        hook = {
+            "command": "{{WrappedAction.Command}}",
+            "args": ["{{WrappedAction.Args}}"],
+            "timeout": "{{WrappedAction.Timeout}}",
+            "cancelation": {
+                "mode": "{{WrappedAction.Cancelation.Mode}}",
+                "notifyPeriodInSeconds": ("{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"),
+            },
+        }
+        wrap_env = {
+            "name": "W",
+            "script": {
+                "actions": {
+                    "onWrapEnvEnter": dict(hook),
+                    "onWrapTaskRun": dict(hook),
+                    "onWrapEnvExit": dict(hook),
+                }
+            },
+        }
+        exts = ("WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1")
+        jt = _decode_job(_job_template(job_environments=[wrap_env], extensions=exts))
+
+        # WHEN
+        job = create_job(job_template=jt, job_parameter_values={})
+
+        # THEN: creation succeeds and every run-time-resolvable field on the
+        # instantiated hook action is the raw, unresolved FormatString.
+        action = job.jobEnvironments[0].script.actions.onWrapTaskRun
+        assert isinstance(action.timeout, FormatString)
+        assert str(action.timeout) == "{{WrappedAction.Timeout}}"
+        assert isinstance(action.cancelation.mode, FormatString)
+        assert str(action.cancelation.mode) == "{{WrappedAction.Cancelation.Mode}}"
+        assert isinstance(action.cancelation.notifyPeriodInSeconds, FormatString)
+        assert (
+            str(action.cancelation.notifyPeriodInSeconds)
+            == "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+        )
+        assert isinstance(action.command, FormatString)
+        assert str(action.command) == "{{WrappedAction.Command}}"
+
+
+class TestCancelationRoundTripForwarding:
+    """Cancelation round-trip forwarding (openjd-rs PR #261 review,
+    discussion r3597453516). A wrap hook must be able to forward the
+    wrapped action's cancelation verbatim via whole-field expressions::
+
+        cancelation:
+          mode: "{{WrappedAction.Cancelation.Mode}}"
+          notifyPeriodInSeconds: "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+
+    Under RFC 0005 type-forwarding, a single outer ``{{...}}`` forwards
+    the expression's type into the field: a string mode behaves like the
+    literal, and a null result means the field is omitted (a null mode
+    drops the whole cancelation object; a null period falls back to the
+    schema default).
+
+    Mirrors ``cancelation_round_trip_*`` in openjd-rs
+    ``crates/openjd-model/tests/integration/test_wrap_actions.rs``.
+
+    Note: the review example also forwards ``timeout:``; that works too —
+    see TestWrapActionsCreateJob
+    .test_create_job_with_full_forwarding_defers_runtime_fields, which
+    covers full forwarding (command/args/timeout/cancelation) through
+    create_job.
+    """
+
+    _ROUND_TRIP_EXTS = ["WRAP_ACTIONS", "EXPR", "FEATURE_BUNDLE_1"]
+
+    def _wrap_actions(self, cancelation: dict) -> dict:
+        actions = {
+            "onWrapEnvEnter": _cmd("{{WrappedAction.Command}}"),
+            "onWrapTaskRun": {
+                "command": "echo",
+                "args": ["{{WrappedAction.Command}}"],
+                "cancelation": cancelation,
+            },
+            "onWrapEnvExit": _cmd("{{WrappedAction.Command}}"),
+        }
+        return actions
+
+    def test_full_cancelation_forwarding_accepted(self):
+        # Mark's example from the PR #261 review thread (minus timeout):
+        # the whole-field expressions in the wrap hook's cancelation
+        # block must parse and validate.
+        tmpl = _env_template(
+            self._wrap_actions(
+                {
+                    "mode": "{{WrappedAction.Cancelation.Mode}}",
+                    "notifyPeriodInSeconds": (
+                        "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+                    ),
+                }
+            ),
+            extensions=self._ROUND_TRIP_EXTS,
+        )
+        _decode(tmpl, extensions=self._ROUND_TRIP_EXTS)
+
+    def test_notify_period_only_forwarding_accepted(self):
+        # The narrower forward: a literal mode with only the notify
+        # period forwarded. notifyPeriodInSeconds is already @fmtstring
+        # under FEATURE_BUNDLE_1; the whole-field expression is int? and
+        # a null result must drop the field (schema default applies).
+        tmpl = _env_template(
+            self._wrap_actions(
+                {
+                    "mode": "NOTIFY_THEN_TERMINATE",
+                    "notifyPeriodInSeconds": (
+                        "{{WrappedAction.Cancelation.NotifyPeriodInSeconds}}"
+                    ),
+                }
+            ),
+            extensions=self._ROUND_TRIP_EXTS,
+        )
+        _decode(tmpl, extensions=self._ROUND_TRIP_EXTS)
+
+    def test_fmtstring_mode_requires_feature_bundle_1(self):
+        # The format-string mode form is gated on FEATURE_BUNDLE_1
+        # (Template Schemas 5.3); with only WRAP_ACTIONS + EXPR it must
+        # be rejected.
+        tmpl = _env_template(
+            self._wrap_actions({"mode": "{{WrappedAction.Cancelation.Mode}}"}),
+            extensions=["WRAP_ACTIONS", "EXPR"],
+        )
+        with pytest.raises(DecodeValidationError, match="FEATURE_BUNDLE_1"):
+            _decode(tmpl, extensions=["WRAP_ACTIONS", "EXPR"])
+
+    @pytest.mark.parametrize(
+        "mode",
+        [
+            pytest.param("TERMIN{{WrappedAction.Cancelation.Mode}}", id="leading-text"),
+            pytest.param("{{ 'NOTIFY' }}_THEN_TERMINATE", id="trailing-text"),
+        ],
+    )
+    def test_partial_fmtstring_mode_accepted(self, mode: str):
+        # A format-string mode gets normal format string behavior
+        # (Template Schemas 5.3): partial interpolation is statically
+        # valid, and the resolved value is checked against the two mode
+        # names at run time. Only a whole-field expression additionally
+        # gets string? null semantics (a null result drops the
+        # cancelation object).
+        tmpl = _env_template(
+            self._wrap_actions({"mode": mode}),
+            extensions=self._ROUND_TRIP_EXTS,
+        )
+        _decode(tmpl, extensions=self._ROUND_TRIP_EXTS)

@@ -12,9 +12,9 @@ name = "_openjd_rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-openjd-expr = "0.1.2"
-openjd-model = "0.3.0"
-openjd-sessions = "0.3.1"
+openjd-expr = "0.2.1"
+openjd-model = "0.4.0"
+openjd-sessions = "0.4.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 serde_json = "1"
@@ -51,6 +51,10 @@ windows = { version = "0.62", features = [
 # Leave this commented out for committed work and CI; the published
 # wheel is built against the crates.io versions, which is what the
 # Cargo.lock file pins.
+#
+# NOTE: the [patch.crates-io] block that redirects these to a sibling
+# ~/openjd-rs checkout must live at the *workspace root* Cargo.toml — cargo
+# ignores `[patch]` in non-root package manifests. See ../Cargo.toml.
 #
 # [patch.crates-io]
 # openjd-expr     = { path = "../../openjd-rs/crates/openjd-expr" }

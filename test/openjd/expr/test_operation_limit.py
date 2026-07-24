@@ -163,24 +163,28 @@ class TestOperationLimitExceeded:
         )
 
     def test_list_multiply_iterations_count(self) -> None:
-        """List repetition counts the result elements."""
+        """List repetition pre-charges the full projected result size (3000
+        elements) before the limit check, so the reported count is the whole
+        charge rather than limit + 1."""
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("[1, 2, 3] * 1000", operation_limit=100)
         assert str(exc_info.value) == "".join(
             [
-                op_limit_msg(100),
+                op_limit_msg(100, count=3001),
                 "  [1, 2, 3] * 1000\n",
                 "  ~~~~~~~~~~^~~~~~",
             ]
         )
 
     def test_flatten_iterations_count(self) -> None:
-        """flatten() counts outer and inner list elements."""
+        """flatten() pre-charges the repeated outer list (1000 elements plus
+        both operand charges) before iterating, so the reported count is the
+        whole charge rather than limit + 1."""
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("flatten([[1,2],[3,4]] * 500)", operation_limit=100)
         assert str(exc_info.value) == "".join(
             [
-                op_limit_msg(100),
+                op_limit_msg(100, count=1002),
                 "  flatten([[1,2],[3,4]] * 500)\n",
                 "          ~~~~~~~~~~~~~~^~~~~",
             ]
@@ -199,24 +203,28 @@ class TestOperationLimitExceeded:
         )
 
     def test_any_iterations_count(self) -> None:
-        """any() iterating a list counts the elements."""
+        """any()'s argument list is pre-charged at construction (1000
+        elements plus operand charges), so the reported count is the whole
+        charge rather than limit + 1."""
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("any([False] * 1000)", operation_limit=100)
         assert str(exc_info.value) == "".join(
             [
-                op_limit_msg(100),
+                op_limit_msg(100, count=1002),
                 "  any([False] * 1000)\n",
                 "      ~~~~~~~~^~~~~~",
             ]
         )
 
     def test_all_iterations_count(self) -> None:
-        """all() iterating a list counts the elements."""
+        """all()'s argument list is pre-charged at construction (1000
+        elements plus operand charges), so the reported count is the whole
+        charge rather than limit + 1."""
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("all([True] * 1000)", operation_limit=100)
         assert str(exc_info.value) == "".join(
             [
-                op_limit_msg(100),
+                op_limit_msg(100, count=1002),
                 "  all([True] * 1000)\n",
                 "      ~~~~~~~^~~~~~",
             ]

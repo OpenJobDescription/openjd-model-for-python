@@ -159,6 +159,18 @@ impl PyCancelationMode {
             "NOTIFY_THEN_TERMINATE" => CancelationMode::NotifyThenTerminate {
                 notify_period_in_seconds: notify_period_in_seconds.map(|fs| fs.inner),
             },
+            // A format-string mode (FEATURE_BUNDLE_1) defers the
+            // TERMINATE-vs-NOTIFY_THEN_TERMINATE decision to run time.
+            // Mirrors the openjd-rs serde impl, which routes any mode
+            // containing "{{" to CancelationMode::DeferredMode.
+            other if other.contains("{{") => CancelationMode::DeferredMode {
+                mode: openjd_expr::FormatString::new(other).map_err(|e| {
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "invalid cancelation mode format string: {e}"
+                    ))
+                })?,
+                notify_period_in_seconds: notify_period_in_seconds.map(|fs| fs.inner),
+            },
             other => {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(
                     "unknown cancelation mode: {other}"
@@ -173,6 +185,9 @@ impl PyCancelationMode {
         match &self.inner {
             CancelationMode::Terminate => "TERMINATE",
             CancelationMode::NotifyThenTerminate { .. } => "NOTIFY_THEN_TERMINATE",
+            // The raw format string; the mode decision is deferred to run
+            // time. Matches the openjd-rs serialization of DeferredMode.
+            CancelationMode::DeferredMode { mode, .. } => mode.raw(),
         }
     }
 
@@ -182,6 +197,10 @@ impl PyCancelationMode {
             CancelationMode::Terminate => None,
             CancelationMode::NotifyThenTerminate {
                 notify_period_in_seconds,
+            }
+            | CancelationMode::DeferredMode {
+                notify_period_in_seconds,
+                ..
             } => notify_period_in_seconds
                 .as_ref()
                 .map(|fs| PyFormatString { inner: fs.clone() }),
@@ -206,6 +225,19 @@ impl PyCancelationMode {
                     .unwrap_or_else(|| "None".to_string());
                 format!(
                     "CancelationMode(mode='NOTIFY_THEN_TERMINATE', notify_period_in_seconds={raw})"
+                )
+            }
+            CancelationMode::DeferredMode {
+                mode,
+                notify_period_in_seconds,
+            } => {
+                let raw = notify_period_in_seconds
+                    .as_ref()
+                    .map(|fs| format!("{:?}", fs.raw()))
+                    .unwrap_or_else(|| "None".to_string());
+                format!(
+                    "CancelationMode(mode={:?}, notify_period_in_seconds={raw})",
+                    mode.raw()
                 )
             }
         }
@@ -524,7 +556,7 @@ impl PyEmbeddedFile {
     fn new(
         name: String,
         r#type: &str,
-        filename: Option<PyFormatString>,
+        filename: Option<String>,
         data: Option<PyFormatString>,
         runnable: Option<bool>,
         end_of_line: Option<&str>,
@@ -533,7 +565,9 @@ impl PyEmbeddedFile {
             inner: EmbeddedFile {
                 name,
                 file_type: parse_file_type(r#type)?,
-                filename: filename.map(|fs| fs.inner),
+                // Plain string per the 2023-09 schema: the field is not
+                // @fmtstring, so "{{ }}" sequences are literal text.
+                filename,
                 data: data.map(|fs| fs.inner),
                 runnable,
                 end_of_line: end_of_line.map(parse_eol).transpose()?,
@@ -553,11 +587,8 @@ impl PyEmbeddedFile {
     }
 
     #[getter]
-    fn filename(&self) -> Option<PyFormatString> {
-        self.inner
-            .filename
-            .as_ref()
-            .map(|fs| PyFormatString { inner: fs.clone() })
+    fn filename(&self) -> Option<String> {
+        self.inner.filename.clone()
     }
 
     #[getter]

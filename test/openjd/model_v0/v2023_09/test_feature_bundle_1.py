@@ -5,7 +5,10 @@ import pytest
 from pydantic import ValidationError
 
 from openjd.model import create_job, decode_job_template
+from openjd.model._errors import DecodeValidationError
+from openjd.model._format_strings import FormatString
 from openjd.model._parse import _parse_model
+from openjd.model._types import ParameterValue, ParameterValueType
 from openjd.model.v2023_09 import (
     Action,
     ArgString,
@@ -414,6 +417,80 @@ class TestSimpleAction:
         assert result.cancelation.notifyPeriodInSeconds == 30
 
 
+class TestSimpleActionFieldScopes:
+    """Parity with Action: a SimpleAction's timeout/cancelation validate at
+    TEMPLATE scope (no Task.*/Session.* symbols), exactly like the script-form
+    Action the sugar desugars to. Regression: they used to validate at the
+    ambient TASK scope, accepting references the desugared form rejects."""
+
+    @staticmethod
+    def _template_with_bash_step(bash: dict) -> dict:
+        return {
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["FEATURE_BUNDLE_1"],
+            "name": "Test",
+            "parameterDefinitions": [{"name": "TO", "type": "INT", "default": 30}],
+            "steps": [
+                {
+                    "name": "Step1",
+                    "parameterSpace": {
+                        "taskParameterDefinitions": [
+                            {"name": "Frame", "type": "INT", "range": "1-3"}
+                        ]
+                    },
+                    "bash": bash,
+                }
+            ],
+        }
+
+    def test_timeout_task_param_rejected(self) -> None:
+        """A task-parameter reference in a SimpleAction timeout is rejected,
+        matching the script-form equivalent."""
+        template = self._template_with_bash_step(
+            {"script": "echo hi", "timeout": "{{Task.Param.Frame}}"}
+        )
+        with pytest.raises(DecodeValidationError, match=r"Task\.Param\.Frame does not exist"):
+            decode_job_template(template=template, supported_extensions=["FEATURE_BUNDLE_1"])
+
+    def test_timeout_job_param_accepted(self) -> None:
+        """A job-parameter reference (template scope) is still accepted."""
+        template = self._template_with_bash_step({"script": "echo hi", "timeout": "{{Param.TO}}"})
+        decode_job_template(template=template, supported_extensions=["FEATURE_BUNDLE_1"])
+
+    def test_cancelation_notify_period_task_param_rejected(self) -> None:
+        """cancelation validates at template scope too."""
+        template = self._template_with_bash_step(
+            {
+                "script": "echo hi",
+                "cancelation": {
+                    "mode": "NOTIFY_THEN_TERMINATE",
+                    "notifyPeriodInSeconds": "{{Task.Param.Frame}}",
+                },
+            }
+        )
+        with pytest.raises(DecodeValidationError, match=r"Task\.Param\.Frame does not exist"):
+            decode_job_template(template=template, supported_extensions=["FEATURE_BUNDLE_1"])
+
+    def test_cancelation_notify_period_job_param_accepted(self) -> None:
+        template = self._template_with_bash_step(
+            {
+                "script": "echo hi",
+                "cancelation": {
+                    "mode": "NOTIFY_THEN_TERMINATE",
+                    "notifyPeriodInSeconds": "{{Param.TO}}",
+                },
+            }
+        )
+        decode_job_template(template=template, supported_extensions=["FEATURE_BUNDLE_1"])
+
+    def test_script_task_param_still_accepted(self) -> None:
+        """The SimpleAction's script/args remain TASK-scoped."""
+        template = self._template_with_bash_step(
+            {"script": "echo {{Task.Param.Frame}}", "args": ["{{Task.Param.Frame}}"]}
+        )
+        decode_job_template(template=template, supported_extensions=["FEATURE_BUNDLE_1"])
+
+
 class TestScriptInterpreterSyntaxSugar:
     """Tests for script interpreter syntax sugar in StepTemplate."""
 
@@ -535,8 +612,6 @@ class TestCreateJobWithFormatStrings:
 
     def test_amount_requirement_min_max_resolved_valid(self) -> None:
         """Test that resolved min/max values are validated correctly."""
-        from openjd.model import create_job, decode_job_template
-        from openjd.model._types import ParameterValue, ParameterValueType
 
         template = decode_job_template(
             template={
@@ -579,9 +654,6 @@ class TestCreateJobWithFormatStrings:
 
     def test_amount_requirement_min_greater_than_max_resolved_fails(self) -> None:
         """Test that resolved min > max fails validation."""
-        from openjd.model import create_job, decode_job_template
-        from openjd.model._errors import DecodeValidationError
-        from openjd.model._types import ParameterValue, ParameterValueType
 
         template = decode_job_template(
             template={
@@ -619,6 +691,90 @@ class TestCreateJobWithFormatStrings:
                 },
             )
         assert "max" in str(excinfo.value).lower()
+
+    def test_timeout_and_notify_period_carried_through_unresolved(self) -> None:
+        """timeout and notifyPeriodInSeconds format strings are NOT resolved
+        at job creation: they are carried through the instantiated Job as raw
+        FormatStrings and resolved at run time by the session, matching
+        openjd-rs (job/create_job/instantiate.rs clones timeout+cancelation
+        unresolved into the Job). This is what allows RFC 0008 wrap hooks to
+        forward run-time-only symbols such as WrappedAction.Timeout."""
+
+        template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "name": "Test",
+                "parameterDefinitions": [{"name": "TO", "type": "INT", "default": 30}],
+                "steps": [
+                    {
+                        "name": "Step1",
+                        "script": {
+                            "actions": {
+                                "onRun": {
+                                    "command": "echo",
+                                    "timeout": "{{Param.TO}}",
+                                    "cancelation": {
+                                        "mode": "NOTIFY_THEN_TERMINATE",
+                                        "notifyPeriodInSeconds": "{{Param.TO}}",
+                                    },
+                                }
+                            }
+                        },
+                    }
+                ],
+            },
+            supported_extensions=[ExtensionName.FEATURE_BUNDLE_1],
+        )
+
+        # WHEN
+        job = create_job(
+            job_template=template,
+            job_parameter_values={"TO": ParameterValue(type=ParameterValueType.INT, value="30")},
+        )
+
+        # THEN: creation succeeds and both fields carry the raw FormatString.
+        on_run = job.steps[0].script.actions.onRun
+        assert isinstance(on_run.timeout, FormatString)
+        assert str(on_run.timeout) == "{{Param.TO}}"
+        assert on_run.cancelation is not None
+        assert isinstance(on_run.cancelation.notifyPeriodInSeconds, FormatString)
+        assert str(on_run.cancelation.notifyPeriodInSeconds) == "{{Param.TO}}"
+
+    def test_literal_timeout_and_notify_period_stay_ints_through_create_job(self) -> None:
+        """Literal integer timeout/notifyPeriodInSeconds are unaffected by
+        the run-time deferral of format-string values."""
+
+        template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "name": "Test",
+                "steps": [
+                    {
+                        "name": "Step1",
+                        "script": {
+                            "actions": {
+                                "onRun": {
+                                    "command": "echo",
+                                    "timeout": 30,
+                                    "cancelation": {
+                                        "mode": "NOTIFY_THEN_TERMINATE",
+                                        "notifyPeriodInSeconds": 15,
+                                    },
+                                }
+                            }
+                        },
+                    }
+                ],
+            },
+            supported_extensions=[ExtensionName.FEATURE_BUNDLE_1],
+        )
+        job = create_job(job_template=template, job_parameter_values={})
+        on_run = job.steps[0].script.actions.onRun
+        assert on_run.timeout == 30
+        assert on_run.cancelation is not None
+        assert on_run.cancelation.notifyPeriodInSeconds == 15
 
 
 class TestAmountRequirementEdgeCases:
@@ -758,8 +914,6 @@ class TestJobNameLength:
 
     def test_job_name_format_string_longer_than_limit_succeeds(self) -> None:
         """Test that format string longer than limit passes if resolved value is shorter."""
-        from openjd.model import create_job, decode_job_template
-        from openjd.model._types import ParameterValue, ParameterValueType
 
         # Template name with format string is > 128 chars, but resolved is short
         long_prefix = "J" * 120

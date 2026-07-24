@@ -233,3 +233,39 @@ class TestStepDependencyGraph_2023_09:
         # THEN
         assert "circular dependency was found" in str(e)
         assert "S1 -> S2 -> S3 -> S4 -> S5 -> S6 -> S7 -> S1" in str(e)
+
+
+class TestStepDependencyGraphDegrees_2023_09:
+    def _graph(self) -> StepDependencyGraph:
+        # Foo depends on Bar and Buz; Bar depends on Buz.
+        template_data = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "Job",
+            "steps": [
+                {
+                    "name": "Foo",
+                    "script": {"actions": {"onRun": {"command": "foo"}}},
+                    "dependencies": [{"dependsOn": "Bar"}, {"dependsOn": "Buz"}],
+                },
+                {
+                    "name": "Bar",
+                    "script": {"actions": {"onRun": {"command": "foo"}}},
+                    "dependencies": [{"dependsOn": "Buz"}],
+                },
+                {
+                    "name": "Buz",
+                    "script": {"actions": {"onRun": {"command": "foo"}}},
+                },
+            ],
+        }
+        job_template = parse_model(model=JobTemplate_2023_09, obj=template_data)
+        job = create_job(job_template=job_template, job_parameter_values=dict())
+        return StepDependencyGraph(job=job)
+
+    def test_max_indegree(self) -> None:
+        # Foo has the most dependencies (2).
+        assert self._graph().max_indegree == 2
+
+    def test_max_outdegree(self) -> None:
+        # Buz has the most dependents (2).
+        assert self._graph().max_outdegree == 2

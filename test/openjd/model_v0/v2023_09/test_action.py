@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from openjd.model._parse import _parse_model
-from openjd.model.v2023_09 import Action, EnvironmentActions, StepActions
+from openjd.model.v2023_09 import Action, EnvironmentActions, ModelParsingContext, StepActions
 
 
 class TestAction:
@@ -164,7 +164,6 @@ class TestEnvironmentActions:
         "data",
         (
             pytest.param({"onEnter": {"command": "foo"}}, id="has onEnter"),
-            pytest.param({"onExit": {"command": "foo"}}, id="has onExit"),
             # For making sure our pre-validator logic is correct
             pytest.param(
                 {
@@ -188,10 +187,26 @@ class TestEnvironmentActions:
         # THEN
         # no exception was raised.
 
+    def test_parse_onexit_only_with_wrap_actions_extension(self) -> None:
+        # RFC 0008: with the WRAP_ACTIONS extension declared, an environment
+        # may define any single action without a standalone onEnter.
+
+        # GIVEN
+        context = ModelParsingContext(supported_extensions=["EXPR", "WRAP_ACTIONS"])
+
+        # WHEN
+        _parse_model(model=EnvironmentActions, obj={"onExit": {"command": "foo"}}, context=context)
+
+        # THEN
+        # no exception was raised.
+
     @pytest.mark.parametrize(
         "data",
         (
             pytest.param({}, id="empty object"),
+            # §3.5: base 2023-09 requires onEnter whenever a script is
+            # present (the WRAP_ACTIONS extension relaxes this).
+            pytest.param({"onExit": {"command": "foo"}}, id="onExit only"),
             pytest.param({"onEnter": {"command": "foo"}, "onUnknown": "blah"}, id="unknown field"),
         ),
     )
