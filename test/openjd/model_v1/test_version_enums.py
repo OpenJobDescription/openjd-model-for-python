@@ -3,6 +3,8 @@
 import pytest
 
 from openjd.model._v1 import TemplateSpecificationVersion, decode_job_template
+from openjd.model._v1.types import ModelExtension
+from openjd.model.v2023_09 import ExtensionName
 
 # All known variants. Add new ones here as the spec evolves; the test
 # ensures every variant is classified as exactly job-template OR
@@ -56,3 +58,48 @@ class TestTemplateSpecificationVersion:
         # like behaviour without being a str subclass).
         assert t.specification_version == "jobtemplate-2023-09"
         assert t.specification_version.value == "jobtemplate-2023-09"
+
+
+def _rust_extension_members() -> set[str]:
+    # `ModelExtension` is a PyO3 pyclass enum, not a real `enum.Enum`, so
+    # it is not iterable. Discover members by identity instead of relying
+    # on the enum protocol or a hardcoded list.
+    return {
+        name
+        for name in dir(ModelExtension)
+        if isinstance(getattr(ModelExtension, name), ModelExtension)
+    }
+
+
+class TestModelExtension:
+    """Drift guard for the `ModelExtension` PyO3 binding.
+
+    `openjd_model::types::ModelExtension` is `#[non_exhaustive]`, so
+    `From<ModelExtension> for PyModelExtension` must carry a catch-all
+    arm and the compiler cannot warn when the Rust crate gains a variant
+    the binding does not map. These tests are that warning.
+
+    Regression: `WRAP_ACTIONS` landed in the Rust crate six days after
+    the binding was written; the binding was never updated, so the
+    catch-all silently mapped it to `EXPR`. A profile built with
+    `WRAP_ACTIONS` therefore enabled `EXPR` instead, and templates using
+    `onWrapEnvEnter`/`onWrapTaskRun`/`onWrapEnvExit` were rejected with
+    an error that did not name the real cause.
+    """
+
+    def test_binding_members_match_python_extension_names(self) -> None:
+        # The binding enum and the Python model layer describe the same
+        # set of 2023-09 extensions. Divergence in either direction is a
+        # bug: a missing member means the catch-all aliases it to the
+        # wrong extension; an extra member means Python cannot name it.
+        assert _rust_extension_members() == {e.value for e in ExtensionName}
+
+    @pytest.mark.parametrize("name", [e.value for e in ExtensionName])
+    def test_name_round_trips_to_its_own_member(self, name: str) -> None:
+        # Catches aliasing directly, independent of member-set equality:
+        # every spec name must parse back to the member of the same name,
+        # never to a different extension.
+        parsed = ModelExtension.from_str(name)
+        assert parsed is not None, f"{name} is not recognized by the Rust binding"
+        assert parsed.name == name
+        assert parsed.as_str() == name

@@ -52,6 +52,7 @@ import pytest
         "openjd._openjd_rs.ModelExtension.REDACTED_ENV_VARS",
         "openjd._openjd_rs.ModelExtension.FEATURE_BUNDLE_1",
         "openjd._openjd_rs.ModelExtension.EXPR",
+        "openjd._openjd_rs.ModelExtension.WRAP_ACTIONS",
         "openjd._openjd_rs.TemplateSpecificationVersion.JOBTEMPLATE_v2023_09",
         "openjd._openjd_rs.TemplateSpecificationVersion.ENVIRONMENT_v2023_09",
     ],

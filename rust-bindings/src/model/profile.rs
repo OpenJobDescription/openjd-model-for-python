@@ -184,6 +184,7 @@ pub(crate) enum PyModelExtension {
     REDACTED_ENV_VARS = 1,
     FEATURE_BUNDLE_1 = 2,
     EXPR = 3,
+    WRAP_ACTIONS = 4,
 }
 
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
@@ -238,6 +239,7 @@ impl From<PyModelExtension> for ModelExtension {
             PyModelExtension::REDACTED_ENV_VARS => ModelExtension::RedactedEnvVars,
             PyModelExtension::FEATURE_BUNDLE_1 => ModelExtension::FeatureBundle1,
             PyModelExtension::EXPR => ModelExtension::Expr,
+            PyModelExtension::WRAP_ACTIONS => ModelExtension::WrapActions,
         }
     }
 }
@@ -249,6 +251,20 @@ impl From<ModelExtension> for PyModelExtension {
             ModelExtension::RedactedEnvVars => PyModelExtension::REDACTED_ENV_VARS,
             ModelExtension::FeatureBundle1 => PyModelExtension::FEATURE_BUNDLE_1,
             ModelExtension::Expr => PyModelExtension::EXPR,
+            ModelExtension::WrapActions => PyModelExtension::WRAP_ACTIONS,
+            // `ModelExtension` is `#[non_exhaustive]`, so downstream
+            // crates cannot write an exhaustive match. This arm is
+            // mandatory, and the compiler will not warn when the Rust
+            // crate gains a variant that has no arm above. The fallback
+            // therefore MISREPRESENTS any such variant as `EXPR`.
+            //
+            // A new upstream variant requires three edits: a new
+            // `PyModelExtension` member, an arm here, and an arm in
+            // `From<PyModelExtension> for ModelExtension`. The guard
+            // against forgetting is
+            // `test/openjd/model_v1/test_version_enums.py::TestModelExtension`,
+            // which fails when this enum drifts from
+            // `openjd.model.v2023_09.ExtensionName`.
             #[allow(unreachable_patterns)]
             _ => PyModelExtension::EXPR,
         }
