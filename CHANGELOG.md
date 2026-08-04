@@ -1,3 +1,11 @@
+## 0.11.2 (2026-08-04)
+
+
+
+### Bug Fixes
+* map WRAP_ACTIONS in the ModelExtension binding (#322) ([`2384490`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/23844909e58b8e878bd02fcaf23ed90b95a35407))
+
+
 ## 0.11.1 (2026-07-24)
 
 
