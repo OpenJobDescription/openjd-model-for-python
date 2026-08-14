@@ -10,6 +10,8 @@ from openjd.model.v2023_09 import (
     FloatTaskParameterDefinition,
     IntTaskParameterDefinition,
     PathTaskParameterDefinition,
+    RangeExpressionTaskParameterDefinition,
+    RangeListTaskParameterDefinition,
     StepParameterSpaceDefinition,
     StringTaskParameterDefinition,
 )
@@ -329,6 +331,10 @@ class TestRangeExpressionTaskParameterDefinition:
                 },
                 id="format string with multiple",
             ),
+            pytest.param(
+                {"name": "foo", "type": "INT", "range": "1-5000"},
+                id="expansion past the list-form cap",
+            ),
         ),
     )
     def test_parse_success(self, data: dict[str, str]) -> None:
@@ -372,6 +378,64 @@ class TestRangeExpressionTaskParameterDefinition:
             _parse_model(model=IntTaskParameterDefinition, obj=data)
 
         # THEN
+        assert len(excinfo.value.errors()) > 0
+
+
+class TestTaskParameterRangeLength:
+    """§3.4 caps the number of elements in the *list* forms of a task parameter's
+    range. §3.4.1.1.1 `<IntRangeExpr>` carries no element cap, so an expression's
+    expansion must not be capped — the form exists to express frame ranges, which
+    routinely run to thousands of values.
+    """
+
+    @pytest.mark.parametrize(
+        "range_expr,expected_len",
+        (
+            pytest.param("1-1024", 1024, id="at the list-form cap"),
+            pytest.param("1-1025", 1025, id="one past the list-form cap"),
+            pytest.param("1-5000", 5000, id="ordinary frame range"),
+            pytest.param("1-100000:2", 50000, id="large range with a step"),
+        ),
+    )
+    def test_range_expression_expansion_is_not_capped(
+        self, range_expr: str, expected_len: int
+    ) -> None:
+        # WHEN the template-layer definition parses a literal range expression
+        _parse_model(
+            model=IntTaskParameterDefinition,
+            obj={"name": "foo", "type": "INT", "range": range_expr},
+        )
+
+        # AND the instantiation target parses the same expression
+        instantiated = _parse_model(
+            model=RangeExpressionTaskParameterDefinition,
+            obj={"type": "INT", "range": range_expr},
+        )
+
+        # THEN neither rejects it, and the range expands in full
+        assert len(instantiated.range) == expected_len
+
+    @pytest.mark.parametrize(
+        "model,obj",
+        (
+            pytest.param(
+                IntTaskParameterDefinition,
+                {"name": "foo", "type": "INT", "range": [1] * 1025},
+                id="template layer",
+            ),
+            pytest.param(
+                RangeListTaskParameterDefinition,
+                {"type": "INT", "range": [1] * 1025},
+                id="instantiation layer",
+            ),
+        ),
+    )
+    def test_list_form_range_is_still_capped(self, model: Any, obj: dict[str, Any]) -> None:
+        # WHEN a list-form range one element past the §3.4 cap is parsed
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=model, obj=obj)
+
+        # THEN it is rejected
         assert len(excinfo.value.errors()) > 0
 
 
