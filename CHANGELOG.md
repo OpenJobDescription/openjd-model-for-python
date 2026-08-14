@@ -3,7 +3,7 @@
 
 
 ### Bug Fixes
-* do not cap <IntRangeExpr> expansion at the list-form limit ([`3fc3da4`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/3fc3da43da9d8c52c7989e25f787437e2ce6378b))
+* do not cap <IntRangeExpr> expansion at the list-form limit (#327) ([`3fc3da4`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/3fc3da43da9d8c52c7989e25f787437e2ce6378b))
 
 
 ## 0.11.2 (2026-08-04)
