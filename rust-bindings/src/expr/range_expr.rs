@@ -39,19 +39,19 @@ impl PyIntRange {
     /// Smallest value in the range (always <= ``end``).
     #[getter]
     fn start(&self) -> i64 {
-        self.inner.start
+        self.inner.start()
     }
 
     /// Largest value in the range (always >= ``start``).
     #[getter]
     fn end(&self) -> i64 {
-        self.inner.end
+        self.inner.end()
     }
 
     /// Step between successive values (always > 0).
     #[getter]
     fn step(&self) -> i64 {
-        self.inner.step
+        self.inner.step()
     }
 
     fn __len__(&self) -> usize {
@@ -83,7 +83,9 @@ impl PyIntRange {
     fn __repr__(&self) -> String {
         format!(
             "IntRange(start={}, end={}, step={})",
-            self.inner.start, self.inner.end, self.inner.step
+            self.inner.start(),
+            self.inner.end(),
+            self.inner.step()
         )
     }
 
@@ -91,7 +93,7 @@ impl PyIntRange {
     fn __reduce__<'py>(&self, py: Python<'py>) -> PyResult<(Bound<'py, PyType>, (i64, i64, i64))> {
         Ok((
             py.get_type::<Self>(),
-            (self.inner.start, self.inner.end, self.inner.step),
+            (self.inner.start(), self.inner.end(), self.inner.step()),
         ))
     }
 }
@@ -178,7 +180,8 @@ impl PyRangeExpr {
             ));
         }
         Ok(PyRangeExpr {
-            inner: RangeExpr::from_values(ints),
+            inner: RangeExpr::from_values(ints)
+                .map_err(|e| PyRangeExprError::new_err(e.to_string()))?,
         })
     }
 
@@ -188,7 +191,7 @@ impl PyRangeExpr {
         self.inner
             .ranges()
             .first()
-            .map(|r| r.start)
+            .map(|r| r.start())
             .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Range expression is empty"))
     }
 
@@ -198,7 +201,7 @@ impl PyRangeExpr {
         self.inner
             .ranges()
             .last()
-            .map(|r| r.end)
+            .map(|r| r.end())
             .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Range expression is empty"))
     }
 
