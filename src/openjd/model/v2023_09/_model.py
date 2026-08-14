@@ -980,9 +980,14 @@ def validate_let_field(value: Any, info: ValidationInfo, *, simple_action: bool 
     return value
 
 
-# §3.4: the maximum number of values a task parameter's range may take on.
-# Not raised by FEATURE_BUNDLE_1 in 2023-09 (matches openjd-rs's
-# EffectiveLimits.max_task_param_range_len).
+# §3.4: the maximum number of elements in a task parameter's *list*-form range
+# — `<IntRangeList>` (§3.4.1.1), `<FloatRangeList>` (§3.4.1.2) and
+# `<StringRangeList>` (§3.4.1.3). Not raised by FEATURE_BUNDLE_1 in 2023-09.
+#
+# Do not apply this to an `<IntRangeExpr>` expansion. §3.4.1.1.1 constrains that
+# form only by "no two ranges may overlap" and states its purpose is to express
+# frame ranges succinctly, so capping the expansion rejects the form's primary
+# use case and pre-empts the host service's own task-count limits.
 _MAX_TASK_PARAM_RANGE_LEN = 1024
 
 
@@ -1289,26 +1294,6 @@ class RangeExpressionTaskParameterDefinition(OpenJDModel_v2023_09):
     # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
     chunks: Optional[TaskChunksDefinition] = None
 
-    @field_validator("range")
-    @classmethod
-    def _validate_range_len(cls, value: Any) -> Any:
-        # §3.4: a range expression that arrives via format-string resolution
-        # (e.g. `range: "{{RawParam.Frames}}"` with a RANGE_EXPR parameter) is
-        # only parsed at instantiation, so the expansion cap must be enforced
-        # here too — matching openjd-rs's resolve-time checks in create_job.
-        if isinstance(value, IntRangeExpr):
-            _check_range_expr_len(value)
-        return value
-
-
-def _check_range_expr_len(parsed_range: IntRangeExpr) -> None:
-    """§3.4: a range expression may expand to at most 1024 values."""
-    if len(parsed_range) > _MAX_TASK_PARAM_RANGE_LEN:
-        raise ValueError(
-            f"range expression expands to {len(parsed_range)} elements "
-            f"(max {_MAX_TASK_PARAM_RANGE_LEN})."
-        )
-
 
 def _range_task_param_target(model: Any, typed_values: dict) -> Type[OpenJDModel]:
     """``create_as`` target-model selector shared by the INT and CHUNK[INT]
@@ -1412,9 +1397,9 @@ def _native_element_type_name(elem: Any) -> str:
 def _validate_int_range_elements(value: Any) -> Any:
     """Shared ``range`` post-validator for the INT and CHUNK[INT]
     task-parameter definitions: a literal range-expression string must parse
-    and may expand to at most 1024 values (§3.4); a list-form range is
-    length-capped. Ranges containing format expressions defer to the
-    RangeExpressionTaskParameterDefinition model once they are resolved.
+    against the ``<IntRangeExpr>`` grammar; a list-form range is length-capped
+    (§3.4). The expansion of a range expression is deliberately not capped —
+    see ``_MAX_TASK_PARAM_RANGE_LEN``.
     """
     if isinstance(value, FormatString):
         # If there are no format expressions, we can validate the range expression.
@@ -1422,11 +1407,9 @@ def _validate_int_range_elements(value: Any) -> Any:
         # they've all been evaluated
         if len(value.expressions) == 0:
             try:
-                parsed_range = IntRangeExpr.from_str(value)
+                IntRangeExpr.from_str(value)
             except Exception as e:
                 raise ValueError(str(e))
-            # §3.4: the range may take on at most 1024 values.
-            _check_range_expr_len(parsed_range)
     else:
         validate_task_param_range_list_len(value)
     return value
