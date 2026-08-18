@@ -1011,3 +1011,60 @@ class TestCreateJobWithSymbolTables:
                 compared += 1
         # Guard against the assertions above passing vacuously
         assert compared > 0
+
+    def test_queue_environment_parameters_reach_the_tables(self) -> None:
+        """Parameters contributed by an external environment template — a queue
+        environment, in service terms — must appear in the returned tables.
+
+        Note the job template itself cannot *reference* such a parameter: the
+        caller merges the environment's parameterDefinitions into the template
+        before decode. What this pins is that the values reach the symbol tables,
+        which is this API's part of that flow.
+        """
+        from openjd.model import create_job_with_symbol_tables
+
+        # GIVEN
+        job_template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["EXPR"],
+                "name": "queue-env-job",
+                "steps": [
+                    {
+                        "name": "render",
+                        "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}},
+                    }
+                ],
+            },
+            supported_extensions=["EXPR"],
+        )
+        env_template = decode_environment_template(
+            template=dict(
+                specificationVersion="environment-2023-09",
+                environment=minimal_environment_2023_09,
+                parameterDefinitions=[{"name": "Bar", "type": "STRING", "default": "fromQueueEnv"}],
+            )
+        )
+        parameter_values = preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+            environment_templates=[env_template],
+        )
+
+        # WHEN
+        result = create_job_with_symbol_tables(
+            job_template=job_template,
+            job_parameter_values=parameter_values,
+            environment_templates=[env_template],
+        )
+
+        # THEN — the queue environment's parameter is in job scope, and inherited
+        # by step scope
+        assert self._entries(result.job_symbol_table)["Param.Bar"] == ("string", "fromQueueEnv")
+        assert self._entries(result.step_symbol_tables["render"])["Param.Bar"] == (
+            "string",
+            "fromQueueEnv",
+        )
