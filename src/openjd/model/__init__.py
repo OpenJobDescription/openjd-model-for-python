@@ -1,7 +1,12 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from ._capabilities import validate_attribute_capability_name, validate_amount_capability_name
-from ._create_job import create_job, preprocess_job_parameters
+from ._create_job import (
+    JobWithSymbolTables,
+    create_job,
+    create_job_with_symbol_tables,
+    preprocess_job_parameters,
+)
 from ._errors import (
     CompatibilityError,
     DecodeValidationError,
@@ -51,6 +56,8 @@ from ._version import version
 
 __all__ = (
     "create_job",
+    "create_job_with_symbol_tables",
+    "JobWithSymbolTables",
     "decode_template",
     "decode_environment_template",
     "decode_job_template",
