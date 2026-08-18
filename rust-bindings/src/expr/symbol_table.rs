@@ -269,6 +269,45 @@ impl PySerializedSymbolTable {
         }
     }
 
+    /// Build a ``SerializedSymbolTable`` from its JSON transport
+    /// text, as produced by ``to_json_str``.
+    ///
+    /// This is the inverse of ``to_json_str`` and exists for callers
+    /// that carry the transport form across a process or service
+    /// boundary — a scheduler persisting the table produced by
+    /// ``create_job`` and later handing it to a worker, for instance.
+    /// Prefer ``from_symtab`` when the source is an in-memory
+    /// ``SymbolTable``.
+    ///
+    /// Raises ``ValueError`` if the text is not valid JSON. Note that
+    /// the *contents* are validated lazily: a well-formed JSON
+    /// document whose entries are not valid symbol table entries is
+    /// accepted here and rejected by ``to_symtab``.
+    #[classmethod]
+    fn from_json_str(_cls: &Bound<'_, pyo3::types::PyType>, json: &str) -> PyResult<Self> {
+        let inner = openjd_expr::SerializedSymbolTable::from_json_str(json).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Failed to parse SerializedSymbolTable JSON: {e}"
+            ))
+        })?;
+        Ok(Self { inner })
+    }
+
+    /// Serialize to the JSON transport text: an array of
+    /// ``{"name", "type", "value"}`` objects in canonical
+    /// (lexicographic) path order.
+    ///
+    /// Use this to move a table across a process or service boundary;
+    /// pair it with ``from_json_str`` to reconstruct. The result is
+    /// stable for a given table, so it is safe to store or compare.
+    fn to_json_str(&self) -> PyResult<String> {
+        serde_json::to_string(&self.inner).map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "Failed to serialize SerializedSymbolTable: {e}"
+            ))
+        })
+    }
+
     /// Deserialize this serialized symbol table into a full
     /// ``SymbolTable`` suitable for inspection or modification.
     /// ``path_format`` controls how PATH-typed values are

@@ -1,5 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+import json
+import pickle
 from pathlib import Path
 from typing import cast
 
@@ -7,7 +9,7 @@ import pytest
 
 import sys
 
-from openjd.expr import ExprValue, SymbolTable, TypeCode
+from openjd.expr import ExprValue, SerializedSymbolTable, SymbolTable, TypeCode
 from openjd.expr import PathFormat
 
 HOST_PATH_FORMAT = PathFormat.WINDOWS if sys.platform == "win32" else PathFormat.POSIX
@@ -254,3 +256,125 @@ class TestDottedPathLookup:
         assert "Param" in st
         assert "Param.X" in st
         assert "Other" not in st
+
+
+class TestSerializedSymbolTableJson:
+    """``to_json_str`` / ``from_json_str`` are the supported way to move a
+    serialized symbol table across a process or service boundary."""
+
+    def test_round_trip_preserves_values(self) -> None:
+        # GIVEN
+        symtab = SymbolTable(
+            {
+                "Job.Name": "my-job",
+                "Step.Name": "render",
+                "Param.Count": 42,
+                "Param.Scale": 1.5,
+                "Param.Debug": True,
+            }
+        )
+        serialized = SerializedSymbolTable.from_symtab(symtab)
+
+        # WHEN
+        json_text = serialized.to_json_str()
+        restored = SerializedSymbolTable.from_json_str(json_text).to_symtab()
+
+        # THEN
+        assert restored["Job.Name"] == ExprValue("my-job")
+        assert restored["Step.Name"] == ExprValue("render")
+        assert restored["Param.Count"] == ExprValue(42)
+        assert restored["Param.Scale"] == ExprValue(1.5)
+        assert restored["Param.Debug"] == ExprValue(True)
+
+    def test_transport_shape(self) -> None:
+        """The transport form is an array of {name, type, value} objects in
+        canonical path order, with scalars carried as strings."""
+        # GIVEN
+        symtab = SymbolTable({"Job.Name": "my-job", "Param.Count": 42})
+
+        # WHEN
+        entries = json.loads(SerializedSymbolTable.from_symtab(symtab).to_json_str())
+
+        # THEN
+        assert entries == [
+            {"name": "Job.Name", "type": "string", "value": "my-job"},
+            {"name": "Param.Count", "type": "int", "value": "42"},
+        ]
+
+    def test_to_json_str_is_stable(self) -> None:
+        # GIVEN
+        symtab = SymbolTable({"Param.B": 2, "Param.A": 1})
+
+        # WHEN
+        first = SerializedSymbolTable.from_symtab(symtab).to_json_str()
+        second = SerializedSymbolTable.from_symtab(symtab).to_json_str()
+
+        # THEN
+        assert first == second
+
+    def test_empty_table_round_trips(self) -> None:
+        # WHEN
+        json_text = SerializedSymbolTable.from_symtab(SymbolTable()).to_json_str()
+
+        # THEN
+        assert json_text == "[]"
+        assert SerializedSymbolTable.from_json_str(json_text).to_symtab().symbols == set()
+
+    def test_from_json_str_accepts_hand_built_transport(self) -> None:
+        """A caller that builds the transport form itself, rather than going
+        through ``from_symtab``, gets the same result."""
+        # GIVEN
+        hand_built = '[{"name": "Job.Name", "type": "string", "value": "hand-built"}]'
+
+        # WHEN
+        symtab = SerializedSymbolTable.from_json_str(hand_built).to_symtab()
+
+        # THEN
+        assert symtab["Job.Name"] == ExprValue("hand-built")
+
+    def test_from_json_str_rejects_malformed_json(self) -> None:
+        # WHEN / THEN
+        with pytest.raises(ValueError, match="Failed to parse SerializedSymbolTable JSON"):
+            SerializedSymbolTable.from_json_str("not json at all")
+
+    def test_from_json_str_defers_content_validation_to_to_symtab(self) -> None:
+        """Well-formed JSON that is not a valid table is accepted by
+        ``from_json_str`` and rejected by ``to_symtab``."""
+        # GIVEN
+        well_formed_but_wrong = '{"not": "an array"}'
+
+        # WHEN
+        serialized = SerializedSymbolTable.from_json_str(well_formed_but_wrong)
+
+        # THEN
+        with pytest.raises(ValueError, match="expected JSON array"):
+            serialized.to_symtab()
+
+    def test_json_round_trip_matches_pickle_round_trip(self) -> None:
+        """The JSON form carries the same content as the pickle form, which
+        round-trips through the same transport text."""
+        # GIVEN
+        symtab = SymbolTable({"Job.Name": "my-job", "Param.Count": 42})
+        serialized = SerializedSymbolTable.from_symtab(symtab)
+
+        # WHEN
+        via_json = SerializedSymbolTable.from_json_str(serialized.to_json_str()).to_symtab()
+        via_pickle = pickle.loads(pickle.dumps(serialized)).to_symtab()
+
+        # THEN
+        assert via_json.symbols == via_pickle.symbols
+        for name in via_json.symbols:
+            assert via_json[name] == via_pickle[name]
+
+    def test_path_values_round_trip_with_host_format(self) -> None:
+        # GIVEN
+        symtab = SymbolTable({"RawParam.Scene": "/proj/scene.blend"})
+        json_text = SerializedSymbolTable.from_symtab(symtab).to_json_str()
+
+        # WHEN
+        restored = SerializedSymbolTable.from_json_str(json_text).to_symtab(
+            path_format=HOST_PATH_FORMAT
+        )
+
+        # THEN
+        assert "RawParam.Scene" in restored
