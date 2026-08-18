@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+import json
 import os
 import tempfile
 import pytest
@@ -818,3 +819,195 @@ class TestCreateJob_2023_09:
             "1 validation errors for JobTemplate\nsteps[0] -> parameterSpace -> combination:\n\tAssociative expressions must have arguments with identical ranges. Expression (A, B) has argument lengths (10, 2)."
             in str(excinfo.value)
         )
+
+
+class TestCreateJobWithSymbolTables:
+    """``create_job_with_symbol_tables`` returns the tables that ``create_job``
+    discards, in the transport form openjd-rs uses."""
+
+    EXPR_TEMPLATE: dict[str, Any] = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "my-job",
+        "parameterDefinitions": [
+            {"name": "Count", "type": "INT", "default": 21},
+            {"name": "Tag", "type": "STRING", "default": "abc"},
+            {"name": "Scene", "type": "PATH", "default": "scene.blend"},
+        ],
+        "steps": [
+            {
+                "name": "render",
+                "let": ["twice = Param.Count * 2", "tag = Job.Name + '-' + Step.Name"],
+                "script": {
+                    "let": ["sess = Job.Name + '!'"],
+                    "actions": {
+                        "onRun": {
+                            "command": "echo",
+                            "args": ["{{ twice }}", "{{ tag }}", "{{ sess }}"],
+                        }
+                    },
+                },
+            },
+            {
+                "name": "publish",
+                "script": {"actions": {"onRun": {"command": "echo", "args": ["{{ Param.Tag }}"]}}},
+            },
+        ],
+    }
+
+    @staticmethod
+    def _entries(serialized: Any) -> dict[str, tuple[str, Any]]:
+        """Decode the transport form into {name: (type, value)}."""
+        _helper, (text,) = serialized.__reduce__()
+        return {e["name"]: (e["type"], e["value"]) for e in json.loads(text)}
+
+    def _create(self) -> Any:
+        from openjd.model import create_job_with_symbol_tables
+
+        job_template = decode_job_template(
+            template=self.EXPR_TEMPLATE, supported_extensions=["EXPR"]
+        )
+        parameter_values = preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+        )
+        return create_job_with_symbol_tables(
+            job_template=job_template, job_parameter_values=parameter_values
+        )
+
+    def test_returns_the_same_job_as_create_job(self) -> None:
+        # GIVEN
+        job_template = decode_job_template(
+            template=self.EXPR_TEMPLATE, supported_extensions=["EXPR"]
+        )
+        parameter_values = preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+        )
+
+        # WHEN
+        plain = create_job(job_template=job_template, job_parameter_values=parameter_values)
+        result = self._create()
+
+        # THEN
+        assert result.job == plain
+
+    def test_job_scope_table(self) -> None:
+        # WHEN
+        entries = self._entries(self._create().job_symbol_table)
+
+        # THEN
+        assert entries["Job.Name"] == ("string", "my-job")
+        assert entries["Param.Count"] == ("int", "21")
+        assert entries["Param.Tag"] == ("string", "abc")
+        # PATH parameters carry RawParam only at template scope: the mapped
+        # Param.* value only exists at session scope.
+        assert entries["RawParam.Scene"] == ("string", "scene.blend")
+        assert "Param.Scene" not in entries
+        # Job scope has no step in it
+        assert "Step.Name" not in entries
+
+    def test_step_scope_tables_are_keyed_by_step_name(self) -> None:
+        # WHEN
+        tables = self._create().step_symbol_tables
+
+        # THEN
+        assert set(tables) == {"render", "publish"}
+
+    def test_step_scope_adds_step_name_and_template_let_results(self) -> None:
+        # WHEN
+        entries = self._entries(self._create().step_symbol_tables["render"])
+
+        # THEN
+        assert entries["Step.Name"] == ("string", "render")
+        # Template-scope `let` results are resolved and frozen into the table
+        assert entries["twice"] == ("int", "42")
+        assert entries["tag"] == ("string", "my-job-render")
+
+    def test_script_scope_let_is_not_in_the_table(self) -> None:
+        """Script-scope `let` resolves at session time, so only the symbols it
+        references travel — not its results."""
+        # WHEN
+        entries = self._entries(self._create().step_symbol_tables["render"])
+
+        # THEN
+        assert "sess" not in entries
+        assert "Job.Name" in entries
+
+    def test_each_step_gets_its_own_scope(self) -> None:
+        # WHEN
+        tables = self._create().step_symbol_tables
+
+        # THEN
+        assert self._entries(tables["publish"])["Step.Name"] == ("string", "publish")
+        # `render`'s let bindings do not leak into `publish`
+        assert "twice" not in self._entries(tables["publish"])
+
+    def test_non_expr_template_has_no_job_name(self) -> None:
+        from openjd.model import create_job_with_symbol_tables
+
+        # GIVEN
+        template = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "plain",
+            "parameterDefinitions": [{"name": "Tag", "type": "STRING", "default": "x"}],
+            "steps": [{"name": "s", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+        }
+        job_template = decode_job_template(template=template)
+        parameter_values = preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+        )
+
+        # WHEN
+        result = create_job_with_symbol_tables(
+            job_template=job_template, job_parameter_values=parameter_values
+        )
+
+        # THEN — Job.Name is EXPR-gated
+        assert "Job.Name" not in self._entries(result.job_symbol_table)
+        assert self._entries(result.job_symbol_table)["Param.Tag"] == ("string", "x")
+
+    def test_matches_the_rust_implementation(self) -> None:
+        """Every symbol openjd-rs' create_job puts in Step.resolved_symtab appears
+        here with an identical type and value.
+
+        This is the property that lets a v0 producer and a Rust consumer share the
+        channel. The table here is a superset: openjd-rs filters its table down to
+        the symbols the step references, which is a payload optimization rather
+        than a semantic difference.
+        """
+        from openjd._openjd_rs import create_job as rs_create_job
+        from openjd._openjd_rs import decode_job_template as rs_decode
+
+        # GIVEN
+        rs_job = rs_create_job(
+            job_template=rs_decode(self.EXPR_TEMPLATE, supported_extensions=["EXPR"]),
+            job_parameter_values={},
+        )
+        v0_tables = self._create().step_symbol_tables
+
+        # WHEN / THEN
+        compared = 0
+        for rs_step in rs_job.steps:
+            if rs_step.resolved_symtab is None:
+                continue
+            rust_entries = self._entries(rs_step.resolved_symtab)
+            v0_entries = self._entries(v0_tables[str(rs_step.name)])
+            for name, rust_value in rust_entries.items():
+                assert (
+                    name in v0_entries
+                ), f"{name} missing from the v0 table for step {rs_step.name}"
+                assert v0_entries[name] == rust_value, f"{name} differs for step {rs_step.name}"
+                compared += 1
+        # Guard against the assertions above passing vacuously
+        assert compared > 0

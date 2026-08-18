@@ -1,15 +1,22 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 import json
+from dataclasses import dataclass
 from os.path import normpath
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from pydantic import ValidationError
 
 from ._errors import CompatibilityError, DecodeValidationError
 from ._format_strings import FormatStringError
 from ._symbol_table import SymbolTable
+
+if TYPE_CHECKING:
+    # Type-only: importing openjd.expr loads the Rust bindings, and importing this
+    # module must not. The runtime imports live in _serialize_symbol_table, which
+    # only the opt-in create_job_with_symbol_tables path reaches.
+    from openjd.expr import SerializedSymbolTable
 from ._internal import instantiate_model
 from ._merge_job_parameter import merge_job_parameter_definitions
 from ._types import (
@@ -26,7 +33,28 @@ from ._types import (
 )
 from ._convert_pydantic_error import pydantic_validationerrors_to_str
 
-__all__ = ("preprocess_job_parameters",)
+__all__ = ("preprocess_job_parameters", "create_job_with_symbol_tables", "JobWithSymbolTables")
+
+
+@dataclass(frozen=True)
+class JobWithSymbolTables:
+    """A created job together with the symbol tables it was instantiated with.
+
+    Returned by :func:`create_job_with_symbol_tables`. The tables are in the
+    ``SerializedSymbolTable`` transport form, ready to persist or send to the host
+    that will run the job's sessions.
+    """
+
+    job: Job
+    """The created job — identical to what ``create_job`` returns."""
+
+    job_symbol_table: "SerializedSymbolTable"
+    """Job scope: ``Param.*``, ``RawParam.*``, and ``Job.Name`` under EXPR."""
+
+    step_symbol_tables: dict[str, "SerializedSymbolTable"]
+    """Step scope keyed by step name: job scope plus ``Step.Name`` and the step's
+    evaluated template-scope ``let`` bindings."""
+
 
 # The original scalar job-parameter type names whose values are carried as
 # strings through preprocessing. EXPR-extension types (BOOL, RANGE_EXPR, and
@@ -386,12 +414,12 @@ def preprocess_job_parameters(
 # =======================================================================
 
 
-def create_job(
+def _create_job_and_symbol_table(
     *,
     job_template: JobTemplate,
     job_parameter_values: JobParameterValues,
     environment_templates: Optional[list[EnvironmentTemplate]] = None,
-) -> Job:
+) -> tuple[Job, SymbolTable]:
     """This function will create a job from a given Job Template and set of values for
     Job Parameters. Minimally, values must be provided for Job Parameters that do not have
     default values defined in the template.
@@ -409,7 +437,8 @@ def create_job(
         DecodeValidationError
 
     Returns:
-        Job: The job generated.
+        tuple[Job, SymbolTable]: The job generated, and the job-scope symbol table
+            it was instantiated with.
     """
 
     # Raises: ValueError
@@ -489,4 +518,112 @@ def create_job(
             pydantic_validationerrors_to_str(job_template.__class__, exc.errors())
         )
 
-    return cast(Job, job)
+    return cast(Job, job), symtab
+
+
+def create_job(
+    *,
+    job_template: JobTemplate,
+    job_parameter_values: JobParameterValues,
+    environment_templates: Optional[list[EnvironmentTemplate]] = None,
+) -> Job:
+    """Create a job from a Job Template and a set of Job Parameter values.
+
+    See :func:`create_job_with_symbol_tables` when you also need the resolved
+    symbol tables — for instance to transport them to a host that will run the
+    job's sessions.
+
+    Raises:
+        DecodeValidationError
+
+    Returns:
+        Job: The job generated.
+    """
+    job, _symtab = _create_job_and_symbol_table(
+        job_template=job_template,
+        job_parameter_values=job_parameter_values,
+        environment_templates=environment_templates,
+    )
+    return job
+
+
+def create_job_with_symbol_tables(
+    *,
+    job_template: JobTemplate,
+    job_parameter_values: JobParameterValues,
+    environment_templates: Optional[list[EnvironmentTemplate]] = None,
+) -> JobWithSymbolTables:
+    """Create a job, and return the resolved symbol tables alongside it.
+
+    Same job as :func:`create_job`. The difference is that the symbol tables
+    built during instantiation are returned instead of discarded, in the
+    ``SerializedSymbolTable`` transport form, so a caller can persist them and
+    hand them to a session on another host.
+
+    This mirrors ``openjd-rs``, whose ``create_job`` attaches the step-scope
+    table to each ``Step`` as ``resolved_symtab``. The tables are returned
+    separately here rather than added to the ``Job`` model so that the model's
+    serialized form does not change.
+
+    Scopes, matching the sessions API:
+
+    * ``job_symbol_table`` — job scope: ``Param.*``, ``RawParam.*`` and, with the
+      EXPR extension, ``Job.Name``. Use it for job and queue environments.
+    * ``step_symbol_tables`` — job scope plus ``Step.Name`` and the step's
+      evaluated template-scope ``let`` bindings, keyed by step name. Use each for
+      that step and its step environments.
+
+    Script-scope ``let`` bindings are deliberately absent: they resolve at
+    session time, so the table carries the symbols they reference rather than
+    their results.
+
+    Unlike ``openjd-rs``, the tables are not filtered down to the symbols a step
+    actually references. They are a superset, which is valid input wherever a
+    filtered table is — a session layers its own scopes on top either way.
+
+    Raises:
+        DecodeValidationError
+
+    Returns:
+        JobWithSymbolTables: The job and its resolved symbol tables.
+    """
+    job, symtab = _create_job_and_symbol_table(
+        job_template=job_template,
+        job_parameter_values=job_parameter_values,
+        environment_templates=environment_templates,
+    )
+
+    step_tables: dict[str, SerializedSymbolTable] = {}
+    for step_template in getattr(job_template, "steps", None) or []:
+        # Reuse the model's own per-step hook — the one instantiate_model calls —
+        # so the returned table is the step scope the job was instantiated with
+        # rather than a reimplementation of it. It depends only on the step's
+        # name, its `let` bindings and the job-scope table, so re-invoking it
+        # here is deterministic.
+        extends_symtab = step_template._job_creation_metadata.extends_symtab
+        step_symtab = extends_symtab(step_template, symtab) if extends_symtab else symtab
+        step_tables[str(step_template.name)] = _serialize_symbol_table(step_symtab)
+
+    return JobWithSymbolTables(
+        job=job,
+        job_symbol_table=_serialize_symbol_table(symtab),
+        step_symbol_tables=step_tables,
+    )
+
+
+def _serialize_symbol_table(symtab: SymbolTable) -> "SerializedSymbolTable":
+    """Convert a job-model symbol table into the EXPR transport form.
+
+    Goes through ``symtab_to_expr_values`` so the typed coercion is the engine's
+    own, then through ``SerializedSymbolTable.from_symtab`` — the same serializer
+    openjd-rs uses — so the bytes match what the Rust implementation produces for
+    an equivalent table.
+    """
+    # Imported here rather than at module scope: both of these load the Rust
+    # bindings, and importing openjd.model must not.
+    from openjd.expr import SerializedSymbolTable
+
+    from ._format_strings._expr_support import symtab_to_expr_values
+
+    engine_symtab = symtab_to_expr_values(symtab, types=symtab.expr_types)
+    return SerializedSymbolTable.from_symtab(engine_symtab)
