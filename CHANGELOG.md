@@ -1,3 +1,12 @@
+## 0.11.4 (2026-08-19)
+
+
+### Features
+* return resolved symbol tables from create_job ([`4d3a732`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/4d3a7320ec08b057d690f14d0d877e132026bae4))
+* add SerializedSymbolTable JSON accessors ([`69d996d`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/69d996da52a6330c37b8c227b46c7677b4105893))
+
+
+
 ## 0.11.3 (2026-08-14)
 
 
