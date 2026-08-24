@@ -1,3 +1,11 @@
+## 0.11.5 (2026-08-24)
+
+
+
+### Bug Fixes
+* bump openjd-rs crate deps to 0.4.0/0.5.2/0.5.2 ([`7222ce3`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/7222ce3d71cd0b84198c6537be419e9329e2d1dd))
+
+
 ## 0.11.4 (2026-08-19)
 
 
