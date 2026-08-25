@@ -24,6 +24,16 @@ class TestEnvironmentTemplate:
             pytest.param(
                 {
                     "specificationVersion": "environment-2023-09",
+                    "environment": {
+                        "name": "Foo",
+                        "script": {"actions": {"onExit": {"command": "foo"}}},
+                    },
+                },
+                id="script with onExit only",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "environment-2023-09",
                     "parameterDefinitions": [{"name": "P", "type": "INT"}],
                     "environment": ENVIRONMENT,
                 },

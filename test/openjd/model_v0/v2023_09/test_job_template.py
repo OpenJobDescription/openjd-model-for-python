@@ -79,6 +79,20 @@ class TestJobTemplate:
                     "name": "Foo",
                     "steps": [STEP_TEMPLATE],
                     "jobEnvironments": [
+                        {
+                            "name": "Foo",
+                            "script": {"actions": {"onExit": {"command": "foo"}}},
+                        }
+                    ],
+                },
+                id="with environment defining onExit only",
+            ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Foo",
+                    "steps": [STEP_TEMPLATE],
+                    "jobEnvironments": [
                         {"name": f"E{i}", "script": ENV_SCRIPT} for i in range(0, 10)
                     ],
                 },
