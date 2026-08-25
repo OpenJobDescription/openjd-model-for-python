@@ -164,6 +164,7 @@ class TestEnvironmentActions:
         "data",
         (
             pytest.param({"onEnter": {"command": "foo"}}, id="has onEnter"),
+            pytest.param({"onExit": {"command": "foo"}}, id="has onExit"),
             # For making sure our pre-validator logic is correct
             pytest.param(
                 {
@@ -187,26 +188,35 @@ class TestEnvironmentActions:
         # THEN
         # no exception was raised.
 
-    def test_parse_onexit_only_with_wrap_actions_extension(self) -> None:
-        # RFC 0008: with the WRAP_ACTIONS extension declared, an environment
-        # may define any single action without a standalone onEnter.
+    @pytest.mark.parametrize(
+        "supported_extensions",
+        (
+            pytest.param([], id="no extensions"),
+            pytest.param(["EXPR", "WRAP_ACTIONS"], id="EXPR and WRAP_ACTIONS"),
+        ),
+    )
+    def test_parse_onexit_only(self, supported_extensions: list[str]) -> None:
+        # An environment may define onExit without onEnter; either ordinary
+        # action alone satisfies the one-of requirement, with or without an
+        # extension being declared.
 
         # GIVEN
-        context = ModelParsingContext(supported_extensions=["EXPR", "WRAP_ACTIONS"])
+        context = ModelParsingContext(supported_extensions=supported_extensions)
 
         # WHEN
-        _parse_model(model=EnvironmentActions, obj={"onExit": {"command": "foo"}}, context=context)
+        actions = _parse_model(
+            model=EnvironmentActions, obj={"onExit": {"command": "foo"}}, context=context
+        )
 
         # THEN
-        # no exception was raised.
+        assert actions.onEnter is None
+        assert actions.onExit is not None
+        assert actions.onExit.command == "foo"
 
     @pytest.mark.parametrize(
         "data",
         (
             pytest.param({}, id="empty object"),
-            # §3.5: base 2023-09 requires onEnter whenever a script is
-            # present (the WRAP_ACTIONS extension relaxes this).
-            pytest.param({"onExit": {"command": "foo"}}, id="onExit only"),
             pytest.param({"onEnter": {"command": "foo"}, "onUnknown": "blah"}, id="unknown field"),
         ),
     )
@@ -219,3 +229,15 @@ class TestEnvironmentActions:
 
         # THEN
         assert len(excinfo.value.errors()) > 0
+
+    def test_parse_fails_no_actions_message(self) -> None:
+        # An actions object with neither ordinary action must be rejected with
+        # the one-of message; this is the only remaining constraint on which
+        # ordinary actions an environment defines.
+
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(model=EnvironmentActions, obj={})
+
+        # THEN
+        assert "Must define one of: onEnter or onExit" in str(excinfo.value)

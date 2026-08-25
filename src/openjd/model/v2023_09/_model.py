@@ -758,15 +758,6 @@ class EnvironmentActions(OpenJDModel_v2023_09):
 
         on_enter = values.get("onEnter")
         on_exit = values.get("onExit")
-        # Base 2023-09 (§3.5) requires onEnter whenever a script is present;
-        # RFC 0008 relaxes this to "at least one action" when the
-        # WRAP_ACTIONS extension is declared. The strict base rule is only
-        # applied at template decode (context present) — job-instantiation
-        # re-validation has no parsing context, matching the other extension
-        # gates in this module.
-        if context is not None and "WRAP_ACTIONS" not in extensions:
-            if on_enter is None:
-                raise ValueError("onEnter is required.")
         if on_enter is None and on_exit is None:
             raise ValueError("Must define one of: onEnter or onExit")
         return values
