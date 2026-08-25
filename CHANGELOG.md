@@ -1,3 +1,11 @@
+## 0.11.6 (2026-08-25)
+
+
+
+### Bug Fixes
+* Allow an environment to define only onExit ([`5b9c661`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/5b9c661f78e08c066d416b36b005f6c88d5119a4))
+
+
 ## 0.11.5 (2026-08-24)
 
 
