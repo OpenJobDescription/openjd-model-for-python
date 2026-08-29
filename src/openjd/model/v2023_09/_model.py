@@ -3499,12 +3499,29 @@ class Step(OpenJDModel_v2023_09):
         ``Step`` built directly, where nothing guarantees that ``script.let``
         starts with ``self.let``; recording a count that does not match would
         make a session evaluate a genuinely session-scope binding in template
-        scope. A mismatch records 0, which is the previous behaviour.
+        scope. A mismatch records nothing, leaving the script's existing marker
+        (0 unless some other step already recorded one -- see below).
         """
         step_let = self.let or []
         script_let = self.script.let or []
         matches_prefix = bool(step_let) and script_let[: len(step_let)] == step_let
-        self.script._template_scope_let_count = len(step_let) if matches_prefix else 0
+        count = len(step_let) if matches_prefix else 0
+        # Only ever raise the marker, never lower it. A script merged by
+        # StepTemplate.resolve_syntax_sugar can be reached by more than one
+        # Step, and the same object is kept here rather than revalidated, so a
+        # sibling Step whose own `let` is empty or does not match the prefix
+        # computes 0 -- writing that over a correct marker would silently
+        # revert the owning step to the bug the marker exists to prevent. Two
+        # Steps share a script object only when they share its `let` list, so
+        # the marker the owning step computed describes that list correctly for
+        # both readers, whereas a 0 computed here describes only this Step's
+        # own `let`. `matches_prefix` above remains the guard against a
+        # genuinely mismatched prefix: a non-zero count is still only ever
+        # recorded after that verification. An unmarked script already reads 0
+        # from the PrivateAttr default, so skipping the write leaves it at 0
+        # rather than unset.
+        if count:
+            self.script._template_scope_let_count = count
         return self
 
 

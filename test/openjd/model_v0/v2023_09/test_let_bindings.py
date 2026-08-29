@@ -15,6 +15,7 @@ from openjd.model import (
     decode_job_template,
     model_to_object,
 )
+from openjd.model.v2023_09 import Step
 
 _EXTS = ["EXPR", "FEATURE_BUNDLE_1"]
 
@@ -406,3 +407,61 @@ class TestTemplateScopeLetCount:
         assert script_branch._template_scope_let_count == 2
         assert sugar_script.let == ["a = 1", "b = 2", "c = 3"]
         assert sugar_script._template_scope_let_count == script_branch._template_scope_let_count
+
+    @pytest.mark.parametrize(
+        "sibling_let",
+        (None, ["z = 9"]),
+        ids=("no-let", "non-matching-let"),
+    )
+    def test_sibling_step_does_not_clear_a_shared_scripts_count(self, sibling_let):
+        # A merged script is a single object, and a Step keeps the instance it is
+        # given rather than revalidating it, so more than one Step can reach it.
+        # A sibling whose own `let` is empty or does not match the prefix
+        # computes 0 for itself; writing that over the marker the owning step
+        # recorded would revert the owner to re-evaluating template-scope
+        # bindings in host scope -- the bug the marker exists to prevent.
+        # GIVEN
+        script = self._resolved_script(
+            {
+                "name": "S",
+                "let": ["a = 1", "b = 2"],
+                "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
+            }
+        )
+        owner = Step(name="S", script=script, let=["a = 1", "b = 2"])
+        assert owner.script is script
+        assert script._template_scope_let_count == 2
+
+        # WHEN
+        sibling = Step(name="T", script=script, let=sibling_let)
+
+        # THEN
+        assert sibling.script is script
+        assert script._template_scope_let_count == 2
+
+    def test_step_records_its_own_count_and_an_unmarked_script_is_zero(self):
+        # Negative control for the "never lower the marker" rule: it must not
+        # stop a Step from recording the count its own `let` legitimately
+        # yields, and a script no Step has ever marked must read 0.
+        # GIVEN
+        marked = self._resolved_script(
+            {
+                "name": "S",
+                "let": ["a = 1", "b = 2"],
+                "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
+            }
+        )
+        unmarked = self._resolved_script({"name": "S", "script": _onrun("hi")})
+        # The de-sugaring merge records on the merged script; strip it so this
+        # asserts the Step validator's own write, not the one already there.
+        fresh = marked.model_copy()
+        fresh._template_scope_let_count = 0
+
+        # WHEN
+        recording = Step(name="S", script=fresh, let=["a = 1", "b = 2"])
+        never_marked = Step(name="U", script=unmarked)
+
+        # THEN
+        assert recording.script._template_scope_let_count == 2
+        assert unmarked.let is None
+        assert never_marked.script._template_scope_let_count == 0
