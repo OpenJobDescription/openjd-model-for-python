@@ -304,6 +304,14 @@ class TestTemplateScopeLetCount:
         template = _decode(_job([step], extensions=extensions))
         return create_job(job_template=template, job_parameter_values={}).steps[0].script
 
+    @staticmethod
+    def _resolved_script(step):
+        """The script a consumer gets from ``resolve_syntax_sugar()`` alone — no
+        ``Step`` is constructed, so ``Step._record_template_scope_let_count``
+        never runs."""
+        template = _decode(_job([step], extensions=("EXPR", "FEATURE_BUNDLE_1")))
+        return template.steps[0].resolve_syntax_sugar().script
+
     def test_no_step_lets_is_zero(self):
         script = self._script({"name": "S", "script": _onrun("hi")})
 
@@ -371,3 +379,30 @@ class TestTemplateScopeLetCount:
         assert job.steps[0].script._template_scope_let_count == 1
         assert "_template_scope_let_count" not in json.dumps(obj)
         assert obj["steps"][0]["script"]["let"] == ["a = 1", "c = 3"]
+
+    @pytest.mark.parametrize("interpreter", ("bash", "python", "cmd", "powershell", "node"))
+    def test_syntax_sugar_records_the_count_without_a_step(self, interpreter):
+        # The worker agent parses a StepTemplate and calls resolve_syntax_sugar()
+        # directly, so no Step is built and the boundary has to be recorded at
+        # the de-sugaring merge — as the `script:` branch records it.
+        # GIVEN
+        sugar_script = self._resolved_script(
+            {
+                "name": "S",
+                "let": ["a = 1", "b = 2"],
+                interpreter: {"script": "print(1)", "let": ["c = 3"]},
+            }
+        )
+        script_branch = self._resolved_script(
+            {
+                "name": "S",
+                "let": ["a = 1", "b = 2"],
+                "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
+            }
+        )
+
+        # THEN: both merge the same list, so both must record the same boundary.
+        assert script_branch.let == ["a = 1", "b = 2", "c = 3"]
+        assert script_branch._template_scope_let_count == 2
+        assert sugar_script.let == ["a = 1", "b = 2", "c = 3"]
+        assert sugar_script._template_scope_let_count == script_branch._template_scope_let_count

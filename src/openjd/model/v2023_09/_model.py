@@ -3748,34 +3748,41 @@ class StepTemplate(OpenJDModel_v2023_09):
             args.extend(simple_action.args)
 
         # Construct directly - inputs are already validated
+        new_script = StepScript.model_construct(
+            actions=StepActions.model_construct(
+                onRun=Action.model_construct(
+                    command=CommandString(command),
+                    args=args,
+                    timeout=simple_action.timeout,
+                    cancelation=simple_action.cancelation,
+                )
+            ),
+            # Carry step-level `let` (RFC 0007) and the SimpleAction's own
+            # `let` onto the de-sugared script (step bindings first) so they
+            # are preserved into the Job and resolved at runtime.
+            let=([*(self.let or []), *(simple_action.let or [])] or None),
+            embeddedFiles=[
+                EmbeddedFileText.model_construct(
+                    name=embedded_name,
+                    type=EmbeddedFileTypes.TEXT,
+                    filename=f"{embedded_name}{ext}",
+                    runnable=True,
+                    data=simple_action.script,
+                )
+            ],
+        )
+        if self.let:
+            # Same as the `script:` branch above: record the template-scope
+            # prefix length here, at the merge, so a consumer that resolves
+            # syntax sugar on a StepTemplate and runs the resulting script
+            # directly -- the worker agent does exactly this -- still gets the
+            # boundary. `model_construct` bypasses validators, so the private
+            # attribute is set by assignment, as it is there.
+            new_script._template_scope_let_count = len(self.let)
         return StepTemplate.model_construct(
             name=self.name,
             description=self.description,
-            script=StepScript.model_construct(
-                actions=StepActions.model_construct(
-                    onRun=Action.model_construct(
-                        command=CommandString(command),
-                        args=args,
-                        timeout=simple_action.timeout,
-                        cancelation=simple_action.cancelation,
-                    )
-                ),
-                # Carry step-level `let` (RFC 0007) and the SimpleAction's own
-                # `let` onto the de-sugared script (step bindings first) so they
-                # are preserved into the Job and resolved at runtime. The
-                # step-level prefix length is recorded by
-                # Step._record_template_scope_let_count.
-                let=([*(self.let or []), *(simple_action.let or [])] or None),
-                embeddedFiles=[
-                    EmbeddedFileText.model_construct(
-                        name=embedded_name,
-                        type=EmbeddedFileTypes.TEXT,
-                        filename=f"{embedded_name}{ext}",
-                        runnable=True,
-                        data=simple_action.script,
-                    )
-                ],
-            ),
+            script=new_script,
             stepEnvironments=self.stepEnvironments,
             parameterSpace=self.parameterSpace,
             hostRequirements=self.hostRequirements,
