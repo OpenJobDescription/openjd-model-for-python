@@ -1,3 +1,17 @@
+## Unreleased
+
+### BREAKING CHANGES
+* Step-level `let` bindings are evaluated once in template scope and are no longer merged into the step's script, so the `Job`
+  returned by `create_job` no longer carries their values. A caller that runs a job whose steps declare a template-scope `let`
+  referenced from the step's script must switch to `create_job_with_symbol_tables` and forward the step's `step_symbol_tables`
+  entry to the session; otherwise the action fails at run time with `Undefined variable`. Callers that only inspect the `Job`
+  at creation time — `StepDependencyGraph`, `StepParameterSpaceIterator`, `hostRequirements` — are unaffected.
+
+### Bug Fixes
+* Evaluate step-level let bindings in template scope
+* Stop merging step-level let into the script
+
+
 ## 0.11.7 (2026-09-01)
 
 

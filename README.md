@@ -211,6 +211,15 @@ except (DecodeValidationError, RuntimeError) as e:
     print(str(e))
 ```
 
+If any of the job's steps declares a template-scope `let` that the step's script
+references, then this `Job` is not sufficient to run the step: step-level `let`
+bindings are evaluated once during instantiation and kept in the step's symbol
+table rather than lowered onto the script, so a session created from the `Job`
+alone has no binding for the name and the action fails with `Undefined variable`.
+Use `create_job_with_symbol_tables` instead and forward the step's entry from the
+returned `step_symbol_tables` to the session that runs it. The two examples below
+only inspect the `Job` at creation time, so plain `create_job` is correct there.
+
 ### Working with Step dependencies
 
 ```python
