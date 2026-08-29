@@ -172,10 +172,21 @@ def instantiate_model(  # noqa: C901
 
     # Extend the symbol table for this model's subtree if defined (e.g. a
     # step's Step.Name and step-level EXPR `let` bindings). This runs before
-    # the transform: StepTemplate's syntax-sugar transform folds step-level
-    # `let` bindings into the script (their runtime channel), so the original
-    # model is the one that still carries them for create_job-time fields
-    # (parameter space, host requirements).
+    # the transform, so the hook always sees the model as authored, and that
+    # ordering is load-bearing for two reasons.
+    #
+    # A transform may rebuild the model rather than adjust it -- StepTemplate's
+    # syntax-sugar transform returns a `model_construct`ed copy -- so the fields
+    # the hook reads (a step's `name` and its `let`) are only guaranteed to be
+    # the authored ones on this side of it. The current transform carries `let`
+    # through deliberately; running the hook first is what keeps that the
+    # transform's choice rather than a requirement on every future one.
+    #
+    # And create_job_with_symbol_tables invokes the same hook on the same
+    # untransformed StepTemplate to build the step symbol table it publishes for
+    # the runtime to seed a session with. That table is only the scope the
+    # step's own fields (script, parameter space, host requirements) were
+    # instantiated against if both callers hand the hook the same model.
     if model._job_creation_metadata.extends_symtab is not None:
         symtab = model._job_creation_metadata.extends_symtab(model, symtab)
 
