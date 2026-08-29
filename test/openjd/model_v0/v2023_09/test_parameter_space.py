@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+from decimal import localcontext
 from typing import Any
 
 import pytest
@@ -473,13 +474,34 @@ class TestRangeListElementNormalization:
             pytest.param("1.5", "1.5", id="no normalization needed"),
             pytest.param("02.50", "2.5", id="leading and trailing zeros"),
             pytest.param("3.500", "3.5", id="trailing zeros"),
-            pytest.param("007", "7", id="leading zeros on a whole number"),
             pytest.param("-02.50", "-2.5", id="negative"),
-            pytest.param("0.0", "0", id="zero"),
-            # normalize() rewrites Decimal('100') as Decimal('1E+2'). Exponent
-            # notation must never reach a task command line.
-            pytest.param("100", "100", id="whole number that normalize() shifts"),
-            pytest.param("1E+2", "100", id="exponent notation in the source"),
+            # An integral float keeps one fractional digit. openjd-rs renders
+            # the <floatstring> '1.0' as `1.0` and '007' as `7.0`, so dropping
+            # the fraction would make the same number render two ways depending
+            # on whether it was written as a <float> or a <floatstring>.
+            pytest.param("1.0", "1.0", id="integral float"),
+            pytest.param("0.0", "0.0", id="zero"),
+            pytest.param("-0.0", "0.0", id="negative zero has no sign"),
+            pytest.param("007", "7.0", id="leading zeros on a whole number"),
+            pytest.param("100", "100.0", id="whole number"),
+            # Exponent notation must never reach a task command line, at any
+            # magnitude and in either direction.
+            pytest.param("1E+2", "100.0", id="exponent notation in the source"),
+            pytest.param(
+                "0.0000001",
+                "0.0000001",
+                id="below 1e-6, where Decimal.__str__ would give 1E-7",
+            ),
+            pytest.param(
+                "1E+30",
+                "1" + "0" * 30 + ".0",
+                id="more digits than the default decimal precision",
+            ),
+            pytest.param(
+                "1.2345678901234567890123456789012345678901",
+                "1.2345678901234567890123456789012345678901",
+                id="more significant digits than the default decimal precision",
+            ),
         ),
     )
     def test_floatstring_elements_carry_their_value(self, element: str, expected: str) -> None:
@@ -490,6 +512,23 @@ class TestRangeListElementNormalization:
 
         # THEN the element renders as the number it denotes
         assert [str(v) for v in model.range] == [expected]
+
+    def test_floatstring_normalization_ignores_the_decimal_context(self) -> None:
+        # GIVEN an embedding application that has narrowed the process-wide
+        # decimal context, and a <floatstring> with more significant digits
+        # than that precision allows
+        element = "1.2345678901234567890123456789012345678901"
+
+        # WHEN the instantiation target parses it under that context
+        with localcontext() as ctx:
+            ctx.prec = 5
+            model = _parse_model(
+                model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
+            )
+
+        # THEN the value is unrounded: what this library renders is a property of
+        # the template, not of the host application's decimal context
+        assert [str(v) for v in model.range] == [element]
 
     @pytest.mark.parametrize(
         "param_type,range_list",

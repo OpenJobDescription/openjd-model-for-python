@@ -1243,22 +1243,40 @@ class TaskChunksDefinition(OpenJDModel_v2023_09):
 
 
 def _normalized_range_element(elem: str, to_int: bool) -> Any:
-    """The number an ``<intstring>``/``<floatstring>`` range element denotes, or
-    the element unchanged when it does not denote one."""
+    """The number an ``<intstring>``/``<floatstring>`` range element denotes -- an
+    ``int`` for ``<intstring>``, and for ``<floatstring>`` the plain-notation text
+    of the value, since ``str(Decimal)`` cannot render every magnitude without an
+    exponent. Returns the element unchanged when it does not denote a number."""
     try:
         if to_int:
             return int(elem)
-        value = Decimal(elem).normalize()
+        value = Decimal(elem)
         if not value.is_finite():
             # Decimal accepts 'nan'/'inf', which are not <floatstring>s; leave
             # them as text rather than changing how they render.
             return elem
-        exponent = value.as_tuple().exponent
-        if isinstance(exponent, int) and exponent > 0:
-            # normalize() rewrites Decimal('100') as Decimal('1E+2'); undo the
-            # shift so a range element never renders in exponent notation.
-            value = value.quantize(Decimal(1))
-        return value
+        # format(value, 'f') is exact and plain at every magnitude: with no
+        # precision in the format spec it neither rounds to getcontext().prec
+        # nor switches to exponent notation, so an embedding app that sets a
+        # different context cannot change what this library renders. Neither
+        # holds of the obvious alternatives -- normalize() rounds to the
+        # ambient precision, str() switches to exponent notation below 1e-6,
+        # and quantize() raises InvalidOperation once the result needs more
+        # digits than the ambient precision allows.
+        text = format(value, "f")
+        negative = text.startswith("-")
+        integer, _, fraction = text.lstrip("-").partition(".")
+        # A <floatstring> denotes a number, so redundant zeros in its source
+        # text are not part of the value: '02.50' is 2.5. One fractional digit
+        # is always kept, matching openjd-rs, which renders the float 1.0 as
+        # `1.0` and never as `1`.
+        integer = integer.lstrip("0") or "0"
+        fraction = fraction.rstrip("0") or "0"
+        if negative and integer == "0" and fraction == "0":
+            # The number denoted by '-0.0' is zero, which has no sign; openjd-rs
+            # renders it `0.0`.
+            negative = False
+        return f"{'-' if negative else ''}{integer}.{fraction}"
     except (ValueError, ArithmeticError):
         # Not a number at all — e.g. a format string that resolved to
         # non-numeric text. A literal range is already checked against its
