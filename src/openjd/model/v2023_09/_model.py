@@ -1242,6 +1242,31 @@ class TaskChunksDefinition(OpenJDModel_v2023_09):
         return validate_int_fmtstring_field(value, ge=0, context=context)
 
 
+def _normalized_range_element(elem: str, to_int: bool) -> Any:
+    """The number an ``<intstring>``/``<floatstring>`` range element denotes, or
+    the element unchanged when it does not denote one."""
+    try:
+        if to_int:
+            return int(elem)
+        value = Decimal(elem).normalize()
+        if not value.is_finite():
+            # Decimal accepts 'nan'/'inf', which are not <floatstring>s; leave
+            # them as text rather than changing how they render.
+            return elem
+        exponent = value.as_tuple().exponent
+        if isinstance(exponent, int) and exponent > 0:
+            # normalize() rewrites Decimal('100') as Decimal('1E+2'); undo the
+            # shift so a range element never renders in exponent notation.
+            value = value.quantize(Decimal(1))
+        return value
+    except (ValueError, ArithmeticError):
+        # Not a number at all — e.g. a format string that resolved to
+        # non-numeric text. A literal range is already checked against its
+        # element type at template parse time, so leave such a value to the
+        # existing behaviour rather than adding a rejection path here.
+        return elem
+
+
 # Target model for task parameters when instantiating a job.
 class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
     # element type of items in the range
@@ -1250,6 +1275,38 @@ class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
     range: TaskRangeList
     # has a value when type is CHUNK[INT], which is only possible from the TASK_CHUNKING extension
     chunks: Optional[TaskChunksDefinition] = None
+
+    @field_validator("range", mode="before")
+    @classmethod
+    def _normalize_numeric_range_elements(cls, value: Any, info: ValidationInfo) -> Any:
+        # §3.4.1.1/§3.4.1.2: an <IntRangeList> element is `<integer> |
+        # <intstring>` and a <FloatRangeList> element is `<float> |
+        # <floatstring>`, where an <intstring>/<floatstring> is "a string whose
+        # value is the string representation of" a number (§2.3, §2.4). Such an
+        # element therefore denotes that number, not its source text, so '02'
+        # is the task value 2 and '02.50' is 2.5. Python was keeping the source
+        # text, which reaches a task command line as `--frame 02`.
+        #
+        # Applied on the instantiation target so every inbound range path is
+        # covered: a literal list, a range-expression expansion, and an RFC 0006
+        # typed whole-field resolution all funnel through this model.
+        #
+        # Numeric elements are left exactly as parsed. A FLOAT range of [1.0]
+        # renders 1.0, which openjd-rs also does and the conformance suite pins
+        # (base/jobs/3.4--float-parameter). STRING and PATH ranges are text by
+        # definition and are never touched.
+        param_type = info.data.get("type")
+        if not isinstance(value, list) or param_type not in (
+            TaskParameterType.INT,
+            TaskParameterType.CHUNK_INT,
+            TaskParameterType.FLOAT,
+        ):
+            return value
+        to_int = param_type != TaskParameterType.FLOAT
+        return [
+            _normalized_range_element(elem, to_int) if isinstance(elem, str) else elem
+            for elem in value
+        ]
 
     @field_validator("range")
     @classmethod

@@ -338,7 +338,14 @@ class StepParameterSpaceIterator(Iterable[TaskParameterSet], Sized):
                     name=name,
                     type=ParameterValueType(parameter.type),
                     range=parameter.range,
-                    range_set=set(parameter.range),
+                    # Non-CHUNK containment compares against ParameterValue.value,
+                    # which is the rendered form of a range element (see
+                    # RangeListIdentifierNode.__getitem__), so the set has to hold
+                    # rendered elements too. A set of the raw elements only matched
+                    # when a range happened to be written as strings — an INT range
+                    # written as `[1, 2, 3]` reported every one of its own values as
+                    # not contained.
+                    range_set={str(v) for v in parameter.range},
                 )
             else:
                 return RangeExpressionIdentifierNode(
