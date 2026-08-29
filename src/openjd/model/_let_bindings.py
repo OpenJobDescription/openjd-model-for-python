@@ -43,7 +43,9 @@ def _parse_rhs(rhs: str) -> Any:
     return ExprNode(rhs)
 
 
-def evaluate_let_bindings(*, symtab: SymbolTable, let_bindings: Iterable[str]) -> None:
+def evaluate_let_bindings(
+    *, symtab: SymbolTable, let_bindings: Iterable[str], path_format: Any = None
+) -> None:
     """Evaluate EXPR ``let`` bindings in order, seeding each into ``symtab``.
 
     ``let_bindings`` is an ordered list of ``"name = expression"`` strings.
@@ -52,6 +54,13 @@ def evaluate_let_bindings(*, symtab: SymbolTable, let_bindings: Iterable[str]) -
     stored under the bound name — a let-bound path stays a path for property
     access, and float rendering fidelity is preserved — matching the Rust
     runtime's natively typed symbol table.
+
+    ``path_format`` is the EXPR ``PathFormat`` that PATH-typed values render
+    with. Callers evaluating in *template* scope pass ``PathFormat.POSIX``,
+    matching openjd-rs, whose job instantiation hardcodes POSIX so a create-time
+    result does not depend on the host that created the job. ``None`` (the
+    default) leaves the engine's default — the host's format — which is what
+    session-scope callers want.
 
     Malformed bindings (missing ``=``, empty name or expression) are skipped:
     the ``let`` field validator rejects them at decode time, so evaluation is
@@ -76,6 +85,6 @@ def evaluate_let_bindings(*, symtab: SymbolTable, let_bindings: Iterable[str]) -
             # evaluate_value keeps the engine's typed value (paths stay
             # paths, float rendering fidelity is preserved) when the binding
             # is later referenced.
-            symtab[name] = _parse_rhs(rhs).evaluate_value(symtab=symtab)
+            symtab[name] = _parse_rhs(rhs).evaluate_value(symtab=symtab, path_format=path_format)
         except ValueError as exc:
             raise ValueError(f"let binding {name!r}: {exc}")

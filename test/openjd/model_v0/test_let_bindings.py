@@ -151,3 +151,62 @@ class TestEvaluateLetBindings:
         info = _parse_rhs.cache_info()
         assert info.hits == 0
         assert info.misses == 2
+
+
+class TestPathFormat:
+    """``path_format`` selects the rendering PATH-typed values coerce to.
+
+    Template-scope callers (job instantiation) pass ``PathFormat.POSIX`` so a
+    binding's create-time value does not depend on the host that created the
+    job; session-scope callers leave it unset and get the host's format.
+    """
+
+    # A binding whose result differs per format: `join` coerces each path to a
+    # string, so the separator the engine renders is visible in the result.
+    BINDING = 'x = [path("/a"), path("/b")].join(",")'
+
+    def test_posix_renders_forward_slashes(self) -> None:
+        # GIVEN
+        from openjd.expr import PathFormat
+
+        symtab = SymbolTable()
+
+        # WHEN
+        evaluate_let_bindings(
+            symtab=symtab, let_bindings=[self.BINDING], path_format=PathFormat.POSIX
+        )
+
+        # THEN
+        assert str(symtab["x"]) == "/a,/b"
+
+    def test_windows_renders_backslashes(self) -> None:
+        # The counterpart to the POSIX case: together they prove the parameter
+        # reaches the engine on any host, rather than the host default
+        # happening to match one of them.
+        # GIVEN
+        from openjd.expr import PathFormat
+
+        symtab = SymbolTable()
+
+        # WHEN
+        evaluate_let_bindings(
+            symtab=symtab, let_bindings=[self.BINDING], path_format=PathFormat.WINDOWS
+        )
+
+        # THEN
+        assert str(symtab["x"]) == "\\a,\\b"
+
+    def test_default_is_the_engine_default(self) -> None:
+        # Omitting path_format preserves the pre-existing behaviour: the engine
+        # renders in the host's format.
+        # GIVEN
+        import os
+
+        symtab = SymbolTable()
+
+        # WHEN
+        evaluate_let_bindings(symtab=symtab, let_bindings=[self.BINDING])
+
+        # THEN
+        expected = "\\a,\\b" if os.name == "nt" else "/a,/b"
+        assert str(symtab["x"]) == expected

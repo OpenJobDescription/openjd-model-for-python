@@ -16,6 +16,7 @@ from pydantic import (
     model_validator,
     ConfigDict,
     Discriminator,
+    PrivateAttr,
     StringConstraints,
     Field,
     PositiveInt,
@@ -1106,6 +1107,18 @@ class StepScript(OpenJDModel_v2023_09):
     actions: StepActions
     embeddedFiles: Optional[EmbeddedFiles] = None  # noqa: N815
     let: Optional[list[str]] = None
+
+    # RFC 0007 (EXPR): on an instantiated Step's script, how many leading `let`
+    # entries came from the step-level bindings that StepTemplate.resolve_syntax_sugar
+    # merged in ahead of the script's own. Those were already evaluated in
+    # template scope at job creation, so a session given the step's resolved
+    # symbol table must skip them rather than re-evaluate them in host scope —
+    # re-evaluating re-renders paths in the host's format, which changes results
+    # (RFC 0007 §3.6; openjd-rs evaluates template scope with PathFormat::POSIX).
+    # Private, so the model's serialized form does not change. Consumers read it
+    # with a getattr(script, "_template_scope_let_count", 0) guard, so an older
+    # model degrades to re-evaluating everything.
+    _template_scope_let_count: int = PrivateAttr(default=0)
 
     _template_variable_scope = ResolutionScope.TASK
     _template_variable_definitions = DefinesTemplateVariables(
@@ -3472,6 +3485,21 @@ class Step(OpenJDModel_v2023_09):
     # for the task-run path.
     let: Optional[list[str]] = None
 
+    @model_validator(mode="after")
+    def _record_template_scope_let_count(self) -> Self:
+        """Record on the script how many of its leading `let` entries are the
+        step-level ones (RFC 0007).
+
+        ``StepTemplate.resolve_syntax_sugar`` builds the script's `let` as
+        ``step-level bindings + the script's own``, in that order, and the
+        step-level ones are preserved verbatim here as ``self.let`` — so their
+        count is the length of the step-level list. A session that was handed
+        the step's resolved symbol table skips that many entries instead of
+        re-evaluating create-time results in host scope.
+        """
+        self.script._template_scope_let_count = len(self.let) if self.let else 0
+        return self
+
 
 class StepTemplate(OpenJDModel_v2023_09):
     """Definition of a single Step within a Job Template.
@@ -3527,6 +3555,15 @@ class StepTemplate(OpenJDModel_v2023_09):
         them. Script-level ``let`` bindings are *not* evaluated here — they
         resolve at session time.
 
+        Template scope renders PATH-typed values with ``PathFormat.POSIX``,
+        matching openjd-rs, whose job instantiation hardcodes POSIX
+        (``create_job/instantiate.rs``) and uses the host's format only inside
+        sessions. Without it a binding's create-time value would depend on the
+        host that created the job: on Windows ``startswith(path("/foo/bar"),
+        "/foo")`` is false against a backslash rendering but true against a
+        POSIX one, so the job would behave differently depending on where it
+        was created.
+
         ``Step.Name`` and ``let`` references only pass template validation
         with the EXPR extension enabled, so seeding them unconditionally does
         not change the behavior of non-EXPR templates.
@@ -3534,9 +3571,16 @@ class StepTemplate(OpenJDModel_v2023_09):
         step_symtab = SymbolTable(source=symtab)
         step_symtab["Step.Name"] = str(self.name)
         if self.let:
+            # Both imports are deferred: `openjd.expr` is the native extension,
+            # and importing openjd.model must not load it. Only an EXPR template
+            # reaches this branch, so the load is conditional on EXPR use.
+            from openjd.expr import PathFormat
+
             from .._let_bindings import evaluate_let_bindings
 
-            evaluate_let_bindings(symtab=step_symtab, let_bindings=self.let)
+            evaluate_let_bindings(
+                symtab=step_symtab, let_bindings=self.let, path_format=PathFormat.POSIX
+            )
         return step_symtab
 
     _template_variable_sources = {
@@ -3660,7 +3704,9 @@ class StepTemplate(OpenJDModel_v2023_09):
             # validated reference/shadowing rules across both scopes at decode.
             if self.let:
                 # The step's own `let` is preserved too (Step.let): the
-                # runtime seeds it when entering the step's environments.
+                # runtime seeds it when entering the step's environments, and
+                # Step._record_template_scope_let_count uses its length to mark
+                # where the template-scope prefix of the merged list ends.
                 merged_let = [*self.let, *(self.script.let or [])]
                 new_script = self.script.model_copy(update={"let": merged_let})
                 return self.model_copy(update={"script": new_script})
@@ -3702,7 +3748,9 @@ class StepTemplate(OpenJDModel_v2023_09):
                 ),
                 # Carry step-level `let` (RFC 0007) and the SimpleAction's own
                 # `let` onto the de-sugared script (step bindings first) so they
-                # are preserved into the Job and resolved at runtime.
+                # are preserved into the Job and resolved at runtime. The
+                # step-level prefix length is recorded by
+                # Step._record_template_scope_let_count.
                 let=([*(self.let or []), *(simple_action.let or [])] or None),
                 embeddedFiles=[
                     EmbeddedFileText.model_construct(
