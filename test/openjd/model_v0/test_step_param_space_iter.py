@@ -567,3 +567,102 @@ class TestStepParameterSpaceIterator_2023_09:  # noqa: N801
             "Param3": ParameterValue(type=ParameterValueType.STRING, value="11"),
             "Param4": ParameterValue(type=ParameterValueType.INT, value="20"),
         } not in it
+
+
+class TestRangeListElementValues:
+    """The values a task command line actually receives, end to end from a
+    template through `create_job`.
+
+    §3.4.1.1/§3.4.1.2 allow a range element to be written in the `<intstring>` /
+    `<floatstring>` form, which §2.3/§2.4 define as "a string whose value is the
+    string representation of" a number. Such an element denotes the number, so
+    `['1', '02', '003']` on an INT parameter is the task values 1, 2 and 3 — not
+    the source text, which would reach a renderer as `--frame 02`.
+    """
+
+    @staticmethod
+    def _task_values(param_type: str, range_list: list) -> list[str]:
+        job_template = parse_model(
+            model=JobTemplate_2023_09,
+            obj={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "Job",
+                "steps": [
+                    {
+                        "name": "step",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {"name": "P", "type": param_type, "range": range_list}
+                            ]
+                        },
+                        "script": {"actions": {"onRun": {"command": "do thing"}}},
+                    }
+                ],
+            },
+        )
+        job = create_job(job_template=job_template, job_parameter_values=dict())
+        return [
+            params["P"].value
+            for params in StepParameterSpaceIterator(space=job.steps[0].parameterSpace)
+        ]
+
+    def test_int_range_intstring_elements(self) -> None:
+        # WHEN an INT range is written with <intstring> elements
+        # THEN each task gets the integer the element denotes
+        assert self._task_values("INT", ["1", "02", "003"]) == ["1", "2", "3"]
+
+    def test_float_range_floatstring_elements(self) -> None:
+        # WHEN a FLOAT range is written with <floatstring> elements
+        # THEN each task gets the number the element denotes
+        assert self._task_values("FLOAT", ["1.5", "02.50"]) == ["1.5", "2.5"]
+
+    def test_float_range_numeric_literals_keep_their_scale(self) -> None:
+        # A <float> literal is not a string representation, so it keeps the scale
+        # it was written with. openjd-rs renders an integral float as `1.0` too,
+        # and the conformance suite pins this
+        # (2023-09/base/jobs/3.4--float-parameter).
+        assert self._task_values("FLOAT", [0.5, 1.0, 1.5]) == ["0.5", "1.0", "1.5"]
+
+    @pytest.mark.parametrize(
+        "param_type,range_list",
+        (
+            pytest.param("STRING", ["02", "1.50"], id="STRING"),
+            pytest.param("PATH", ["/frames/02", "/frames/003"], id="PATH"),
+        ),
+    )
+    def test_string_and_path_ranges_are_text(self, param_type: str, range_list: list) -> None:
+        # §3.4.1.3/§3.4.1.4 give STRING and PATH no numeric element form, so
+        # nothing about their elements is normalizable.
+        assert self._task_values(param_type, range_list) == range_list
+
+    @pytest.mark.parametrize(
+        "range_list",
+        (
+            pytest.param([10, 11, 12], id="written as integers"),
+            pytest.param(["10", "11", "12"], id="written as intstrings"),
+        ),
+    )
+    def test_containment_matches_the_rendered_values(self, range_list: list) -> None:
+        # Containment compares a ParameterValue against the parameter space, and
+        # ParameterValue.value is the *rendered* form of a range element. The
+        # containment set was built from the raw elements, so an INT range
+        # written as `[10, 11, 12]` reported its own values as not contained.
+
+        # GIVEN a parameter space over an int range
+        space = StepParameterSpace_2023_09(
+            taskParameterDefinitions={
+                "Param1": RangeListTaskParameterDefinition_2023_09(
+                    type=ParameterValueType.INT, range=range_list
+                ),
+            },
+        )
+
+        # WHEN it is iterated
+        it = StepParameterSpaceIterator(space=space)
+
+        # THEN every value it yields is contained in it, however the range was written
+        values = list(it)
+        assert [v["Param1"].value for v in values] == ["10", "11", "12"]
+        for value in values:
+            assert value in it
+        assert {"Param1": ParameterValue(type=ParameterValueType.INT, value="13")} not in it

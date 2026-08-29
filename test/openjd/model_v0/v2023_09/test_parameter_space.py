@@ -439,6 +439,95 @@ class TestTaskParameterRangeLength:
         assert len(excinfo.value.errors()) > 0
 
 
+class TestRangeListElementNormalization:
+    """§3.4.1.1/§3.4.1.2: an `<IntRangeList>` element is `<integer> | <intstring>`
+    and a `<FloatRangeList>` element is `<float> | <floatstring>`. An
+    `<intstring>`/`<floatstring>` is "a string whose value is the string
+    representation of" a number (§2.3, §2.4), so it denotes that number and not
+    its source text — a range of `['1', '02', '003']` is the task values 1, 2 and
+    3. These values reach a task command line, so keeping the text renders
+    `--frame 02`.
+    """
+
+    @pytest.mark.parametrize(
+        "param_type",
+        (pytest.param("INT", id="INT"), pytest.param("CHUNK[INT]", id="CHUNK[INT]")),
+    )
+    def test_intstring_elements_carry_their_value(self, param_type: str) -> None:
+        # GIVEN an int range mixing the <integer> and <intstring> forms
+        obj: dict[str, Any] = {"type": param_type, "range": [1, "02", "003", 4]}
+        if param_type == "CHUNK[INT]":
+            obj["chunks"] = {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}
+
+        # WHEN the instantiation target parses it
+        model = _parse_model(model=RangeListTaskParameterDefinition, obj=obj)
+
+        # THEN every element is the integer it denotes, and renders without the
+        # leading zeros of its source text
+        assert model.range == [1, 2, 3, 4]
+        assert [str(v) for v in model.range] == ["1", "2", "3", "4"]
+
+    @pytest.mark.parametrize(
+        "element,expected",
+        (
+            pytest.param("1.5", "1.5", id="no normalization needed"),
+            pytest.param("02.50", "2.5", id="leading and trailing zeros"),
+            pytest.param("3.500", "3.5", id="trailing zeros"),
+            pytest.param("007", "7", id="leading zeros on a whole number"),
+            pytest.param("-02.50", "-2.5", id="negative"),
+            pytest.param("0.0", "0", id="zero"),
+            # normalize() rewrites Decimal('100') as Decimal('1E+2'). Exponent
+            # notation must never reach a task command line.
+            pytest.param("100", "100", id="whole number that normalize() shifts"),
+            pytest.param("1E+2", "100", id="exponent notation in the source"),
+        ),
+    )
+    def test_floatstring_elements_carry_their_value(self, element: str, expected: str) -> None:
+        # WHEN the instantiation target parses a float range holding a <floatstring>
+        model = _parse_model(
+            model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
+        )
+
+        # THEN the element renders as the number it denotes
+        assert [str(v) for v in model.range] == [expected]
+
+    @pytest.mark.parametrize(
+        "param_type,range_list",
+        (
+            # A <float> literal keeps the scale it was written with. openjd-rs
+            # renders an integral float as `1.0` too, and the conformance suite
+            # pins it (2023-09/base/jobs/3.4--float-parameter).
+            pytest.param("FLOAT", [0.5, 1.0, 1.5], id="FLOAT numeric literals"),
+            pytest.param("INT", [1, 2, 3], id="INT numeric literals"),
+            # STRING and PATH ranges are text by definition — §3.4.1.3/§3.4.1.4
+            # give no numeric form, so nothing about them is normalizable.
+            pytest.param("STRING", ["02", "003", "1.50"], id="STRING"),
+            pytest.param("PATH", ["/frames/02", "/frames/003"], id="PATH"),
+        ),
+    )
+    def test_elements_that_must_not_change(self, param_type: str, range_list: list) -> None:
+        # WHEN the instantiation target parses a range that normalization must not touch
+        model = _parse_model(
+            model=RangeListTaskParameterDefinition,
+            obj={"type": param_type, "range": range_list},
+        )
+
+        # THEN every element renders exactly as it was written
+        assert [str(v) for v in model.range] == [str(v) for v in range_list]
+
+    def test_unparseable_element_is_left_alone(self) -> None:
+        # GIVEN a range element that does not denote a number — reachable when a
+        # format string resolves to non-numeric text, since the template-layer
+        # element check only sees literals.
+        # WHEN the instantiation target parses it
+        model = _parse_model(
+            model=RangeListTaskParameterDefinition, obj={"type": "INT", "range": ["notanumber"]}
+        )
+
+        # THEN it is carried through unchanged rather than rejected here
+        assert model.range == ["notanumber"]
+
+
 class TestStepParameterSpaceDefinition:
     @pytest.mark.parametrize(
         "data",
