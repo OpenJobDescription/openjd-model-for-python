@@ -16,7 +16,6 @@ from pydantic import (
     model_validator,
     ConfigDict,
     Discriminator,
-    PrivateAttr,
     StringConstraints,
     Field,
     PositiveInt,
@@ -1107,18 +1106,6 @@ class StepScript(OpenJDModel_v2023_09):
     actions: StepActions
     embeddedFiles: Optional[EmbeddedFiles] = None  # noqa: N815
     let: Optional[list[str]] = None
-
-    # RFC 0007 (EXPR): on an instantiated Step's script, how many leading `let`
-    # entries came from the step-level bindings that StepTemplate.resolve_syntax_sugar
-    # merged in ahead of the script's own. Those were already evaluated in
-    # template scope at job creation, so a session must reproduce them in that
-    # scope rather than re-evaluate them in the host's — re-evaluating in host
-    # format re-renders paths, which changes results
-    # (RFC 0007 §3.6; openjd-rs evaluates template scope with PathFormat::POSIX).
-    # Private, so the model's serialized form does not change. Consumers read it
-    # with a getattr(script, "_template_scope_let_count", 0) guard, so an older
-    # model degrades to re-evaluating everything.
-    _template_scope_let_count: int = PrivateAttr(default=0)
 
     _template_variable_scope = ResolutionScope.TASK
     _template_variable_definitions = DefinesTemplateVariables(
@@ -3481,48 +3468,10 @@ class Step(OpenJDModel_v2023_09):
     # RFC 0007 (EXPR): the step-level `let` bindings, preserved from the
     # StepTemplate so the runtime can seed them when entering the step's
     # environments — a step environment's variables and actions may reference
-    # them. The step's own script carries a merged copy (step bindings first)
-    # for the task-run path.
+    # them. Their *values* are already resolved at job creation and travel in
+    # the step's symbol table (see create_job_with_symbol_tables), so they are
+    # not merged into the script's own `let` for the runtime to re-evaluate.
     let: Optional[list[str]] = None
-
-    @model_validator(mode="after")
-    def _record_template_scope_let_count(self) -> Self:
-        """Record on the script how many of its leading `let` entries are the
-        step-level ones (RFC 0007).
-
-        ``StepTemplate.resolve_syntax_sugar`` builds the script's `let` as
-        ``step-level bindings + the script's own``, in that order, and the
-        step-level ones are preserved verbatim here as ``self.let`` — so their
-        count is the length of the step-level list.
-
-        The prefix is *verified*, not assumed. This validator also runs for a
-        ``Step`` built directly, where nothing guarantees that ``script.let``
-        starts with ``self.let``; recording a count that does not match would
-        make a session evaluate a genuinely session-scope binding in template
-        scope. A mismatch records nothing, leaving the script's existing marker
-        (0 unless some other step already recorded one -- see below).
-        """
-        step_let = self.let or []
-        script_let = self.script.let or []
-        matches_prefix = bool(step_let) and script_let[: len(step_let)] == step_let
-        count = len(step_let) if matches_prefix else 0
-        # Only ever raise the marker, never lower it. A script merged by
-        # StepTemplate.resolve_syntax_sugar can be reached by more than one
-        # Step, and the same object is kept here rather than revalidated, so a
-        # sibling Step whose own `let` is empty or does not match the prefix
-        # computes 0 -- writing that over a correct marker would silently
-        # revert the owning step to the bug the marker exists to prevent. Two
-        # Steps share a script object only when they share its `let` list, so
-        # the marker the owning step computed describes that list correctly for
-        # both readers, whereas a 0 computed here describes only this Step's
-        # own `let`. `matches_prefix` above remains the guard against a
-        # genuinely mismatched prefix: a non-zero count is still only ever
-        # recorded after that verification. An unmarked script already reads 0
-        # from the PrivateAttr default, so skipping the write leaves it at 0
-        # rather than unset.
-        if count:
-            self.script._template_scope_let_count = count
-        return self
 
 
 class StepTemplate(OpenJDModel_v2023_09):
@@ -3721,26 +3670,13 @@ class StepTemplate(OpenJDModel_v2023_09):
             StepTemplate: A new StepTemplate with de-sugared script, or self if no sugar.
         """
         if self.script:
-            # Step-level `let` (RFC 0007) is excluded from the instantiated Step
-            # by the job-creation metadata, so fold it into the script's own
-            # `let` (step bindings first, then the script's) so it survives into
-            # the Job and the runtime resolves it. The model has already
-            # validated reference/shadowing rules across both scopes at decode.
-            if self.let:
-                # The step's own `let` is preserved too (Step.let): the
-                # runtime seeds it when entering the step's environments, and
-                # Step._record_template_scope_let_count uses its length to mark
-                # where the template-scope prefix of the merged list ends.
-                merged_let = [*self.let, *(self.script.let or [])]
-                new_script = self.script.model_copy(update={"let": merged_let})
-                # Set here, at the merge, and not only on the instantiated Step.
-                # A consumer that resolves syntax sugar on a StepTemplate and
-                # runs the resulting script directly -- the worker agent does
-                # exactly this, via BatchGetJobEntity -- never constructs a
-                # Step, so Step._record_template_scope_let_count never runs for
-                # it and the boundary would be lost.
-                new_script._template_scope_let_count = len(self.let)
-                return self.model_copy(update={"script": new_script})
+            # The step-level `let` (RFC 0007) is *not* folded into the script's
+            # own `let`. It is evaluated in template scope at job creation and
+            # its resolved values travel in the step's symbol table
+            # (create_job_with_symbol_tables().step_symbol_tables[name]), which
+            # the runtime seeds the session with. Merging it here would have the
+            # session re-evaluate those bindings in host scope, re-rendering
+            # PATH values and overwriting the correctly formatted seeded value.
             return self
 
         for name, (command, ext, arg_prefix) in _INTERPRETER_MAP.items():
@@ -3774,10 +3710,10 @@ class StepTemplate(OpenJDModel_v2023_09):
                     cancelation=simple_action.cancelation,
                 )
             ),
-            # Carry step-level `let` (RFC 0007) and the SimpleAction's own
-            # `let` onto the de-sugared script (step bindings first) so they
-            # are preserved into the Job and resolved at runtime.
-            let=([*(self.let or []), *(simple_action.let or [])] or None),
+            # Only the SimpleAction's own `let` (RFC 0007) — the step-level one
+            # is resolved at job creation and travels in the step's symbol
+            # table, as in the `script:` branch above.
+            let=simple_action.let,
             embeddedFiles=[
                 EmbeddedFileText.model_construct(
                     name=embedded_name,
@@ -3788,14 +3724,6 @@ class StepTemplate(OpenJDModel_v2023_09):
                 )
             ],
         )
-        if self.let:
-            # Same as the `script:` branch above: record the template-scope
-            # prefix length here, at the merge, so a consumer that resolves
-            # syntax sugar on a StepTemplate and runs the resulting script
-            # directly -- the worker agent does exactly this -- still gets the
-            # boundary. `model_construct` bypasses validators, so the private
-            # attribute is set by assignment, as it is there.
-            new_script._template_scope_let_count = len(self.let)
         return StepTemplate.model_construct(
             name=self.name,
             description=self.description,

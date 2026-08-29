@@ -4,18 +4,15 @@
 environments, host-context function scoping, and type-aware expression
 validation."""
 
-import json
-
 import pytest
 
+from openjd.expr import PathFormat
 from openjd.model import (
     DecodeValidationError,
     SymbolTable,
-    create_job,
+    create_job_with_symbol_tables,
     decode_job_template,
-    model_to_object,
 )
-from openjd.model.v2023_09 import Step
 
 _EXTS = ["EXPR", "FEATURE_BUNDLE_1"]
 
@@ -294,133 +291,20 @@ class TestStepScopeIsTemplateScope:
         assert str(symtab["under"]) == "true"
 
 
-class TestTemplateScopeLetCount:
-    """The instantiated Step's script carries a merged `let` — the step-level
-    bindings first, then the script's own. `_template_scope_let_count` records
-    how many leading entries are the step-level ones, so a session handed the
-    step's resolved symbol table can skip re-evaluating them in host scope."""
-
-    @staticmethod
-    def _script(step, *, extensions=("EXPR",)):
-        template = _decode(_job([step], extensions=extensions))
-        return create_job(job_template=template, job_parameter_values={}).steps[0].script
+class TestStepLetIsNotMergedIntoScript:
+    """A step-level `let` is resolved once, in template scope, at job creation,
+    and its values travel in the step's symbol table. It is therefore *not*
+    merged into the script's own `let`: doing so would have the session
+    re-evaluate the same bindings in the host's scope, re-rendering PATH values
+    and overwriting the correctly formatted seeded value."""
 
     @staticmethod
     def _resolved_script(step):
-        """The script a consumer gets from ``resolve_syntax_sugar()`` alone — no
-        ``Step`` is constructed, so ``Step._record_template_scope_let_count``
-        never runs."""
         template = _decode(_job([step], extensions=("EXPR", "FEATURE_BUNDLE_1")))
         return template.steps[0].resolve_syntax_sugar().script
 
-    def test_no_step_lets_is_zero(self):
-        script = self._script({"name": "S", "script": _onrun("hi")})
-
-        assert script._template_scope_let_count == 0
-        assert script.let is None
-
-    def test_script_lets_only_is_zero(self):
-        script = self._script({"name": "S", "script": {"let": ["a = 1"], **_onrun("{{a}}")}})
-
-        assert script._template_scope_let_count == 0
-        assert script.let == ["a = 1"]
-
-    def test_step_lets_only(self):
-        script = self._script(
-            {"name": "S", "let": ["a = 1", "b = 2"], "script": _onrun("{{a}}{{b}}")}
-        )
-
-        assert script._template_scope_let_count == 2
-        assert script.let == ["a = 1", "b = 2"]
-
-    def test_both_scopes_counts_only_the_step_level_ones(self):
-        script = self._script(
-            {
-                "name": "S",
-                "let": ["a = 1", "b = 2"],
-                "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
-            }
-        )
-
-        # THEN: the count is the step-level count, and the merged order puts the
-        # step-level bindings first — the two together are what makes a prefix
-        # skip correct.
-        assert script._template_scope_let_count == 2
-        assert script.let == ["a = 1", "b = 2", "c = 3"]
-
-    def test_syntax_sugar_script_records_the_count(self):
-        # The de-sugaring path builds its own merged `let`, so it needs the same
-        # boundary recorded.
-        script = self._script(
-            {
-                "name": "S",
-                "let": ["a = 1"],
-                "python": {"script": "print(1)", "let": ["b = 2"]},
-            },
-            extensions=("EXPR", "FEATURE_BUNDLE_1"),
-        )
-
-        assert script._template_scope_let_count == 1
-        assert script.let == ["a = 1", "b = 2"]
-
-    def test_count_is_private_and_not_serialized(self):
-        # Hard requirement: recording the boundary must not change the model's
-        # serialized shape.
-        step = {
-            "name": "S",
-            "let": ["a = 1"],
-            "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
-        }
-        job = create_job(job_template=_decode(_job([step])), job_parameter_values={})
-
-        # WHEN
-        obj = model_to_object(model=job)
-
-        # THEN
-        assert job.steps[0].script._template_scope_let_count == 1
-        assert "_template_scope_let_count" not in json.dumps(obj)
-        assert obj["steps"][0]["script"]["let"] == ["a = 1", "c = 3"]
-
-    @pytest.mark.parametrize("interpreter", ("bash", "python", "cmd", "powershell", "node"))
-    def test_syntax_sugar_records_the_count_without_a_step(self, interpreter):
-        # The worker agent parses a StepTemplate and calls resolve_syntax_sugar()
-        # directly, so no Step is built and the boundary has to be recorded at
-        # the de-sugaring merge — as the `script:` branch records it.
-        # GIVEN
-        sugar_script = self._resolved_script(
-            {
-                "name": "S",
-                "let": ["a = 1", "b = 2"],
-                interpreter: {"script": "print(1)", "let": ["c = 3"]},
-            }
-        )
-        script_branch = self._resolved_script(
-            {
-                "name": "S",
-                "let": ["a = 1", "b = 2"],
-                "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
-            }
-        )
-
-        # THEN: both merge the same list, so both must record the same boundary.
-        assert script_branch.let == ["a = 1", "b = 2", "c = 3"]
-        assert script_branch._template_scope_let_count == 2
-        assert sugar_script.let == ["a = 1", "b = 2", "c = 3"]
-        assert sugar_script._template_scope_let_count == script_branch._template_scope_let_count
-
-    @pytest.mark.parametrize(
-        "sibling_let",
-        (None, ["z = 9"]),
-        ids=("no-let", "non-matching-let"),
-    )
-    def test_sibling_step_does_not_clear_a_shared_scripts_count(self, sibling_let):
-        # A merged script is a single object, and a Step keeps the instance it is
-        # given rather than revalidating it, so more than one Step can reach it.
-        # A sibling whose own `let` is empty or does not match the prefix
-        # computes 0 for itself; writing that over the marker the owning step
-        # recorded would revert the owner to re-evaluating template-scope
-        # bindings in host scope -- the bug the marker exists to prevent.
-        # GIVEN
+    def test_script_branch_keeps_only_the_scripts_own_let(self):
+        # GIVEN / WHEN
         script = self._resolved_script(
             {
                 "name": "S",
@@ -428,40 +312,75 @@ class TestTemplateScopeLetCount:
                 "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
             }
         )
-        owner = Step(name="S", script=script, let=["a = 1", "b = 2"])
-        assert owner.script is script
-        assert script._template_scope_let_count == 2
-
-        # WHEN
-        sibling = Step(name="T", script=script, let=sibling_let)
 
         # THEN
-        assert sibling.script is script
-        assert script._template_scope_let_count == 2
+        assert script.let == ["c = 3"]
 
-    def test_step_records_its_own_count_and_an_unmarked_script_is_zero(self):
-        # Negative control for the "never lower the marker" rule: it must not
-        # stop a Step from recording the count its own `let` legitimately
-        # yields, and a script no Step has ever marked must read 0.
-        # GIVEN
-        marked = self._resolved_script(
+    @pytest.mark.parametrize("interpreter", ("python", "bash", "cmd", "powershell", "node"))
+    def test_simple_action_branch_keeps_only_the_actions_own_let(self, interpreter):
+        # The de-sugaring path builds a fresh script, so it has to make the same
+        # choice independently of the `script:` branch.
+        # GIVEN / WHEN
+        script = self._resolved_script(
             {
                 "name": "S",
                 "let": ["a = 1", "b = 2"],
-                "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
+                interpreter: {"script": "print(1)", "let": ["c = 3"]},
             }
         )
-        unmarked = self._resolved_script({"name": "S", "script": _onrun("hi")})
-        # The de-sugaring merge records on the merged script; strip it so this
-        # asserts the Step validator's own write, not the one already there.
-        fresh = marked.model_copy()
-        fresh._template_scope_let_count = 0
-
-        # WHEN
-        recording = Step(name="S", script=fresh, let=["a = 1", "b = 2"])
-        never_marked = Step(name="U", script=unmarked)
 
         # THEN
-        assert recording.script._template_scope_let_count == 2
-        assert unmarked.let is None
-        assert never_marked.script._template_scope_let_count == 0
+        assert script.let == ["c = 3"]
+
+
+class TestStepLetTravelsInTheStepSymbolTable:
+    """The transport that replaces the merge: `create_job_with_symbol_tables`
+    resolves the step-level `let` at creation and hands the values over in the
+    step's symbol table, PATH values stored so each host renders them itself."""
+
+    @staticmethod
+    def _tables(step):
+        template = _decode(_job([step]))
+        return create_job_with_symbol_tables(job_template=template, job_parameter_values={})
+
+    _STEP = {
+        "name": "S",
+        "let": ["a = 1", 'root = path("/foo/bar")', 'txt = string(path("/mnt/out"))'],
+        "script": {"let": ["scriptonly = 7"], **_onrun("{{a}}{{scriptonly}}")},
+    }
+
+    def test_step_let_values_are_carried_and_paths_render_per_host(self):
+        # GIVEN
+        result = self._tables(self._STEP)
+        table = result.step_symbol_tables["S"]
+
+        # WHEN
+        posix = table.to_symtab(path_format=PathFormat.POSIX)
+        windows = table.to_symtab(path_format=PathFormat.WINDOWS)
+
+        # THEN: the values the deleted merge used to have the session recompute
+        # are already here, and the PATH one is stored so it renders in each
+        # host's own format rather than the creating host's.
+        assert str(posix["a"]) == "1"
+        assert str(posix["root"]) == "/foo/bar"
+        assert str(windows["root"]) == "\\foo\\bar"
+        # Rendered to a string at create time, in template scope, so it stays
+        # POSIX on every host -- this is what re-evaluating in host scope broke.
+        assert str(posix["txt"]) == "/mnt/out"
+        assert str(windows["txt"]) == "/mnt/out"
+        # AND: the script still carries only its own bindings, for the session
+        # to evaluate in host scope.
+        assert result.job.steps[0].script.let == ["scriptonly = 7"]
+
+    def test_script_let_is_not_in_the_step_symbol_table(self):
+        # A script-level binding resolves at session time in host scope, so it
+        # must not be evaluated into -- or leak into -- the create-time table.
+        # GIVEN
+        result = self._tables(self._STEP)
+
+        # WHEN
+        symtab = result.step_symbol_tables["S"].to_symtab(path_format=PathFormat.POSIX)
+
+        # THEN
+        assert "scriptonly" not in symtab
+        assert "a" in symtab
