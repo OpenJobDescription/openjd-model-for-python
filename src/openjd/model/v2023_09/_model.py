@@ -1208,7 +1208,10 @@ FloatRangeList = Annotated[
     list[Union[Decimal, TaskParameterStringValue]], Field(min_length=1, max_length=1024)
 ]
 StringRangeList = Annotated[list[TaskParameterStringValue], Field(min_length=1, max_length=1024)]
-TaskParameterStringValueAsJob = Annotated[str, StringConstraints(min_length=0, max_length=1024)]
+_MAX_TASK_PARAM_VALUE_LEN = 1024
+TaskParameterStringValueAsJob = Annotated[
+    str, StringConstraints(min_length=0, max_length=_MAX_TASK_PARAM_VALUE_LEN)
+]
 
 TaskRangeList = list[Union[TaskParameterStringValueAsJob, int, float, Decimal]]
 
@@ -1246,7 +1249,8 @@ def _normalized_range_element(elem: str, to_int: bool) -> Any:
     """The number an ``<intstring>``/``<floatstring>`` range element denotes -- an
     ``int`` for ``<intstring>``, and for ``<floatstring>`` the plain-notation text
     of the value, since ``str(Decimal)`` cannot render every magnitude without an
-    exponent. Returns the element unchanged when it does not denote a number."""
+    exponent. Returns the element unchanged when it does not denote a number, or
+    when its plain-notation form would not fit this field's character cap."""
     try:
         if to_int:
             return int(elem)
@@ -1254,6 +1258,32 @@ def _normalized_range_element(elem: str, to_int: bool) -> Any:
         if not value.is_finite():
             # Decimal accepts 'nan'/'inf', which are not <floatstring>s; leave
             # them as text rather than changing how they render.
+            return elem
+        # Bound the expansion from the exponent before performing it. Decimal
+        # construction from a string is unbounded -- the context's Emax/Emin
+        # constrain arithmetic results, not construction, so Decimal('1e999999999')
+        # is finite and the guard above does not stop it -- and the plain-notation
+        # length is linear in the exponent, so 11 characters of template text
+        # would otherwise materialize ~10**9 characters.
+        #
+        # The bound is the character cap this field already enforces, because an
+        # expansion past it cannot be carried here as text at all: the value is
+        # stored in a TaskRangeList element, whose str member is
+        # TaskParameterStringValueAsJob, and pydantic's union falls through to
+        # the numeric members instead, rendering the element as an integer, or as
+        # inf, or as 0.0. Such an element keeps its source text -- what this
+        # function already does for anything it cannot normalize, and how it
+        # rendered before normalization was introduced.
+        exponent = cast(int, value.as_tuple().exponent)  # finite: never 'n'/'N'/'F'
+        # Length of the '[-]<integer>.<fraction>' text returned below. Stripping
+        # redundant zeros can only shorten it, so this is an upper bound.
+        expansion_len = (
+            (1 if value.is_signed() else 0)
+            + max(value.adjusted() + 1, 1)  # integer digits, at least one
+            + 1  # the decimal point
+            + max(-exponent, 1)  # fraction digits, at least one
+        )
+        if expansion_len > _MAX_TASK_PARAM_VALUE_LEN:
             return elem
         # format(value, 'f') is exact and plain at every magnitude: with no
         # precision in the format spec it neither rounds to getcontext().prec

@@ -513,6 +513,53 @@ class TestRangeListElementNormalization:
         # THEN the element renders as the number it denotes
         assert [str(v) for v in model.range] == [expected]
 
+    @pytest.mark.parametrize(
+        "element",
+        (
+            # Decimal's context bounds arithmetic results, not construction from
+            # a string, so these are finite: 11 characters of template text
+            # whose plain-notation expansion is ~10**9 characters.
+            pytest.param("1e999999999", id="huge positive exponent"),
+            pytest.param("1e-999999999", id="huge negative exponent"),
+            # One character past the cap in each direction: both expand to 1025.
+            pytest.param("1E+1022", id="one past the cap, positive exponent"),
+            pytest.param("1E-1023", id="one past the cap, negative exponent"),
+        ),
+    )
+    def test_element_too_long_to_expand_keeps_its_source_text(self, element: str) -> None:
+        # WHEN the instantiation target parses a <floatstring> whose plain-notation
+        # form would not fit TaskParameterStringValueAsJob's 1024-character cap
+        model = _parse_model(
+            model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
+        )
+
+        # THEN it keeps its source text rather than being expanded. Expanding it
+        # would allocate the whole expansion, and the result could not be carried
+        # as text here anyway: it fails the str member of TaskRangeList's union,
+        # and pydantic then falls through to the numeric members, rendering the
+        # element as an integer, or as inf, or as 0.0.
+        assert [str(v) for v in model.range] == [element]
+
+    @pytest.mark.parametrize(
+        "element,expected",
+        (
+            pytest.param("1E+1021", "1" + "0" * 1021 + ".0", id="positive exponent"),
+            pytest.param("1E-1022", "0." + "0" * 1021 + "1", id="negative exponent"),
+        ),
+    )
+    def test_element_at_the_cap_is_still_normalized(self, element: str, expected: str) -> None:
+        # GIVEN a <floatstring> whose plain-notation form is exactly 1024
+        # characters — at the cap, not past it
+        assert len(expected) == 1024
+
+        # WHEN the instantiation target parses it
+        model = _parse_model(
+            model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
+        )
+
+        # THEN the length bound has not cost it its normalization
+        assert [str(v) for v in model.range] == [expected]
+
     def test_floatstring_normalization_ignores_the_decimal_context(self) -> None:
         # GIVEN an embedding application that has narrowed the process-wide
         # decimal context, and a <floatstring> with more significant digits
