@@ -1111,9 +1111,9 @@ class StepScript(OpenJDModel_v2023_09):
     # RFC 0007 (EXPR): on an instantiated Step's script, how many leading `let`
     # entries came from the step-level bindings that StepTemplate.resolve_syntax_sugar
     # merged in ahead of the script's own. Those were already evaluated in
-    # template scope at job creation, so a session given the step's resolved
-    # symbol table must skip them rather than re-evaluate them in host scope —
-    # re-evaluating re-renders paths in the host's format, which changes results
+    # template scope at job creation, so a session must reproduce them in that
+    # scope rather than re-evaluate them in the host's — re-evaluating in host
+    # format re-renders paths, which changes results
     # (RFC 0007 §3.6; openjd-rs evaluates template scope with PathFormat::POSIX).
     # Private, so the model's serialized form does not change. Consumers read it
     # with a getattr(script, "_template_scope_let_count", 0) guard, so an older
@@ -3493,11 +3493,18 @@ class Step(OpenJDModel_v2023_09):
         ``StepTemplate.resolve_syntax_sugar`` builds the script's `let` as
         ``step-level bindings + the script's own``, in that order, and the
         step-level ones are preserved verbatim here as ``self.let`` — so their
-        count is the length of the step-level list. A session that was handed
-        the step's resolved symbol table skips that many entries instead of
-        re-evaluating create-time results in host scope.
+        count is the length of the step-level list.
+
+        The prefix is *verified*, not assumed. This validator also runs for a
+        ``Step`` built directly, where nothing guarantees that ``script.let``
+        starts with ``self.let``; recording a count that does not match would
+        make a session evaluate a genuinely session-scope binding in template
+        scope. A mismatch records 0, which is the previous behaviour.
         """
-        self.script._template_scope_let_count = len(self.let) if self.let else 0
+        step_let = self.let or []
+        script_let = self.script.let or []
+        matches_prefix = bool(step_let) and script_let[: len(step_let)] == step_let
+        self.script._template_scope_let_count = len(step_let) if matches_prefix else 0
         return self
 
 
@@ -3709,6 +3716,13 @@ class StepTemplate(OpenJDModel_v2023_09):
                 # where the template-scope prefix of the merged list ends.
                 merged_let = [*self.let, *(self.script.let or [])]
                 new_script = self.script.model_copy(update={"let": merged_let})
+                # Set here, at the merge, and not only on the instantiated Step.
+                # A consumer that resolves syntax sugar on a StepTemplate and
+                # runs the resulting script directly -- the worker agent does
+                # exactly this, via BatchGetJobEntity -- never constructs a
+                # Step, so Step._record_template_scope_let_count never runs for
+                # it and the boundary would be lost.
+                new_script._template_scope_let_count = len(self.let)
                 return self.model_copy(update={"script": new_script})
             return self
 
