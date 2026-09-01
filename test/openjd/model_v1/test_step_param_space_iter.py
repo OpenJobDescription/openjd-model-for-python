@@ -750,7 +750,7 @@ class TestChunksTaskCountOverride:
                 step=self._step(self._STATIC), chunks_task_count_override=override
             )
             with pytest.raises(IndexError) as excinfo:
-                it[0]
+                _ = it[0]
             assert str(excinfo.value) == "index out of range"
 
     def test_an_intermediate_override_regroups_the_chunks(self) -> None:
