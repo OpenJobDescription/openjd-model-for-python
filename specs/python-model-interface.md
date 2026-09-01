@@ -1127,6 +1127,8 @@ from openjd.model._v1.job import StepParameterSpaceIterator
 
 it = StepParameterSpaceIterator(step=job.steps[0])
 # or: it = StepParameterSpaceIterator(space=step.parameterSpace)
+# or, to walk a chunked space one task at a time:
+#     it = StepParameterSpaceIterator(space=..., chunks_task_count_override=1)
 
 len(it)                     # total task count, e.g. 10
 it[0]                       # {"Frame": 1}
@@ -1149,6 +1151,24 @@ parameter space without rebuilding the iterator (the iterator caches
 non-trivial state for chunked spaces). Indexing (``it[i]``) is
 unaffected by iteration position; ``__contains__`` is also
 non-mutating.
+
+`chunks_task_count_override` replaces the `defaultTaskCount` of a
+`CHUNK[INT]` parameter and turns adaptive chunking off, so a chunked
+space can be walked at a granularity the caller picks. Pass `1` to
+iterate individual tasks — a `1-20` range chunked five at a time then
+yields `1-1`, `2-2`, … instead of `1-5`, `6-10`, …. It is ignored when
+the space has no chunked parameter, matching the pure-Python reference.
+Both iteration and indexing observe it, and `len()` counts the
+overridden granularity.
+
+This is the only way to change the chunk size of a *static* chunked
+space: the `chunks_default_task_count` setter accepts adaptive spaces
+only, and raises `ValueError` otherwise.
+
+`chunks_task_count_override=0` raises `ValueError`. The Rust layer
+clamps the override to at least 1, so 0 would silently mean 1, and the
+`chunks_default_task_count` setter already rejects it. The pure-Python
+reference does not validate this argument.
 
 ### `StepDependencyGraph`
 
