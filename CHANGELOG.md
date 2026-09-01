@@ -1,3 +1,13 @@
+## 0.11.7 (2026-09-01)
+
+
+
+### Bug Fixes
+* Bound floatstring range element expansion by the field's char cap ([`e7a17b3`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/e7a17b34f261aee0bad6cbfd56e412318ae34935))
+* Render floatstring range elements exactly and in plain notation ([`d6d5540`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d6d554031ec0419b8b7c89573d6f102dfaaa5d93))
+* Normalize intstring/floatstring task parameter range elements ([`f5da1b0`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/f5da1b02b4910f38f0b9b9ada87f0c97e15710ca))
+
+
 ## 0.11.6 (2026-08-25)
 
 
