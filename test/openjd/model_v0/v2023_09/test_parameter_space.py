@@ -485,6 +485,16 @@ class TestRangeListElementNormalization:
             pytest.param("0", "0", id="bare zero"),
             pytest.param("0.0", "0.0", id="zero"),
             pytest.param("0.00", "0.00", id="zero keeps its trailing zeros too"),
+            # Zero has no sign, which openjd-rs and mainline both render away.
+            # Dropping it must not drop the decimal places with it.
+            pytest.param("-0.0", "0.0", id="negative zero has no sign"),
+            pytest.param("-0.00", "0.00", id="unsigned, but still two places"),
+            # Reaches zero only by underflow, so the text does not render the
+            # value and is not kept.
+            pytest.param("1e-400", "0.0", id="underflow to zero"),
+            # float() ignores surrounding whitespace and this text reaches a
+            # command line, so it is trimmed rather than forwarded.
+            pytest.param("  1.5  ", "1.5", id="surrounding whitespace"),
             pytest.param("1.0", "1.0", id="integral float keeps its point"),
             # Exponent notation is the author's own text and is forwarded. The
             # FLOAT parameter default path does the same for `default: "1E+2"`.
@@ -508,25 +518,33 @@ class TestRangeListElementNormalization:
         assert [str(v) for v in model.range] == [expected]
 
     @pytest.mark.parametrize(
-        "element",
+        "element,expected",
         (
-            pytest.param("1e999999999", id="huge positive exponent"),
-            pytest.param("1e-999999999", id="huge negative exponent"),
-            pytest.param("1E+1022", id="positive exponent past the field cap"),
-            pytest.param("1E-1023", id="negative exponent past the field cap"),
+            # An exponent too large for a float still costs only its own
+            # characters, which is the whole point: nothing expands it.
+            pytest.param("1e999999999", "1e999999999", id="huge positive exponent"),
+            pytest.param("1E+1022", "1E+1022", id="positive exponent past the field cap"),
+            # Too small, and the value underflows to zero, so the text no longer
+            # renders it. openjd-rs resolves these to zero and renders 0.0 too.
+            pytest.param("1e-999999999", "0.0", id="huge negative exponent"),
+            pytest.param("1E-1023", "0.0", id="negative exponent past the field cap"),
         ),
     )
-    def test_a_huge_exponent_costs_only_its_own_characters(self, element: str) -> None:
+    def test_a_huge_exponent_costs_only_its_own_characters(
+        self, element: str, expected: str
+    ) -> None:
         # WHEN 11 characters of template text denote a number needing ~10**9
         # digits in plain notation
         model = _parse_model(
             model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
         )
 
-        # THEN it renders as its own text. Nothing expands it, so no exponent
-        # bound is needed and the value cannot exceed the field's 1024-character
-        # cap and fall through to a numeric member of the union.
-        assert [str(v) for v in model.range] == [element]
+        # THEN nothing expands it, so no bound on the exponent is needed to stop a
+        # template allocating ~10**9 characters. Long *literal* text can still
+        # exceed TaskParameterStringValueAsJob's cap and fall through to a numeric
+        # member of the union, as it does on mainline and in 0.11.6; only the
+        # expansion is gone.
+        assert [str(v) for v in model.range] == [expected]
 
     def test_floatstring_rendering_ignores_the_decimal_context(self) -> None:
         # GIVEN an embedding application that has narrowed the process-wide

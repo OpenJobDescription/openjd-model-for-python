@@ -1275,12 +1275,21 @@ def _normalized_range_element(elem: str, to_int: bool) -> Any:
             return int(elem)  # int() already drops leading zeros
         # Parsed only to check it is a number; the text is what renders. Not a
         # Decimal -- re-rendering one is context-sensitive and unbounded (§7.5).
-        float(elem)
+        value = float(elem)
     except ValueError:
         # A resolved format string can be non-numeric. Literals are checked at
         # template parse time, so carry it through rather than rejecting here.
         return elem
-    return _REDUNDANT_LEADING_ZEROS.sub(r"\1", elem)
+    # Trimmed because the text reaches a command line and float() ignores
+    # surrounding whitespace; openjd-rs trims here too.
+    text = _REDUNDANT_LEADING_ZEROS.sub(r"\1", elem.strip())
+    if value == 0.0:
+        # Zero has no sign, so drop one without dropping the decimal places:
+        # '-0.00' renders `0.00`. Text that reaches zero only by underflow, like
+        # '1e-400', does not render the value at all and is not kept.
+        unsigned = text.lstrip("+-")
+        return unsigned if set(unsigned) <= {"0", "."} else "0.0"
+    return text
 
 
 # Target model for task parameters when instantiating a job.
