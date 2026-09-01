@@ -149,16 +149,24 @@ impl PyStepParameterSpaceIterator {
     fn new(
         step: Option<&PyStep>,
         space: Option<&PyStepParameterSpace>,
-        chunks_task_count_override: Option<usize>,
+        chunks_task_count_override: Option<i64>,
     ) -> PyResult<Self> {
-        // Rejected rather than clamped: openjd-model applies `.max(1)` to the
-        // override, so 0 would silently mean 1. The `chunks_default_task_count`
-        // setter already refuses 0, and the two should not disagree.
-        if chunks_task_count_override == Some(0) {
-            return Err(pyo3::exceptions::PyValueError::new_err(
-                "chunks_task_count_override must be a positive integer.",
-            ));
-        }
+        // Taken as i64, not usize, so a negative value reaches this check instead of
+        // failing pyo3's unsigned extraction with OverflowError. Every non-positive
+        // value should report the same ValueError the message and the spec promise.
+        //
+        // Rejected rather than clamped: openjd-model applies `.max(1)` to the override,
+        // so 0 would silently mean 1. The `chunks_default_task_count` setter already
+        // refuses 0, and the two should not disagree.
+        let chunks_task_count_override: Option<usize> = match chunks_task_count_override {
+            Some(n) if n <= 0 => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "chunks_task_count_override must be a positive integer.",
+                ));
+            }
+            Some(n) => Some(n as usize),
+            None => None,
+        };
         let ps = if let Some(s) = space {
             s.inner.clone()
         } else if let Some(st) = step {

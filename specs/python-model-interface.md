@@ -1158,8 +1158,12 @@ space can be walked at a granularity the caller picks. Pass `1` to
 iterate individual tasks — a `1-20` range chunked five at a time then
 yields `1-1`, `2-2`, … instead of `1-5`, `6-10`, …. It is ignored when
 the space has no chunked parameter, matching the pure-Python reference.
-Both iteration and indexing observe it, and `len()` counts the
-overridden granularity.
+Iteration observes it, and `len()` counts the overridden granularity.
+
+Indexing observes it too, but only for a space that supports random
+access. A `CONTIGUOUS` chunked space requires sequential iteration, so
+`it[i]` raises `IndexError` for any index — with or without the
+override — even though `len(it)` reports a count.
 
 This is the only way to change the chunk size of a *static* chunked
 space: the `chunks_default_task_count` setter accepts adaptive spaces

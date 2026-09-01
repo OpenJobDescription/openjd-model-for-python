@@ -788,11 +788,19 @@ class TestChunksTaskCountOverride:
         assert it.chunks_default_task_count is None
         assert it.chunks_parameter_name is None
 
-    def test_override_of_zero_is_rejected(self) -> None:
-        """openjd-model clamps the override to at least 1, so 0 would silently mean
-        1. The ``chunks_default_task_count`` setter already refuses 0."""
+    @pytest.mark.parametrize("override", [0, -1, -5])
+    def test_a_non_positive_override_is_rejected_as_a_value_error(self, override: int) -> None:
+        """openjd-model clamps the override to at least 1, so 0 would silently mean 1, and
+        the ``chunks_default_task_count`` setter already refuses 0.
+
+        Negatives report the same ``ValueError`` rather than the ``OverflowError`` an
+        unsigned extraction would raise, so one ``except ValueError`` covers every
+        non-positive input.
+        """
         with pytest.raises(ValueError) as excinfo:
-            StepParameterSpaceIterator(step=self._step(self._STATIC), chunks_task_count_override=0)
+            StepParameterSpaceIterator(
+                step=self._step(self._STATIC), chunks_task_count_override=override
+            )
         assert str(excinfo.value) == "chunks_task_count_override must be a positive integer."
 
     def test_the_setter_still_refuses_a_static_space(self) -> None:
