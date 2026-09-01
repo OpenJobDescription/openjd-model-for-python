@@ -489,9 +489,12 @@ class TestRangeListElementNormalization:
             # Dropping it must not drop the decimal places with it.
             pytest.param("-0.0", "0.0", id="negative zero has no sign"),
             pytest.param("-0.00", "0.00", id="unsigned, but still two places"),
-            # Reaches zero only by underflow, so the text does not render the
-            # value and is not kept.
-            pytest.param("1e-400", "0.0", id="underflow to zero"),
+            # An all-zero mantissa spells zero whatever the exponent.
+            pytest.param("0E+2", "0E+2", id="exponent form of zero"),
+            pytest.param("-0e5", "0e5", id="signed exponent form of zero"),
+            # Underflow is not zero being spelled: the digits are the request.
+            pytest.param("1e-400", "1e-400", id="underflow keeps its digits"),
+            pytest.param("0." + "0" * 400 + "1", "0." + "0" * 400 + "1", id="tiny plain decimal"),
             # float() ignores surrounding whitespace and this text reaches a
             # command line, so it is trimmed rather than forwarded.
             pytest.param("  1.5  ", "1.5", id="surrounding whitespace"),
@@ -524,10 +527,10 @@ class TestRangeListElementNormalization:
             # characters, which is the whole point: nothing expands it.
             pytest.param("1e999999999", "1e999999999", id="huge positive exponent"),
             pytest.param("1E+1022", "1E+1022", id="positive exponent past the field cap"),
-            # Too small, and the value underflows to zero, so the text no longer
-            # renders it. openjd-rs resolves these to zero and renders 0.0 too.
-            pytest.param("1e-999999999", "0.0", id="huge negative exponent"),
-            pytest.param("1E-1023", "0.0", id="negative exponent past the field cap"),
+            # Too small for a float either way, and the digits still stand:
+            # underflowing to 0.0 is a parse limit, not the author writing zero.
+            pytest.param("1e-999999999", "1e-999999999", id="huge negative exponent"),
+            pytest.param("1E-1023", "1E-1023", id="negative exponent past the field cap"),
         ),
     )
     def test_a_huge_exponent_costs_only_its_own_characters(

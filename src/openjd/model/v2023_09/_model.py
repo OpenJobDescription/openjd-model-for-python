@@ -1262,6 +1262,14 @@ class TaskChunksDefinition(OpenJDModel_v2023_09):
 # digit, so '0.50' keeps the zero that is its integer part.
 _REDUNDANT_LEADING_ZEROS = re.compile(r"^([+-]?)0+(?=[0-9])")
 
+# An all-zero mantissa, whatever the exponent: '0.00', '-0.0' and '0e5' spell zero,
+# '1e-400' does not. Mirrors openjd_expr::value::text_spells_zero.
+_SPELLS_ZERO = re.compile(r"^[+-]?[0.]*[0][0.]*(?:[eE][+-]?[0-9]+)?$")
+
+
+def _spells_zero(text: str) -> bool:
+    return _SPELLS_ZERO.match(text) is not None
+
 
 def _normalized_range_element(elem: str, to_int: bool) -> Any:
     """The value an ``<intstring>``/``<floatstring>`` range element denotes.
@@ -1275,7 +1283,7 @@ def _normalized_range_element(elem: str, to_int: bool) -> Any:
             return int(elem)  # int() already drops leading zeros
         # Parsed only to check it is a number; the text is what renders. Not a
         # Decimal -- re-rendering one is context-sensitive and unbounded (§7.5).
-        value = float(elem)
+        float(elem)
     except ValueError:
         # A resolved format string can be non-numeric. Literals are checked at
         # template parse time, so carry it through rather than rejecting here.
@@ -1283,13 +1291,11 @@ def _normalized_range_element(elem: str, to_int: bool) -> Any:
     # Trimmed because the text reaches a command line and float() ignores
     # surrounding whitespace; openjd-rs trims here too.
     text = _REDUNDANT_LEADING_ZEROS.sub(r"\1", elem.strip())
-    if value == 0.0:
-        # Zero has no sign, so drop one without dropping the decimal places:
-        # '-0.00' renders `0.00`. Text that reaches zero only by underflow, like
-        # '1e-400', does not render the value at all and is not kept.
-        unsigned = text.lstrip("+-")
-        return unsigned if set(unsigned) <= {"0", "."} else "0.0"
-    return text
+    # Zero has no sign, so drop one without dropping the decimal places: '-0.00'
+    # renders `0.00`. Decided from the text, not from `value` -- the parse
+    # underflows to 0.0 below ~5e-324, and a tiny value's digits are exactly what
+    # a <floatstring> is for.
+    return text.lstrip("+-") if _spells_zero(text) else text
 
 
 # Target model for task parameters when instantiating a job.
