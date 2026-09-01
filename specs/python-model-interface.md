@@ -1157,8 +1157,14 @@ non-mutating.
 space can be walked at a granularity the caller picks. Pass `1` to
 iterate individual tasks — a `1-20` range chunked five at a time then
 yields `1-1`, `2-2`, … instead of `1-5`, `6-10`, …. It is ignored when
-the space has no chunked parameter, matching the pure-Python reference.
+the space has no chunked parameter, matching the pure-Python reference,
+although a non-positive value is still rejected in that case.
 Iteration observes it, and `len()` counts the overridden granularity.
+
+The rendered form of a chunk depends on `rangeConstraint`, which matters
+because these are strings a consumer parses and may feed back through
+`__contains__`. A single-task chunk is `"1-1"` under `CONTIGUOUS` and a
+bare `"1"` under `NONCONTIGUOUS`.
 
 It is currently the only way to change the chunk size of a *static*
 chunked space: the `chunks_default_task_count` setter accepts adaptive

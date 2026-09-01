@@ -139,7 +139,9 @@ impl PyStepParameterSpaceIterator {
     /// `CHUNK[INT]` parameter and turns adaptive chunking off, so a chunked space
     /// can be walked at a caller-chosen granularity. Pass `1` to iterate individual
     /// tasks. Ignored when the space has no chunked parameter, matching the
-    /// pure-Python reference.
+    /// pure-Python reference — though a non-positive value is still rejected in
+    /// that case, since validating an argument is cheaper to reason about than
+    /// silently discarding a bad one.
     ///
     /// Without this, a statically chunked space could only be walked at the
     /// template's own chunk size: `chunks_default_task_count` is settable for

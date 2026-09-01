@@ -744,7 +744,11 @@ class TestChunksTaskCountOverride:
     def test_a_contiguous_space_refuses_indexing_with_or_without_the_override(self) -> None:
         """Pre-existing behaviour the override does not change: openjd-model requires
         sequential iteration for contiguous chunking, so ``get`` always declines.
-        Pinned here so a future change to random access is a deliberate one."""
+        Pinned here so a future change to random access is a deliberate one. Its
+        counterpart is ``test_known_gaps.py::test_a_contiguous_chunked_space_supports_indexing``,
+        a strict xfail asserting the opposite: closing that gap fails there as an xpass
+        *and* here as a hard assertion, so both move together, along with the
+        limitation noted in ``specs/python-model-interface.md``."""
         for override in (None, 1):
             it = StepParameterSpaceIterator(
                 step=self._step(self._STATIC), chunks_task_count_override=override
@@ -777,6 +781,17 @@ class TestChunksTaskCountOverride:
         assert overridden.chunks_adaptive is False
         assert len(overridden) == 10
         assert self._frames(overridden) == [f"{n}-{n}" for n in range(1, 11)]
+
+    def test_a_non_positive_override_is_rejected_even_when_it_would_be_ignored(self) -> None:
+        """The validation runs before the space is inspected, so an unchunked space still
+        rejects 0 rather than silently discarding it. The reference does not validate at
+        all; this is the documented divergence, pinned so it stays deliberate."""
+        space = StepParameterSpace(
+            taskParameterDefinitions={"Frame": {"type": "INT", "range": [1, 2, 3]}}
+        )
+        with pytest.raises(ValueError) as excinfo:
+            StepParameterSpaceIterator(space=space, chunks_task_count_override=0)
+        assert str(excinfo.value) == "chunks_task_count_override must be a positive integer."
 
     def test_override_is_ignored_when_the_space_has_no_chunked_parameter(self) -> None:
         """Reference behaviour: the override only applies to a space that chunks."""
