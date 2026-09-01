@@ -85,23 +85,65 @@ def _chunked_step(constraint: str) -> Any:
 
 @pytest.mark.xfail(
     reason="v1 derives chunks_parameter_name and chunks_default_task_count from adaptive "
-    "detection, so both are None for a statically chunked space. v0 reports them for any "
-    "chunked space. See openjd-model step_param_space.rs: chunks_param_name and "
+    "detection, so both are None for any non-adaptive chunked space. v0 reports them for "
+    "any chunked space. See openjd-model step_param_space.rs: chunks_param_name and "
     "adaptive_chunk_size are both built from adaptive_info.",
     strict=True,
 )
-def test_chunk_metadata_is_reported_for_a_static_space() -> None:
-    """v0 returns ``"Frame"`` and ``5`` for this space. v1 returns ``None`` for both.
+@pytest.mark.parametrize(
+    "chunks,override,expected_count",
+    [
+        # Statically chunked: no override involved, v0 reports the template's size.
+        ({"defaultTaskCount": 5, "rangeConstraint": "CONTIGUOUS"}, None, 5),
+        # Statically chunked, re-chunked by the override.
+        ({"defaultTaskCount": 5, "rangeConstraint": "CONTIGUOUS"}, 1, 1),
+        # Adaptive, turned static by the override. v0 reports the override as the size.
+        (
+            {"defaultTaskCount": 5, "targetRuntimeSeconds": 60, "rangeConstraint": "CONTIGUOUS"},
+            1,
+            1,
+        ),
+    ],
+    ids=["static", "static-overridden", "adaptive-overridden"],
+)
+def test_chunk_metadata_is_reported_for_a_non_adaptive_space(
+    chunks: dict, override: int | None, expected_count: int
+) -> None:
+    """v0 returns ``"Frame"`` and the chunk size for each of these. v1 returns ``None``.
 
-    Neither value is unknowable — both are in the template — so a consumer inspecting a
-    static chunked space through v1 cannot learn which parameter chunks, or at what size.
+    Neither value is unknowable — both are in the template, or are the override the caller
+    just passed — so a consumer inspecting a non-adaptive chunked space through v1 cannot
+    learn which parameter chunks, or at what size. One root cause, three ways to reach it:
+    anything that leaves the space non-adaptive drops both getters.
     """
+    from openjd.model._v1 import create_job, decode_job_template
     from openjd.model._v1.job import StepParameterSpaceIterator
 
-    it = StepParameterSpaceIterator(step=_chunked_step("CONTIGUOUS"))
+    template = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "T",
+        "extensions": ["TASK_CHUNKING"],
+        "steps": [
+            {
+                "name": "S",
+                "parameterSpace": {
+                    "taskParameterDefinitions": [
+                        {"name": "Frame", "type": "CHUNK[INT]", "range": "1-10", "chunks": chunks}
+                    ]
+                },
+                "script": {
+                    "actions": {"onRun": {"command": "echo", "args": ["{{Task.Param.Frame}}"]}}
+                },
+            }
+        ],
+    }
+    job_template = decode_job_template(template=template, supported_extensions=["TASK_CHUNKING"])
+    step = create_job(job_template=job_template, job_parameter_values={}).steps[0]
+
+    it = StepParameterSpaceIterator(step=step, chunks_task_count_override=override)
     assert it.chunks_adaptive is False
     assert it.chunks_parameter_name == "Frame"
-    assert it.chunks_default_task_count == 5
+    assert it.chunks_default_task_count == expected_count
 
 
 @pytest.mark.xfail(

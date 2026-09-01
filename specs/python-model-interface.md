@@ -1160,19 +1160,30 @@ yields `1-1`, `2-2`, … instead of `1-5`, `6-10`, …. It is ignored when
 the space has no chunked parameter, matching the pure-Python reference.
 Iteration observes it, and `len()` counts the overridden granularity.
 
-Indexing observes it too, but only for a space that supports random
-access. A `CONTIGUOUS` chunked space requires sequential iteration, so
-`it[i]` raises `IndexError` for any index — with or without the
-override — even though `len(it)` reports a count.
+It is currently the only way to change the chunk size of a *static*
+chunked space: the `chunks_default_task_count` setter accepts adaptive
+spaces only, and raises `ValueError` otherwise.
 
-This is the only way to change the chunk size of a *static* chunked
-space: the `chunks_default_task_count` setter accepts adaptive spaces
-only, and raises `ValueError` otherwise.
-
-`chunks_task_count_override=0` raises `ValueError`. The Rust layer
-clamps the override to at least 1, so 0 would silently mean 1, and the
+Any non-positive value raises `ValueError`, so one `except ValueError`
+covers `0` and negatives alike. The Rust layer clamps the override to at
+least 1, so 0 would otherwise silently mean 1, and the
 `chunks_default_task_count` setter already rejects it. The pure-Python
 reference does not validate this argument.
+
+Two current-implementation limitations, both divergences from the v0
+reference rather than intended behaviour. Each has a `strict` xfail in
+`test/openjd/model_v1/test_known_gaps.py`, so clearing either will fail
+CI until this text is updated with it.
+
+- Indexing observes the override only for a space that supports random
+  access. A `CONTIGUOUS` chunked space requires sequential iteration, so
+  `it[i]` raises `IndexError` for any index — with or without the
+  override — even though `len(it)` reports a count. See
+  `test_a_contiguous_chunked_space_supports_indexing`.
+- `chunks_parameter_name` and `chunks_default_task_count` both return
+  `None` once the space is non-adaptive, which supplying the override
+  makes it. v0 reports the parameter name and the override value. See
+  `test_chunk_metadata_is_reported_for_a_non_adaptive_space`.
 
 ### `StepDependencyGraph`
 
