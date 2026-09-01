@@ -1258,74 +1258,29 @@ class TaskChunksDefinition(OpenJDModel_v2023_09):
         return validate_int_fmtstring_field(value, ge=0, context=context)
 
 
+# '02.50' -> '2.50', '007' -> '7', '000' -> '0'. The lookahead leaves the last
+# digit, so '0.50' keeps the zero that is its integer part.
+_REDUNDANT_LEADING_ZEROS = re.compile(r"^([+-]?)0+(?=[0-9])")
+
+
 def _normalized_range_element(elem: str, to_int: bool) -> Any:
-    """The number an ``<intstring>``/``<floatstring>`` range element denotes -- an
-    ``int`` for ``<intstring>``, and for ``<floatstring>`` the plain-notation text
-    of the value, since ``str(Decimal)`` cannot render every magnitude without an
-    exponent. Returns the element unchanged when it does not denote a number, or
-    when its plain-notation form would not fit this field's character cap."""
+    """The value an ``<intstring>``/``<floatstring>`` range element denotes.
+
+    An ``<intstring>`` becomes an ``int``. A ``<floatstring>`` keeps its text less
+    redundant leading zeros, so the decimal places it was written with survive
+    (§7.5). Returns the element unchanged when it does not denote a number.
+    """
     try:
         if to_int:
-            return int(elem)
-        value = Decimal(elem)
-        if not value.is_finite():
-            # Decimal accepts 'nan'/'inf', which are not <floatstring>s; leave
-            # them as text rather than changing how they render.
-            return elem
-        # Bound the expansion from the exponent before performing it. Decimal
-        # construction from a string is unbounded -- the context's Emax/Emin
-        # constrain arithmetic results, not construction, so Decimal('1e999999999')
-        # is finite and the guard above does not stop it -- and the plain-notation
-        # length is linear in the exponent, so 11 characters of template text
-        # would otherwise materialize ~10**9 characters.
-        #
-        # The bound is the character cap this field already enforces, because an
-        # expansion past it cannot be carried here as text at all: the value is
-        # stored in a TaskRangeList element, whose str member is
-        # TaskParameterStringValueAsJob, and pydantic's union falls through to
-        # the numeric members instead, rendering the element as an integer, or as
-        # inf, or as 0.0. Such an element keeps its source text -- what this
-        # function already does for anything it cannot normalize, and how it
-        # rendered before normalization was introduced.
-        exponent = cast(int, value.as_tuple().exponent)  # finite: never 'n'/'N'/'F'
-        # Length of the '[-]<integer>.<fraction>' text returned below. Stripping
-        # redundant zeros can only shorten it, so this is an upper bound.
-        expansion_len = (
-            (1 if value.is_signed() else 0)
-            + max(value.adjusted() + 1, 1)  # integer digits, at least one
-            + 1  # the decimal point
-            + max(-exponent, 1)  # fraction digits, at least one
-        )
-        if expansion_len > _MAX_TASK_PARAM_VALUE_LEN:
-            return elem
-        # format(value, 'f') is exact and plain at every magnitude: with no
-        # precision in the format spec it neither rounds to getcontext().prec
-        # nor switches to exponent notation, so an embedding app that sets a
-        # different context cannot change what this library renders. Neither
-        # holds of the obvious alternatives -- normalize() rounds to the
-        # ambient precision, str() switches to exponent notation below 1e-6,
-        # and quantize() raises InvalidOperation once the result needs more
-        # digits than the ambient precision allows.
-        text = format(value, "f")
-        negative = text.startswith("-")
-        integer, _, fraction = text.lstrip("-").partition(".")
-        # A <floatstring> denotes a number, so redundant zeros in its source
-        # text are not part of the value: '02.50' is 2.5. One fractional digit
-        # is always kept, matching openjd-rs, which renders the float 1.0 as
-        # `1.0` and never as `1`.
-        integer = integer.lstrip("0") or "0"
-        fraction = fraction.rstrip("0") or "0"
-        if negative and integer == "0" and fraction == "0":
-            # The number denoted by '-0.0' is zero, which has no sign; openjd-rs
-            # renders it `0.0`.
-            negative = False
-        return f"{'-' if negative else ''}{integer}.{fraction}"
-    except (ValueError, ArithmeticError):
-        # Not a number at all — e.g. a format string that resolved to
-        # non-numeric text. A literal range is already checked against its
-        # element type at template parse time, so leave such a value to the
-        # existing behaviour rather than adding a rejection path here.
+            return int(elem)  # int() already drops leading zeros
+        # Parsed only to check it is a number; the text is what renders. Not a
+        # Decimal -- re-rendering one is context-sensitive and unbounded (§7.5).
+        float(elem)
+    except ValueError:
+        # A resolved format string can be non-numeric. Literals are checked at
+        # template parse time, so carry it through rather than rejecting here.
         return elem
+    return _REDUNDANT_LEADING_ZEROS.sub(r"\1", elem)
 
 
 # Target model for task parameters when instantiating a job.
@@ -1340,22 +1295,14 @@ class RangeListTaskParameterDefinition(OpenJDModel_v2023_09):
     @field_validator("range", mode="before")
     @classmethod
     def _normalize_numeric_range_elements(cls, value: Any, info: ValidationInfo) -> Any:
-        # §3.4.1.1/§3.4.1.2: an <IntRangeList> element is `<integer> |
-        # <intstring>` and a <FloatRangeList> element is `<float> |
-        # <floatstring>`, where an <intstring>/<floatstring> is "a string whose
-        # value is the string representation of" a number (§2.3, §2.4). Such an
-        # element therefore denotes that number, not its source text, so '02'
-        # is the task value 2 and '02.50' is 2.5. Python was keeping the source
-        # text, which reaches a task command line as `--frame 02`.
+        # §7.5: a string-form range element loses redundant leading zeros and
+        # keeps its decimal places, so '02' is the value 2 and '02.50' renders
+        # `2.50`. Numeric literals carry no such request and are left as parsed;
+        # STRING and PATH ranges have no numeric form at all.
         #
-        # Applied on the instantiation target so every inbound range path is
-        # covered: a literal list, a range-expression expansion, and an RFC 0006
-        # typed whole-field resolution all funnel through this model.
-        #
-        # Numeric elements are left exactly as parsed. A FLOAT range of [1.0]
-        # renders 1.0, which openjd-rs also does and the conformance suite pins
-        # (base/jobs/3.4--float-parameter). STRING and PATH ranges are text by
-        # definition and are never touched.
+        # On the instantiation target so all three inbound paths are covered: a
+        # literal list, a range-expression expansion, and RFC 0006 whole-field
+        # resolution.
         param_type = info.data.get("type")
         if not isinstance(value, list) or param_type not in (
             TaskParameterType.INT,
