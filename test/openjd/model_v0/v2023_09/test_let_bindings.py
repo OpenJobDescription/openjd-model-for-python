@@ -41,6 +41,29 @@ class TestLetValid:
             _job([{"name": "S", "script": {"let": ["a = 2"], **_onrun("{{a}}")}}]),
         )
 
+    # §3.6.1 boundary: 512 characters is the maximum and must be accepted, with
+    # EXPR alone, since the cap does not depend on FEATURE_BUNDLE_1.
+    def test_name_512_chars(self):
+        name = "a" * 512
+        # Referenced, not just declared: a cap further down the path would
+        # otherwise be invisible here.
+        _decode(_job([{"name": "S", "let": [f"{name} = 1"], "script": _onrun(f"{{{{{name}}}}}")}]))
+
+    def test_name_512_chars_with_fb1(self):
+        name = "a" * 512
+        _decode(
+            _job(
+                [{"name": "S", "let": [f"{name} = 1"], "script": _onrun(f"{{{{{name}}}}}")}],
+                extensions=("EXPR", "FEATURE_BUNDLE_1"),
+            )
+        )
+
+    def test_name_512_chars_script(self):
+        name = "a" * 512
+        _decode(
+            _job([{"name": "S", "script": {"let": [f"{name} = 1"], **_onrun(f"{{{{{name}}}}}")}}])
+        )
+
     def test_chained_and_functions(self):
         _decode(
             _job(
@@ -97,6 +120,40 @@ class TestLetInvalid:
         # its definition point). Mirrors openjd-rs "references itself".
         with pytest.raises(DecodeValidationError, match="cannot reference itself"):
             _decode(_job([{"name": "S", "let": ["x = x + 1"], "script": _onrun("hi")}]))
+
+    # §3.6.1 caps a `<UserIdentifier>` at 512 characters. `_job` declares EXPR
+    # alone, so these pin the cap independently of FEATURE_BUNDLE_1.
+    def test_name_513_chars(self):
+        name = "a" * 513
+        with pytest.raises(
+            DecodeValidationError,
+            match=r"at most 512 characters long: 'a{32}'\.\.\. \(513 characters\)",
+        ):
+            _decode(_job([{"name": "S", "let": [f"{name} = 1"], "script": _onrun("hi")}]))
+
+    def test_name_513_chars_names_the_offending_binding(self):
+        # The validator is a field_validator on the whole list, so the error path
+        # is `let` with no index; the message has to identify the binding itself.
+        name = "b" * 513
+        with pytest.raises(DecodeValidationError, match=r"'b{32}'\.\.\. \(513 characters\)"):
+            _decode(_job([{"name": "S", "let": ["ok = 1", f"{name} = 2"], "script": _onrun("hi")}]))
+
+    def test_name_513_chars_with_fb1(self):
+        name = "a" * 513
+        with pytest.raises(DecodeValidationError, match="at most 512 characters"):
+            _decode(
+                _job(
+                    [{"name": "S", "let": [f"{name} = 1"], "script": _onrun("hi")}],
+                    extensions=("EXPR", "FEATURE_BUNDLE_1"),
+                )
+            )
+
+    def test_name_513_chars_script(self):
+        name = "a" * 513
+        with pytest.raises(DecodeValidationError, match="at most 512 characters"):
+            _decode(
+                _job([{"name": "S", "script": {"let": [f"{name} = 1"], **_onrun("hi")}}]),
+            )
 
     def test_comprehension_shadows_let(self):
         with pytest.raises(DecodeValidationError, match="shadows"):
