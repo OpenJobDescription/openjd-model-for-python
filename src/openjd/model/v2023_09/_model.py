@@ -921,6 +921,19 @@ class ScriptInterpreter(str, Enum):
 LET_MAX_BINDINGS = 50
 _LET_NAME_RE = re.compile(r"^[a-z_][A-Za-z0-9_]*$")
 
+# §3.6.1: the maximum length of a `let` binding's `<UserIdentifier>`.
+#
+# Flat 512, deliberately not the §7.1 `<Identifier>` cap that
+# `NameIdentifierLengthMixin` and the inline
+# `512 if "FEATURE_BUNDLE_1" in context.extensions else 64` checks apply. §3.6.1
+# states one maximum for a `<UserIdentifier>` and does not gate it on an
+# extension, and the conformance pair proves the flat reading:
+# `EXPR/job_templates/3.6--let-boundary-edges.yaml` declares `EXPR` alone and
+# requires a 512-character name to be accepted, so borrowing the §7.1 cap would
+# limit it to 64 and reject a template the spec permits. EXPR gates whether
+# `let` exists at all and moves neither cap.
+LET_MAX_IDENTIFIER_LEN = 512
+
 
 def parse_let_bindings(value: Any) -> list[tuple[str, str]]:
     """Parse a ``let`` field value (list of ``"name = expression"`` strings)
@@ -941,6 +954,12 @@ def parse_let_bindings(value: Any) -> list[tuple[str, str]]:
         expr = expr.strip()
         if not _LET_NAME_RE.match(name):
             raise ValueError(f"A 'let' binding name must be a valid identifier: {name!r}")
+        # The name is not interpolated into the message: at 513 characters it
+        # would dwarf the diagnostic.
+        if len(name) > LET_MAX_IDENTIFIER_LEN:
+            raise ValueError(
+                f"A 'let' binding name must be at most {LET_MAX_IDENTIFIER_LEN} characters long"
+            )
         if not expr:
             raise ValueError(f"A 'let' binding must define an expression: {binding!r}")
         result.append((name, expr))
