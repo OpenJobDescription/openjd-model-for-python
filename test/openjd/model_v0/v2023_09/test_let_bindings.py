@@ -121,8 +121,18 @@ class TestLetInvalid:
     # alone, so these pin the cap independently of FEATURE_BUNDLE_1.
     def test_name_513_chars(self):
         name = "a" * 513
-        with pytest.raises(DecodeValidationError, match="at most 512 characters"):
+        with pytest.raises(
+            DecodeValidationError,
+            match=r"at most 512 characters long: 'a{32}'\.\.\. \(513 characters\)",
+        ):
             _decode(_job([{"name": "S", "let": [f"{name} = 1"], "script": _onrun("hi")}]))
+
+    def test_name_513_chars_names_the_offending_binding(self):
+        # The validator is a field_validator on the whole list, so the error path
+        # is `let` with no index; the message has to identify the binding itself.
+        name = "b" * 513
+        with pytest.raises(DecodeValidationError, match=r"'b{32}'\.\.\. \(513 characters\)"):
+            _decode(_job([{"name": "S", "let": ["ok = 1", f"{name} = 2"], "script": _onrun("hi")}]))
 
     def test_name_513_chars_with_fb1(self):
         name = "a" * 513

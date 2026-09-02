@@ -946,10 +946,13 @@ def parse_let_bindings(value: Any) -> list[tuple[str, str]]:
         expr = expr.strip()
         if not _LET_NAME_RE.match(name):
             raise ValueError(f"A 'let' binding name must be a valid identifier: {name!r}")
-        # Name omitted from the message; at 513 characters it would dwarf it.
+        # Truncated rather than omitted: the caller is a field_validator on the
+        # whole list, so the error path is `let` with no index to identify which
+        # binding is over.
         if len(name) > LET_MAX_IDENTIFIER_LEN:
             raise ValueError(
-                f"A 'let' binding name must be at most {LET_MAX_IDENTIFIER_LEN} characters long"
+                f"A 'let' binding name must be at most {LET_MAX_IDENTIFIER_LEN} "
+                f"characters long: {name[:32]!r}... ({len(name)} characters)"
             )
         if not expr:
             raise ValueError(f"A 'let' binding must define an expression: {binding!r}")
