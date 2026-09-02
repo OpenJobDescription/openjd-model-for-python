@@ -648,3 +648,192 @@ class TestChunkIntContains:
         # caller wants to check whether a known chunk is in the space.
         existing = {"Frame": TaskParameterValue(type=TaskParameterType.CHUNK_INT, value="1-5")}
         assert existing in it
+
+
+class TestChunksTaskCountOverride:
+    """``chunks_task_count_override`` re-chunks a space at the caller's granularity.
+
+    Before this existed, a *statically* chunked space could only be walked at the
+    template's own ``defaultTaskCount``: the ``chunks_default_task_count`` setter
+    accepts adaptive spaces only. Consumers that store one task per chunk value —
+    the reason the pure-Python reference has this argument — had no way to expand a
+    static space through the binding.
+    """
+
+    @staticmethod
+    def _step(chunks: dict[str, Any], *, range: str = "1-10") -> Any:
+        """A single CHUNK[INT] step, built through decode + create_job so the test
+        exercises the same path a consumer hits at runtime."""
+        t = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "extensions": ["TASK_CHUNKING"],
+                "steps": [
+                    {
+                        "name": "S",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {
+                                    "name": "Frame",
+                                    "type": "CHUNK[INT]",
+                                    "range": range,
+                                    "chunks": chunks,
+                                }
+                            ]
+                        },
+                        "script": {
+                            "actions": {
+                                "onRun": {"command": "echo", "args": ["{{Task.Param.Frame}}"]}
+                            }
+                        },
+                    }
+                ],
+            },
+            supported_extensions=["TASK_CHUNKING"],
+        )
+        return create_job(job_template=t, job_parameter_values={}).steps[0]
+
+    _STATIC = {"defaultTaskCount": 5, "rangeConstraint": "CONTIGUOUS"}
+    _ADAPTIVE = {"defaultTaskCount": 5, "targetRuntimeSeconds": 60, "rangeConstraint": "CONTIGUOUS"}
+
+    @staticmethod
+    def _frames(it: Any) -> list:
+        return [params["Frame"].value for params in it]
+
+    def test_static_space_without_override_yields_template_chunks(self) -> None:
+        """The baseline the override changes: 1-10 at 5 per chunk is two chunks."""
+        it = StepParameterSpaceIterator(step=self._step(self._STATIC))
+        assert self._frames(it) == ["1-5", "6-10"]
+
+    def test_static_space_with_override_1_yields_individual_tasks(self) -> None:
+        """The case the argument exists for, and the one that was unreachable."""
+        it = StepParameterSpaceIterator(step=self._step(self._STATIC), chunks_task_count_override=1)
+        assert self._frames(it) == [f"{n}-{n}" for n in range(1, 11)]
+
+    def test_len_counts_the_overridden_granularity(self) -> None:
+        """``len()`` is the observable proof the override reached the space: the same
+        template counts 2 without it and 10 with it."""
+        step = self._step(self._STATIC)
+        assert len(StepParameterSpaceIterator(step=step)) == 2
+        assert len(StepParameterSpaceIterator(step=step, chunks_task_count_override=1)) == 10
+
+    def test_indexing_observes_the_override(self) -> None:
+        """``__getitem__`` builds a fresh iterator, so it has to carry the override too,
+        or indexing reports chunks iteration never yields.
+
+        Uses NONCONTIGUOUS because random access needs a non-sequential space, and a
+        CONTIGUOUS chunked space is always sequential (see the test below).
+        """
+        it = StepParameterSpaceIterator(
+            step=self._step({"defaultTaskCount": 5, "rangeConstraint": "NONCONTIGUOUS"}),
+            chunks_task_count_override=1,
+        )
+        yielded = self._frames(it)
+        assert yielded == [str(n) for n in range(1, 11)]
+        # Without the override carried through, index 0 would be the template's first
+        # chunk, "1-5", and disagree with what iteration produced.
+        fresh = StepParameterSpaceIterator(
+            step=self._step({"defaultTaskCount": 5, "rangeConstraint": "NONCONTIGUOUS"}),
+            chunks_task_count_override=1,
+        )
+        assert fresh[0]["Frame"].value == yielded[0]
+        assert fresh[9]["Frame"].value == yielded[-1]
+        assert fresh[-1]["Frame"].value == yielded[-1]
+
+    def test_a_contiguous_space_refuses_indexing_with_or_without_the_override(self) -> None:
+        """Pre-existing behaviour the override does not change: openjd-model requires
+        sequential iteration for contiguous chunking, so ``get`` always declines.
+        Pinned here so a future change to random access is a deliberate one. Its
+        counterpart is ``test_known_gaps.py::test_a_contiguous_chunked_space_supports_indexing``,
+        a strict xfail asserting the opposite: closing that gap fails there as an xpass
+        *and* here as a hard assertion, so both move together, along with the
+        limitation noted in ``specs/python-model-interface.md``."""
+        for override in (None, 1):
+            it = StepParameterSpaceIterator(
+                step=self._step(self._STATIC), chunks_task_count_override=override
+            )
+            with pytest.raises(IndexError) as excinfo:
+                _ = it[0]
+            assert str(excinfo.value) == "index out of range"
+
+    def test_an_intermediate_override_regroups_the_chunks(self) -> None:
+        """Not just 1: any positive size regroups the space."""
+        it = StepParameterSpaceIterator(step=self._step(self._STATIC), chunks_task_count_override=2)
+        assert self._frames(it) == ["1-2", "3-4", "5-6", "7-8", "9-10"]
+
+    def test_override_turns_adaptive_chunking_off(self) -> None:
+        """Matches the pure-Python reference: supplying the override makes the
+        parameter static, which is also what makes ``len()`` answerable — an
+        adaptive space raises on ``len()`` because the count is not yet knowable."""
+        adaptive = StepParameterSpaceIterator(step=self._step(self._ADAPTIVE))
+        assert adaptive.chunks_adaptive is True
+        with pytest.raises(ValueError) as excinfo:
+            len(adaptive)
+        assert (
+            str(excinfo.value)
+            == "Length is not available because the parameter space uses adaptive chunking."
+        )
+
+        overridden = StepParameterSpaceIterator(
+            step=self._step(self._ADAPTIVE), chunks_task_count_override=1
+        )
+        assert overridden.chunks_adaptive is False
+        assert len(overridden) == 10
+        assert self._frames(overridden) == [f"{n}-{n}" for n in range(1, 11)]
+
+    def test_a_non_positive_override_is_rejected_even_when_it_would_be_ignored(self) -> None:
+        """The validation runs before the space is inspected, so an unchunked space still
+        rejects 0 rather than silently discarding it. The reference does not validate at
+        all; this is the documented divergence, pinned so it stays deliberate."""
+        space = StepParameterSpace(
+            taskParameterDefinitions={"Frame": {"type": "INT", "range": [1, 2, 3]}}
+        )
+        with pytest.raises(ValueError) as excinfo:
+            StepParameterSpaceIterator(space=space, chunks_task_count_override=0)
+        assert str(excinfo.value) == "chunks_task_count_override must be a positive integer."
+
+    def test_override_is_ignored_when_the_space_has_no_chunked_parameter(self) -> None:
+        """Reference behaviour: the override only applies to a space that chunks."""
+        space = StepParameterSpace(
+            taskParameterDefinitions={"Frame": {"type": "INT", "range": [1, 2, 3]}}
+        )
+        it = StepParameterSpaceIterator(space=space, chunks_task_count_override=1)
+        assert [params["Frame"].value for params in it] == ["1", "2", "3"]
+        assert it.chunks_default_task_count is None
+        assert it.chunks_parameter_name is None
+
+    @pytest.mark.parametrize("override", [0, -1, -5])
+    def test_a_non_positive_override_is_rejected_as_a_value_error(self, override: int) -> None:
+        """openjd-model clamps the override to at least 1, so 0 would silently mean 1, and
+        the ``chunks_default_task_count`` setter already refuses 0.
+
+        Negatives report the same ``ValueError`` rather than the ``OverflowError`` an
+        unsigned extraction would raise, so one ``except ValueError`` covers every
+        non-positive input.
+        """
+        with pytest.raises(ValueError) as excinfo:
+            StepParameterSpaceIterator(
+                step=self._step(self._STATIC), chunks_task_count_override=override
+            )
+        assert str(excinfo.value) == "chunks_task_count_override must be a positive integer."
+
+    def test_the_setter_still_refuses_a_static_space(self) -> None:
+        """The override does not replace the setter, and must not loosen it: the
+        setter mutates a live adaptive iterator, which a static space cannot do."""
+        it = StepParameterSpaceIterator(step=self._step(self._STATIC))
+        with pytest.raises(ValueError) as excinfo:
+            it.chunks_default_task_count = 1
+        assert str(excinfo.value) == (
+            "The parameter space does not use adaptive chunking, "
+            "so cannot modify chunks_default_task_count."
+        )
+
+    def test_yielded_values_round_trip_through_contains(self) -> None:
+        """An overridden chunk must still satisfy containment, so a consumer can
+        validate a task it was handed."""
+        step = self._step(self._STATIC)
+        it = StepParameterSpaceIterator(step=step, chunks_task_count_override=1)
+        fresh = StepParameterSpaceIterator(step=step, chunks_task_count_override=1)
+        for params in list(it):
+            assert params in fresh

@@ -123,14 +123,52 @@ pub(crate) struct PyStepParameterSpaceIterator {
     /// every `NodeIterator` impl is `Send + Sync` (enforced at the
     /// trait bound in `openjd-model`).
     iter: Mutex<StepParameterSpaceIterator>,
+    /// The `chunks_task_count_override` this was constructed with, kept
+    /// so `__getitem__` can rebuild an equivalent iterator. Without it,
+    /// random access would silently fall back to the template's own
+    /// `defaultTaskCount` and disagree with iteration.
+    chunk_override: Option<usize>,
 }
 
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PyStepParameterSpaceIterator {
+    /// Construct an iterator over a step's parameter space.
+    ///
+    /// `chunks_task_count_override` overrides the `defaultTaskCount` of a
+    /// `CHUNK[INT]` parameter and turns adaptive chunking off, so a chunked space
+    /// can be walked at a caller-chosen granularity. Pass `1` to iterate individual
+    /// tasks. Ignored when the space has no chunked parameter, matching the
+    /// pure-Python reference — though a non-positive value is still rejected in
+    /// that case, since validating an argument is cheaper to reason about than
+    /// silently discarding a bad one.
+    ///
+    /// Without this, a statically chunked space could only be walked at the
+    /// template's own chunk size: `chunks_default_task_count` is settable for
+    /// adaptive spaces only.
     #[new]
-    #[pyo3(signature = (*, step=None, space=None))]
-    fn new(step: Option<&PyStep>, space: Option<&PyStepParameterSpace>) -> PyResult<Self> {
+    #[pyo3(signature = (*, step=None, space=None, chunks_task_count_override=None))]
+    fn new(
+        step: Option<&PyStep>,
+        space: Option<&PyStepParameterSpace>,
+        chunks_task_count_override: Option<i64>,
+    ) -> PyResult<Self> {
+        // Taken as i64, not usize, so a negative value reaches this check instead of
+        // failing pyo3's unsigned extraction with OverflowError. Every non-positive
+        // value should report the same ValueError the message and the spec promise.
+        //
+        // Rejected rather than clamped: openjd-model applies `.max(1)` to the override,
+        // so 0 would silently mean 1. The `chunks_default_task_count` setter already
+        // refuses 0, and the two should not disagree.
+        let chunks_task_count_override: Option<usize> = match chunks_task_count_override {
+            Some(n) if n <= 0 => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "chunks_task_count_override must be a positive integer.",
+                ));
+            }
+            Some(n) => Some(n as usize),
+            None => None,
+        };
         let ps = if let Some(s) = space {
             s.inner.clone()
         } else if let Some(st) = step {
@@ -148,7 +186,9 @@ impl PyStepParameterSpaceIterator {
                 combination: None,
             }
         };
-        let iter = StepParameterSpaceIterator::new(&ps).map_err(model_err_to_py)?;
+        let iter =
+            StepParameterSpaceIterator::new_with_chunk_override(&ps, chunks_task_count_override)
+                .map_err(model_err_to_py)?;
         let len = iter.len();
         let names = iter.names().clone();
         Ok(Self {
@@ -156,6 +196,7 @@ impl PyStepParameterSpaceIterator {
             len,
             names,
             iter: Mutex::new(iter),
+            chunk_override: chunks_task_count_override,
         })
     }
 
@@ -185,8 +226,12 @@ impl PyStepParameterSpaceIterator {
             index as usize
         };
         // Random access uses a fresh iterator — don't disturb the
-        // persistent iter's cursor or its adaptive Arc.
-        let iter = StepParameterSpaceIterator::new(&self.space).map_err(model_err_to_py)?;
+        // persistent iter's cursor or its adaptive Arc. It must carry the
+        // same chunk override, or indexing would report chunks that
+        // iteration never yields.
+        let iter =
+            StepParameterSpaceIterator::new_with_chunk_override(&self.space, self.chunk_override)
+                .map_err(model_err_to_py)?;
         match iter.get(idx) {
             Some(params) => task_param_set_to_py(py, &params),
             None => Err(pyo3::exceptions::PyIndexError::new_err(

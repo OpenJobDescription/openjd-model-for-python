@@ -1127,6 +1127,8 @@ from openjd.model._v1.job import StepParameterSpaceIterator
 
 it = StepParameterSpaceIterator(step=job.steps[0])
 # or: it = StepParameterSpaceIterator(space=step.parameterSpace)
+# or, to walk a chunked space one task at a time:
+#     it = StepParameterSpaceIterator(space=..., chunks_task_count_override=1)
 
 len(it)                     # total task count, e.g. 10
 it[0]                       # {"Frame": 1}
@@ -1149,6 +1151,45 @@ parameter space without rebuilding the iterator (the iterator caches
 non-trivial state for chunked spaces). Indexing (``it[i]``) is
 unaffected by iteration position; ``__contains__`` is also
 non-mutating.
+
+`chunks_task_count_override` replaces the `defaultTaskCount` of a
+`CHUNK[INT]` parameter and turns adaptive chunking off, so a chunked
+space can be walked at a granularity the caller picks. Pass `1` to
+iterate individual tasks — a `1-20` range chunked five at a time then
+yields `1-1`, `2-2`, … instead of `1-5`, `6-10`, …. It is ignored when
+the space has no chunked parameter, matching the pure-Python reference,
+although a non-positive value is still rejected in that case.
+Iteration observes it, and `len()` counts the overridden granularity.
+
+The rendered form of a chunk depends on `rangeConstraint`, which matters
+because these are strings a consumer parses and may feed back through
+`__contains__`. A single-task chunk is `"1-1"` under `CONTIGUOUS` and a
+bare `"1"` under `NONCONTIGUOUS`.
+
+It is currently the only way to change the chunk size of a *static*
+chunked space: the `chunks_default_task_count` setter accepts adaptive
+spaces only, and raises `ValueError` otherwise.
+
+Any non-positive value raises `ValueError`, so one `except ValueError`
+covers `0` and negatives alike. The Rust layer clamps the override to at
+least 1, so 0 would otherwise silently mean 1, and the
+`chunks_default_task_count` setter already rejects it. The pure-Python
+reference does not validate this argument.
+
+Two current-implementation limitations, both divergences from the v0
+reference rather than intended behaviour. Each has a `strict` xfail in
+`test/openjd/model_v1/test_known_gaps.py`, so clearing either will fail
+CI until this text is updated with it.
+
+- Indexing observes the override only for a space that supports random
+  access. A `CONTIGUOUS` chunked space requires sequential iteration, so
+  `it[i]` raises `IndexError` for any index — with or without the
+  override — even though `len(it)` reports a count. See
+  `test_a_contiguous_chunked_space_supports_indexing`.
+- `chunks_parameter_name` and `chunks_default_task_count` both return
+  `None` once the space is non-adaptive, which supplying the override
+  makes it. v0 reports the parameter name and the override value. See
+  `test_chunk_metadata_is_reported_for_a_non_adaptive_space`.
 
 ### `StepDependencyGraph`
 

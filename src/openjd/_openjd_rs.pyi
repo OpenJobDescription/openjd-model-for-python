@@ -2381,7 +2381,23 @@ class StepParameterSpaceIterator:
         *,
         step: typing.Optional[Step] = None,
         space: typing.Optional[StepParameterSpace] = None,
-    ) -> StepParameterSpaceIterator: ...
+        chunks_task_count_override: typing.Optional[builtins.int] = None,
+    ) -> StepParameterSpaceIterator:
+        r"""
+        Construct an iterator over a step's parameter space.
+
+        `chunks_task_count_override` overrides the `defaultTaskCount` of a
+        `CHUNK[INT]` parameter and turns adaptive chunking off, so a chunked space
+        can be walked at a caller-chosen granularity. Pass `1` to iterate individual
+        tasks. Ignored when the space has no chunked parameter, matching the
+        pure-Python reference -- though a non-positive value is still rejected in
+        that case.
+
+        Without this, a statically chunked space could only be walked at the
+        template's own chunk size: `chunks_default_task_count` is settable for
+        adaptive spaces only.
+        """
+
     def __len__(self) -> builtins.int: ...
     def __getitem__(self, index: builtins.int) -> dict: ...
     def __iter__(self) -> StepParameterSpaceIterator:
