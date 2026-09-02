@@ -45,20 +45,24 @@ class TestLetValid:
     # EXPR alone, since the cap does not depend on FEATURE_BUNDLE_1.
     def test_name_512_chars(self):
         name = "a" * 512
-        _decode(_job([{"name": "S", "let": [f"{name} = 1"], "script": _onrun("hi")}]))
+        # Referenced, not just declared: a cap further down the path would
+        # otherwise be invisible here.
+        _decode(_job([{"name": "S", "let": [f"{name} = 1"], "script": _onrun(f"{{{{{name}}}}}")}]))
 
     def test_name_512_chars_with_fb1(self):
         name = "a" * 512
         _decode(
             _job(
-                [{"name": "S", "let": [f"{name} = 1"], "script": _onrun("hi")}],
+                [{"name": "S", "let": [f"{name} = 1"], "script": _onrun(f"{{{{{name}}}}}")}],
                 extensions=("EXPR", "FEATURE_BUNDLE_1"),
             )
         )
 
     def test_name_512_chars_script(self):
         name = "a" * 512
-        _decode(_job([{"name": "S", "script": {"let": [f"{name} = 1"], **_onrun("hi")}}]))
+        _decode(
+            _job([{"name": "S", "script": {"let": [f"{name} = 1"], **_onrun(f"{{{{{name}}}}}")}}])
+        )
 
     def test_chained_and_functions(self):
         _decode(
