@@ -41,8 +41,8 @@ class TestLetValid:
             _job([{"name": "S", "script": {"let": ["a = 2"], **_onrun("{{a}}")}}]),
         )
 
-    # §3.6.1 boundary: 512 characters is the maximum and must be accepted. With
-    # EXPR alone, because the cap does not depend on FEATURE_BUNDLE_1.
+    # §3.6.1 boundary: 512 characters is the maximum and must be accepted, with
+    # EXPR alone, since the cap does not depend on FEATURE_BUNDLE_1.
     def test_name_512_chars(self):
         name = "a" * 512
         _decode(_job([{"name": "S", "let": [f"{name} = 1"], "script": _onrun("hi")}]))
@@ -117,12 +117,8 @@ class TestLetInvalid:
         with pytest.raises(DecodeValidationError, match="cannot reference itself"):
             _decode(_job([{"name": "S", "let": ["x = x + 1"], "script": _onrun("hi")}]))
 
-    # §3.6.1: a `<UserIdentifier>` is at most 512 characters. The cap is flat,
-    # not the FEATURE_BUNDLE_1-gated §7.1 `<Identifier>` cap, so the accept case
-    # must hold with EXPR alone. `_job` declares EXPR only by default, which is
-    # what the conformance fixture
-    # `EXPR/job_templates/3.6--let-boundary-edges.yaml` asserts; the
-    # `_with_fb1` variants pin that declaring FEATURE_BUNDLE_1 does not move it.
+    # §3.6.1 caps a `<UserIdentifier>` at 512 characters. `_job` declares EXPR
+    # alone, so these pin the cap independently of FEATURE_BUNDLE_1.
     def test_name_513_chars(self):
         name = "a" * 513
         with pytest.raises(DecodeValidationError, match="at most 512 characters"):
