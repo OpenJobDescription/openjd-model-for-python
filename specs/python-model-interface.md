@@ -718,6 +718,24 @@ does. (The underlying Rust struct has `chunks: Option<ResolvedChunks>`
 on the `Int` variant for shape reasons, but no resolver path ever
 populates it; the binding mirrors the runtime *behaviour*.)
 
+`FloatTaskParameter.range` is numeric, so it does not show the decimal
+places a `<floatstring>` range element was written with. A range element
+`'2.50'` reports `2.5` here and renders `2.50` as the task parameter
+value, which is the form that reaches a command line (Template Schemas
+§7.5). Two `FloatTaskParameter`s that compare equal by `range` can
+therefore render different task values. Read
+`StepParameterSpaceIterator` for the rendered form.
+
+Constructing a space directly follows the same rule as the template: a
+range element given as a `str` is a `<floatstring>` and keeps its
+spelling, and one given as a `float` is a `<float>` and renders as the
+number. `StepParameterSpace(taskParameterDefinitions={"F": {"type":
+"FLOAT", "range": ["1.50"]}})` renders `1.50`, and `range=[1.5]` renders
+`1.5`. Stripping a redundant leading zero is a `create_job`
+normalization rather than part of reading a resolved value, so `'02.50'`
+given directly to the constructor keeps its zero where the same element
+in a template does not.
+
 ### `ChunkIntTaskParameter`
 
 Available only when the `TASK_CHUNKING` extension is enabled.
@@ -1176,20 +1194,30 @@ least 1, so 0 would otherwise silently mean 1, and the
 `chunks_default_task_count` setter already rejects it. The pure-Python
 reference does not validate this argument.
 
-Two current-implementation limitations, both divergences from the v0
-reference rather than intended behaviour. Each has a `strict` xfail in
-`test/openjd/model_v1/test_known_gaps.py`, so clearing either will fail
-CI until this text is updated with it.
+Indexing observes the override. `openjd-model` 0.6.0 gave a `CONTIGUOUS`
+chunked space random access, so `it[i]` answers there as it does for a
+`NONCONTIGUOUS` one, and reports the overridden granularity rather than
+the template's.
 
-- Indexing observes the override only for a space that supports random
-  access. A `CONTIGUOUS` chunked space requires sequential iteration, so
-  `it[i]` raises `IndexError` for any index — with or without the
-  override — even though `len(it)` reports a count. See
-  `test_a_contiguous_chunked_space_supports_indexing`.
-- `chunks_parameter_name` and `chunks_default_task_count` both return
-  `None` once the space is non-adaptive, which supplying the override
-  makes it. v0 reports the parameter name and the override value. See
-  `test_chunk_metadata_is_reported_for_a_non_adaptive_space`.
+One current-implementation limitation remains. An *adaptive* space has no
+knowable count until it is walked, so `len(it)` raises `ValueError` and
+`it[i]` is refused for every index, negative included. Iteration still
+yields, which is what distinguishes an unknown count from an empty space.
+Supplying the override makes the space static and lifts both.
+
+That refusal is enforced rather than incidental: `__getitem__` rejects an
+adaptive space before it resolves a negative index, because the
+arithmetic for a negative index would otherwise run against the length
+`__len__` declines to report.
+
+One divergence from the v0 reference here, in the exception *type*. v0
+raises a bare `LookupError` for an adaptive `it[i]`; v1 raises
+`IndexError`, which is a `LookupError` subclass, so a caller catching
+either type is served by both implementations. The messages agree.
+Because `IndexError` also means "past the end" in v1, the two conditions
+are told apart by the message rather than the type — the adaptive refusal
+says `Items cannot be retrieved by index because the parameter space uses
+adaptive chunking.` where a real overrun says `index out of range`.
 
 ### `StepDependencyGraph`
 
