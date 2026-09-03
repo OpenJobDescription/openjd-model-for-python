@@ -718,6 +718,24 @@ does. (The underlying Rust struct has `chunks: Option<ResolvedChunks>`
 on the `Int` variant for shape reasons, but no resolver path ever
 populates it; the binding mirrors the runtime *behaviour*.)
 
+`FloatTaskParameter.range` is numeric, so it does not show the decimal
+places a `<floatstring>` range element was written with. A range element
+`'2.50'` reports `2.5` here and renders `2.50` as the task parameter
+value, which is the form that reaches a command line (Template Schemas
+§7.5). Two `FloatTaskParameter`s that compare equal by `range` can
+therefore render different task values. Read
+`StepParameterSpaceIterator` for the rendered form.
+
+Constructing a space directly follows the same rule as the template: a
+range element given as a `str` is a `<floatstring>` and keeps its
+spelling, and one given as a `float` is a `<float>` and renders as the
+number. `StepParameterSpace(taskParameterDefinitions={"F": {"type":
+"FLOAT", "range": ["1.50"]}})` renders `1.50`, and `range=[1.5]` renders
+`1.5`. Stripping a redundant leading zero is a `create_job`
+normalization rather than part of reading a resolved value, so `'02.50'`
+given directly to the constructor keeps its zero where the same element
+in a template does not.
+
 ### `ChunkIntTaskParameter`
 
 Available only when the `TASK_CHUNKING` extension is enabled.
