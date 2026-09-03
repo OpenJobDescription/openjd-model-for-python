@@ -9,6 +9,8 @@ natively (lists/bools) into the instantiated ``JobParameter`` so the typed EXPR
 symbol table can coerce them.
 """
 
+from pathlib import Path
+
 import pytest
 
 from openjd.model import (
@@ -16,6 +18,7 @@ from openjd.model import (
     create_job,
     decode_job_template,
     model_to_object,
+    preprocess_job_parameters,
 )
 
 
@@ -118,6 +121,27 @@ class TestCreateJobExprParams:
         # is accepted and reaches create_job unchanged (coercion of [] is []).
         job = _create({"name": "Bs", "type": "LIST[BOOL]", "default": []})
         assert _stored_value(job, "Bs") == []
+
+    def test_list_bool_invalid_default_error_names_parameter(self) -> None:
+        # The template-default coercion path must name the offending parameter,
+        # matching the submitted-value path. Defaults are normally pre-validated
+        # at decode, so bypass decode validation with model_copy to place an
+        # invalid item on the default (mirroring the merge path's model_copy
+        # carry-over, which skips validators) and reach collection-time coercion.
+        jt = decode_job_template(
+            template=_template({"name": "Flags", "type": "LIST[BOOL]", "default": [True]}),
+            supported_extensions=["EXPR"],
+        )
+        bad_param = jt.parameterDefinitions[0].model_copy(update={"default": ["maybe"]})
+        bad_jt = jt.model_copy(update={"parameterDefinitions": [bad_param]})
+        with pytest.raises(ValueError, match=r"Parameter Flags"):
+            preprocess_job_parameters(
+                job_template=bad_jt,
+                job_parameter_values={},
+                job_template_dir=Path(),
+                current_working_dir=Path(),
+                allow_job_template_dir_walk_up=True,
+            )
 
     @pytest.mark.parametrize(
         "param_def,expected",

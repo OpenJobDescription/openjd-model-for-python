@@ -143,6 +143,16 @@ class TestListBoolValueCoercion:
         # equality alone passes for ints ([1,0,1] == [True,False,True]).
         assert all(type(x) is bool for x in pv["Flags"].value)
 
+    def test_json_string_float_spelling_coerced_per_item(
+        self, list_bool_template, tmp_path
+    ) -> None:
+        # The valid float spelling 1.0/0.0 is accepted per item and stored as
+        # canonical booleans; equality alone would pass ([1.0, 0.0] ==
+        # [True, False]), so the type check proves per-item coercion ran.
+        pv = _preprocess(list_bool_template, {"Flags": "[1.0, 0.0]"}, tmp_path)
+        assert pv["Flags"].value == [True, False]
+        assert all(type(x) is bool for x in pv["Flags"].value)
+
     def test_invalid_item_rejected_with_parameter_name(self, list_bool_template, tmp_path) -> None:
         with pytest.raises(ValueError, match=r"Parameter Flags"):
             _preprocess(list_bool_template, {"Flags": ["maybe"]}, tmp_path)
@@ -171,6 +181,25 @@ class TestListBoolValueCoercion:
         # Each parsed item fails _coerce_bool_value (a list, null, an int
         # other than 0/1, or a float other than 0.0/1.0), so the JSON-string
         # form must name the parameter on the offending item.
+        with pytest.raises(ValueError, match=r"Parameter Flags"):
+            _preprocess(list_bool_template, {"Flags": submitted}, tmp_path)
+
+    @pytest.mark.parametrize(
+        "submitted",
+        [
+            pytest.param([None], id="null-item"),
+            pytest.param([2], id="int-out-of-range-item"),
+            pytest.param([2.0], id="float-out-of-range-item"),
+            pytest.param([[True]], id="nested-list-item"),
+        ],
+    )
+    def test_native_list_invalid_items_rejected_with_parameter_name(
+        self, list_bool_template, tmp_path, submitted
+    ) -> None:
+        # The native-list submitted branch (not the JSON-string parse-then-
+        # coerce branch) must also name the parameter when an item fails
+        # _coerce_bool_value: null, an int other than 0/1, a float other than
+        # 0.0/1.0, or a nested list each pin the existing per-item guard.
         with pytest.raises(ValueError, match=r"Parameter Flags"):
             _preprocess(list_bool_template, {"Flags": submitted}, tmp_path)
 

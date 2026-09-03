@@ -243,8 +243,15 @@ def _collect_defaults_2023_09(
 
                         # Defaults are pre-validated at decode time by
                         # _check_item (and re-validated on any merge via
-                        # _check_constraints), so this coercion cannot fail.
-                        default_value = [_coerce_bool_value(item) for item in param.default]
+                        # _check_constraints), so this coercion normally cannot
+                        # fail. A definition that bypasses those validators
+                        # (e.g. a model_copy carry-over) could still reach here,
+                        # so name the parameter on failure, matching the
+                        # submitted-value path's error context below.
+                        try:
+                            default_value = [_coerce_bool_value(item) for item in param.default]
+                        except ValueError as exc:
+                            raise ValueError(f"Parameter {param.name}: {exc}") from exc
                     return_value[param.name] = ParameterValue(
                         type=ParameterValueType(param.type), value=default_value
                     )
