@@ -1,3 +1,14 @@
+## 0.11.8 (2026-09-03)
+
+
+### Features
+* A chunked step parameter space can now be walked at a granularity you choose, instead of only at the chunk size the template declared. Pass `chunks_task_count_override` when constructing `StepParameterSpaceIterator`; it overrides the `defaultTaskCount` of a `CHUNK[INT]` parameter and turns adaptive chunking off. Pass `1` to iterate individual tasks. It is ignored when the space has no chunked parameter, though a non-positive value is still rejected. (#344)
+
+### Bug Fixes
+* A float range element keeps the number of decimal places it was written with, so `2.50` in a range list renders as `2.50` rather than `2.5`. Redundant leading zeros are still dropped, and a signed zero renders as the author wrote it. This is the scale-preserving behavior required by Template Schemas §7.5. (#345)
+* A `let` binding name longer than 512 characters is now rejected instead of accepted, per Template Schemas §3.6.1. The error names the offending binding with a 32-character prefix and its true length, so it is diagnosable when a template declares many bindings. (#348)
+
+
 ## 0.11.7 (2026-09-01)
 
 
