@@ -150,16 +150,15 @@ awk -v re="^[*][*] ($workspace_pattern); version " '
 
 # ── Combine ───────────────────────────────────────────────────────────
 
+# Piped through `sed` on the way in, so the EOL strip needs neither a second temp
+# file nor `sed -i`, which wants a backup suffix on BSD sed and refuses one on GNU.
 {
     echo ""
     echo ""
     cat "$python_section"
     echo ""
     cat "$rust_section"
-} > "$generated"
-
-# Ensure consistent EOL.
-sed -i 's/\r//' "$generated"
+} | sed 's/\r//' > "$generated"
 
 if [[ "$mode" == "update" ]]; then
     cp "$generated" "$OUTPUT_FILE"

@@ -899,15 +899,25 @@ fn task_param_def_from_dict(
         // List of values — coerce each to the variant's element type.
         let mut items: Vec<serde_json::Value> = Vec::with_capacity(list.len());
         for v in list.iter() {
-            let s: String = match v.extract::<String>() {
-                Ok(s) => s,
-                Err(_) => v.str()?.extract()?,
+            // Whether the element arrived as a Python `str` decides which member of
+            // the template's own `<float> | <floatstring>` union it is, and a
+            // `<floatstring>` has to keep the spelling it was written with (§7.5).
+            // `Float64` reads a JSON string as that spelling and a JSON number as a
+            // bare value, so the distinction has to survive to here -- `v.str()`
+            // collapses it.
+            let (s, is_text): (String, bool) = match v.extract::<String>() {
+                Ok(s) => (s, true),
+                Err(_) => (v.str()?.extract()?, false),
             };
             items.push(match variant {
                 "int" | "chunkInt" => match s.parse::<i64>() {
                     Ok(n) => serde_json::Value::Number(n.into()),
                     Err(_) => serde_json::Value::String(s),
                 },
+                // The text carries as-is. `Float64`'s deserializer parses it, and
+                // rejects an unparseable one there rather than here -- which is also
+                // what happened when this re-emitted a number.
+                "float" if is_text => serde_json::Value::String(s),
                 "float" => match s.parse::<f64>() {
                     Ok(n) => serde_json::Number::from_f64(n)
                         .map(serde_json::Value::Number)

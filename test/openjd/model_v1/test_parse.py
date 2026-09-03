@@ -232,6 +232,69 @@ def test_template_extensions_list(template, template_type, decode_function) -> N
     decode_function(template=template, supported_extensions=["TASK_CHUNKING", "EXPR"])
 
 
+class TestLetIdentifierLengthCap(object):
+    """A ``let`` binding's ``<UserIdentifier>`` is capped at 512 characters
+    (Template Schemas §3.6.1). Enforced by openjd-model 0.6.0 (openjd-rs#358);
+    before that a 513-character name was accepted here. The v0 side has its own
+    coverage in ``test/openjd/model_v0/v2023_09/test_let_bindings.py``; this is the
+    v1 path, which had none.
+
+    The cap is flat, not the §7.1 ``<Identifier>`` cap of 64 rising to 512 with
+    ``FEATURE_BUNDLE_1``. The 512-character accept with ``EXPR`` alone is what makes
+    the difference observable, and is why the fix upstream did not reuse
+    ``EffectiveLimits::max_identifier_len``.
+    """
+
+    @staticmethod
+    def _template(name: str, extensions: list[str]) -> dict[str, Any]:
+        return {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "extensions": extensions,
+            "steps": [
+                {
+                    "name": "Step1",
+                    "let": [f"{name} = 42"],
+                    "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}},
+                }
+            ],
+        }
+
+    @pytest.mark.parametrize(
+        "extensions",
+        [
+            pytest.param(["EXPR"], id="EXPR only"),
+            pytest.param(["EXPR", "FEATURE_BUNDLE_1"], id="with FEATURE_BUNDLE_1"),
+        ],
+    )
+    def test_512_characters_is_accepted(self, extensions: list[str]) -> None:
+        """Both extension sets accept the boundary. Without ``FEATURE_BUNDLE_1`` the
+        §7.1 cap would be 64, so this is the case that pins the cap as flat."""
+        template = self._template("a" * 512, extensions)
+        assert decode_job_template(template=template, supported_extensions=extensions)
+
+    @pytest.mark.parametrize(
+        "extensions",
+        [
+            pytest.param(["EXPR"], id="EXPR only"),
+            pytest.param(["EXPR", "FEATURE_BUNDLE_1"], id="with FEATURE_BUNDLE_1"),
+        ],
+    )
+    def test_513_characters_is_rejected(self, extensions: list[str]) -> None:
+        template = self._template("a" * 513, extensions)
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=template, supported_extensions=extensions)
+        message = str(excinfo.value)
+        assert "steps[0] -> let[0]" in message
+        assert "exceeds 512 characters" in message
+
+    def test_a_short_name_is_unaffected(self) -> None:
+        """Control. 65 characters is over the §7.1 cap of 64 and under §3.6.1's, so it
+        must be accepted -- a regression to the wrong constant would reject it."""
+        template = self._template("a" * 65, ["EXPR"])
+        assert decode_job_template(template=template, supported_extensions=["EXPR"])
+
+
 class TestDecodeJobTemplateStr:
     """``decode_job_template_str`` wrapper: parses YAML or JSON
     directly, no intermediate dict. The wrapper lives on

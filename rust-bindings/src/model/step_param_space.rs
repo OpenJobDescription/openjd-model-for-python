@@ -214,6 +214,26 @@ impl PyStepParameterSpaceIterator {
     }
 
     fn __getitem__(&self, py: Python<'_>, index: isize) -> PyResult<Py<PyDict>> {
+        // Random access uses a fresh iterator — don't disturb the
+        // persistent iter's cursor or its adaptive Arc. It must carry the
+        // same chunk override, or indexing would report chunks that
+        // iteration never yields.
+        let iter =
+            StepParameterSpaceIterator::new_with_chunk_override(&self.space, self.chunk_override)
+                .map_err(model_err_to_py)?;
+        // Rejected here rather than left to `get`, because the negative-index
+        // arithmetic below resolves against `self.len` — the count `__len__`
+        // refuses to report for an adaptive space. Without this, `it[-1]` declines
+        // only incidentally, and would start answering against that hidden count
+        // if `get` were ever extended to adaptive spaces the way 0.6.0 extended it
+        // to contiguous ones. The message is the pure-Python reference's; the type
+        // stays `IndexError`, which is a `LookupError` as v0 raises, so `except`
+        // clauses for either keep working.
+        if iter.chunks_adaptive() {
+            return Err(pyo3::exceptions::PyIndexError::new_err(
+                "Items cannot be retrieved by index because the parameter space uses adaptive chunking.",
+            ));
+        }
         let idx = if index < 0 {
             let adjusted = self.len as isize + index;
             if adjusted < 0 {
@@ -225,13 +245,6 @@ impl PyStepParameterSpaceIterator {
         } else {
             index as usize
         };
-        // Random access uses a fresh iterator — don't disturb the
-        // persistent iter's cursor or its adaptive Arc. It must carry the
-        // same chunk override, or indexing would report chunks that
-        // iteration never yields.
-        let iter =
-            StepParameterSpaceIterator::new_with_chunk_override(&self.space, self.chunk_override)
-                .map_err(model_err_to_py)?;
         match iter.get(idx) {
             Some(params) => task_param_set_to_py(py, &params),
             None => Err(pyo3::exceptions::PyIndexError::new_err(

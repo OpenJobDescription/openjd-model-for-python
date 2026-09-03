@@ -548,8 +548,12 @@ pub(crate) fn task_parameter_to_py<'py>(
             }
             .into_bound_py_any(py)
         }
+        // `Float64` carries the spelling a `<floatstring>` range element was
+        // written with (§7.5). It reaches a command line through
+        // `TaskParameterValue`, which renders it verbatim; this getter is the
+        // numeric introspection view, so take the value and drop the spelling.
         TaskParameter::Float { range } => PyFloatTaskParameter {
-            range: range.clone(),
+            range: range.iter().map(|f| f.value()).collect(),
         }
         .into_bound_py_any(py),
         TaskParameter::String { range } => PyStringTaskParameter {

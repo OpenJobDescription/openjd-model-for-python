@@ -14,7 +14,7 @@ definition as a dict literal of the form
 ``{type, range, [chunks]}`` matching the YAML/JSON template syntax.
 """
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import pytest
 
@@ -563,6 +563,101 @@ class TestStepParameterSpaceIterator:
             len(it)
 
 
+class TestFloatRangeSpellingIsPreserved:
+    """A FLOAT range element given as a ``str`` keeps the decimal places it was
+    written with, so the value reaching a command line is the one the caller asked
+    for (Template Schemas §7.5, openjd-rs#354).
+
+    ``StepParameterSpace`` builds the *resolved* space directly, without the
+    ``decode_job_template`` + ``create_job`` path, so it is its own route to a
+    ``Float64`` and has to make the same choice: the template's range element is a
+    ``<float> | <floatstring>`` union, and only the string member carries a
+    spelling. Before openjd-model 0.6.0 there was no spelling to carry -- the
+    resolved range was ``Vec<f64>`` -- so this could not be observed.
+    """
+
+    @staticmethod
+    def _rendered(elements: list[Any]) -> list[str]:
+        space = StepParameterSpace(
+            taskParameterDefinitions={"F": {"type": "FLOAT", "range": elements}}
+        )
+        return [params["F"].value for params in StepParameterSpaceIterator(space=space)]
+
+    @pytest.mark.parametrize(
+        "element,expected",
+        [
+            ("1.50", "1.50"),  # the trailing zero is the requested scale
+            ("3.500", "3.500"),
+            ("1e3", "1e3"),  # exponent notation is not expanded
+            ("1E+2", "1E+2"),
+            ("5.", "5."),  # no digit is invented after the point
+            (".5", ".5"),  # nor before it
+            ("0.50", "0.50"),
+            ("-0.00", "0.00"),  # zero has no sign, but keeps its places
+            # The last two do not pin the fix -- both render the same without it, and
+            # both survive the mutant that reverts it. Kept as controls: canonical text
+            # must not change, and padded text must still be trimmed (it took the
+            # string path already, because Rust's `f64` parse rejects the spaces).
+            ("2.5", "2.5"),
+            ("  2.50  ", "2.50"),
+        ],
+    )
+    def test_a_string_element_keeps_its_spelling(self, element: str, expected: str) -> None:
+        assert self._rendered([element]) == [expected]
+
+    @pytest.mark.parametrize("element,expected", [(1.5, "1.5"), (1000.0, "1000.0"), (0.5, "0.5")])
+    def test_a_float_element_renders_as_the_number(self, element: float, expected: str) -> None:
+        """The negative control. A Python ``float`` is the union's ``<float>`` member and
+        has no spelling to keep, so it must not acquire one from ``str()`` -- these are
+        the values where preserving the text would have been indistinguishable from
+        rendering the number, and they must stay that way."""
+        assert self._rendered([element]) == [expected]
+
+    def test_it_matches_what_the_template_path_renders(self) -> None:
+        """The two routes to a resolved space agree, which is the point of the fix:
+        before it, this space rendered ``1.5`` where the template rendered ``1.50``."""
+        elements = ["1.50", "1e3", "5.", ".5", "2.5"]
+        template = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "steps": [
+                {
+                    "name": "S",
+                    "parameterSpace": {
+                        "taskParameterDefinitions": [
+                            {"name": "F", "type": "FLOAT", "range": elements}
+                        ]
+                    },
+                    "script": {
+                        "actions": {"onRun": {"command": "echo", "args": ["{{Task.Param.F}}"]}}
+                    },
+                }
+            ],
+        }
+        step = create_job(
+            job_template=decode_job_template(template=template), job_parameter_values={}
+        ).steps[0]
+        from_template = [params["F"].value for params in StepParameterSpaceIterator(step=step)]
+        assert self._rendered(elements) == from_template == elements
+
+    def test_a_redundant_leading_zero_is_not_stripped_here(self) -> None:
+        """The one place the two routes still differ, and deliberately. Stripping a
+        redundant leading zero is a ``create_job`` normalization (openjd-model
+        ``create_job/ranges.rs``), not part of reading a resolved value, so the
+        template path renders ``2.50`` while a value handed straight to the resolved
+        type keeps the ``0``. Constructing the Rust ``TaskParameter`` directly behaves
+        the same way, because ``Float64``'s deserializer trims whitespace and unsigns
+        zero but does not strip.
+        """
+        assert self._rendered(["02.50"]) == ["02.50"]
+
+    def test_an_unparseable_element_is_still_rejected(self) -> None:
+        """Forwarding the text rather than a number must not turn a bad element into an
+        accepted one; it fails in ``Float64``'s deserializer instead of here."""
+        with pytest.raises(ValueError, match="not-a-float"):
+            self._rendered(["not-a-float"])
+
+
 class TestChunkIntContains:
     """``__contains__`` must round-trip values yielded by a chunked
     iterator. The iterator yields ``TaskParameterValue`` instances
@@ -722,8 +817,10 @@ class TestChunksTaskCountOverride:
         """``__getitem__`` builds a fresh iterator, so it has to carry the override too,
         or indexing reports chunks iteration never yields.
 
-        Uses NONCONTIGUOUS because random access needs a non-sequential space, and a
-        CONTIGUOUS chunked space is always sequential (see the test below).
+        NONCONTIGUOUS because that is what the assertions below depend on: it renders a
+        single-task chunk as a bare ``"1"``, where CONTIGUOUS renders ``"1-1"``. Both
+        support random access — see
+        ``test_a_contiguous_space_supports_indexing_with_or_without_the_override``.
         """
         it = StepParameterSpaceIterator(
             step=self._step({"defaultTaskCount": 5, "rangeConstraint": "NONCONTIGUOUS"}),
@@ -741,21 +838,95 @@ class TestChunksTaskCountOverride:
         assert fresh[9]["Frame"].value == yielded[-1]
         assert fresh[-1]["Frame"].value == yielded[-1]
 
-    def test_a_contiguous_space_refuses_indexing_with_or_without_the_override(self) -> None:
-        """Pre-existing behaviour the override does not change: openjd-model requires
-        sequential iteration for contiguous chunking, so ``get`` always declines.
-        Pinned here so a future change to random access is a deliberate one. Its
-        counterpart is ``test_known_gaps.py::test_a_contiguous_chunked_space_supports_indexing``,
-        a strict xfail asserting the opposite: closing that gap fails there as an xpass
-        *and* here as a hard assertion, so both move together, along with the
-        limitation noted in ``specs/python-model-interface.md``."""
-        for override in (None, 1):
-            it = StepParameterSpaceIterator(
-                step=self._step(self._STATIC), chunks_task_count_override=override
-            )
+    def test_a_contiguous_space_supports_indexing_with_or_without_the_override(self) -> None:
+        """openjd-model 0.6.0 (openjd-rs#355) gave a contiguous chunked space random
+        access, so ``get`` now answers where it used to decline. Promoted from
+        ``test_known_gaps.py::test_a_contiguous_chunked_space_supports_indexing``,
+        which pinned the v0 reading as a strict xfail.
+
+        Indexing observes the override, same as the NONCONTIGUOUS case above, and the
+        end of the space is still an ``IndexError``.
+        """
+        it = StepParameterSpaceIterator(step=self._step(self._STATIC))
+        assert [it[0]["Frame"].value, it[1]["Frame"].value, it[-1]["Frame"].value] == [
+            "1-5",
+            "6-10",
+            "6-10",
+        ]
+        with pytest.raises(IndexError) as excinfo:
+            _ = it[2]
+        assert str(excinfo.value) == "index out of range"
+
+        overridden = StepParameterSpaceIterator(
+            step=self._step(self._STATIC), chunks_task_count_override=1
+        )
+        assert [overridden[0]["Frame"].value, overridden[-1]["Frame"].value] == ["1-1", "10-10"]
+
+    def test_an_adaptive_space_still_refuses_indexing(self) -> None:
+        """The negative control for the test above, and the remaining limitation
+        recorded in ``specs/python-model-interface.md``: an adaptive space has no
+        knowable count, so ``len()`` raises and every index is refused. Iteration
+        still yields, which is what distinguishes "unknown count" from "empty".
+
+        The refusal is enforced rather than incidental. ``__getitem__`` resolves a
+        negative index against the length ``__len__`` declines to report, so leaving
+        the rejection to ``get`` would let ``it[-1]`` answer against that hidden count
+        if ``get`` were extended to adaptive spaces, as 0.6.0 extended it to
+        contiguous ones. The message therefore names the reason instead of saying
+        "index out of range", and it is the pure-Python reference's wording.
+        """
+        it = StepParameterSpaceIterator(step=self._step(self._ADAPTIVE))
+        assert it.chunks_adaptive is True
+        for index in (0, 1, -1, -100):
             with pytest.raises(IndexError) as excinfo:
-                _ = it[0]
-            assert str(excinfo.value) == "index out of range"
+                _ = it[index]
+            assert str(excinfo.value) == (
+                "Items cannot be retrieved by index because the parameter space "
+                "uses adaptive chunking."
+            )
+        # v0 raises a bare LookupError here, not an IndexError. IndexError is a
+        # LookupError subclass, so a caller catching either is served by both
+        # implementations; the type itself still differs, which the spec records.
+        with pytest.raises(LookupError):
+            _ = it[0]
+        assert self._frames(StepParameterSpaceIterator(step=self._step(self._ADAPTIVE))) == [
+            "1-5",
+            "6-10",
+        ]
+
+    @pytest.mark.parametrize(
+        "chunks,override,expected_count",
+        [
+            # Statically chunked: no override involved, the template's own size.
+            ({"defaultTaskCount": 5, "rangeConstraint": "CONTIGUOUS"}, None, 5),
+            # Statically chunked, re-chunked by the override.
+            ({"defaultTaskCount": 5, "rangeConstraint": "CONTIGUOUS"}, 1, 1),
+            # Adaptive, turned static by the override, which becomes the size.
+            (
+                {
+                    "defaultTaskCount": 5,
+                    "targetRuntimeSeconds": 60,
+                    "rangeConstraint": "CONTIGUOUS",
+                },
+                1,
+                1,
+            ),
+        ],
+        ids=["static", "static-overridden", "adaptive-overridden"],
+    )
+    def test_chunk_metadata_is_reported_for_a_non_adaptive_space(
+        self, chunks: dict[str, Any], override: Optional[int], expected_count: int
+    ) -> None:
+        """openjd-model 0.6.0 (openjd-rs#355) reports ``chunks_parameter_name`` and
+        ``chunks_default_task_count`` for any chunked space, not only an adaptive one,
+        which is what the v0 reference has always done. Promoted from
+        ``test_known_gaps.py``, where it was a strict xfail."""
+        it = StepParameterSpaceIterator(
+            step=self._step(chunks), chunks_task_count_override=override
+        )
+        assert it.chunks_adaptive is False
+        assert it.chunks_parameter_name == "Frame"
+        assert it.chunks_default_task_count == expected_count
 
     def test_an_intermediate_override_regroups_the_chunks(self) -> None:
         """Not just 1: any positive size regroups the space."""
