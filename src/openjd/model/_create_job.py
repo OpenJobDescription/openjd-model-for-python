@@ -96,21 +96,17 @@ def _coerce_expr_param_value(param_type_name: str, value: Any) -> Any:
         if not isinstance(parsed, list):
             raise ValueError(f"Value '{value}' is not valid JSON for a list parameter.")
         if param_type_name == "LIST_BOOL":
-            # RFC 0007 §2.15: each LIST[BOOL] item accepts the same values as a
-            # scalar BOOL parameter (JobBoolParameterDefinition). Normalize the
-            # freshly parsed items; other LIST[*] types pass the parsed list
-            # through unchanged.
-            # Inline import matches the file's deferred v2023_09 import pattern
-            # (avoids a module-level dependency on the version package).
+            # §2.15: LIST[BOOL] items accept the same spellings as scalar BOOL;
+            # reuse the scalar's coercion so the two can't drift. Deferred import:
+            # this file is version-agnostic and v2023_09._model imports from this
+            # package, so a top-level import would risk a cycle.
             from .v2023_09._model import _coerce_bool_value
 
             return [_coerce_bool_value(item) for item in parsed]
         return parsed
     if param_type_name == "LIST_BOOL" and isinstance(value, list):
-        # RFC 0007 §2.15: a LIST[BOOL] value submitted as a native list is
-        # normalized per item, same as its JSON-string form above. Build a new
-        # list — never mutate the caller's input.
-        # Inline import matches the file's deferred v2023_09 import pattern.
+        # Same §2.15 normalization as the JSON branch above; build a new list,
+        # never mutate the caller's input.
         from .v2023_09._model import _coerce_bool_value
 
         return [_coerce_bool_value(item) for item in value]
@@ -232,22 +228,12 @@ def _collect_defaults_2023_09(
                     # applies to the scalar PATH type.
                     default_value: Any = param.default
                     if param.type.name == "LIST_BOOL" and isinstance(param.default, list):
-                        # RFC 0007 §2.15: each LIST[BOOL] item accepts the same
-                        # values as a scalar BOOL parameter. Normalize the
-                        # template default per item (build a new list — never
-                        # mutate param.default), matching the submitted-value
-                        # path so mixed spellings store as canonical booleans.
-                        # Inline import matches the file's deferred v2023_09
-                        # import pattern.
+                        # Same §2.15 normalization for template defaults. Decode-time
+                        # validation normally guarantees success, but validator-bypassing
+                        # definitions (e.g. model_copy) can still reach here, hence the
+                        # Parameter-name context on failure.
                         from .v2023_09._model import _coerce_bool_value
 
-                        # Defaults are pre-validated at decode time by
-                        # _check_item (and re-validated on any merge via
-                        # _check_constraints), so this coercion normally cannot
-                        # fail. A definition that bypasses those validators
-                        # (e.g. a model_copy carry-over) could still reach here,
-                        # so name the parameter on failure, matching the
-                        # submitted-value path's error context below.
                         try:
                             default_value = [_coerce_bool_value(item) for item in param.default]
                         except ValueError as exc:
