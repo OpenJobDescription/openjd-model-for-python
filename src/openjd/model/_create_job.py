@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 
 from pydantic import ValidationError
 
+from ._bool_coercion import _coerce_bool_value
 from ._errors import CompatibilityError, DecodeValidationError
 from ._format_strings import FormatStringError
 from ._symbol_table import SymbolTable
@@ -63,6 +64,14 @@ class JobWithSymbolTables:
 _LEGACY_SCALAR_TYPE_NAMES = frozenset({"STRING", "INT", "FLOAT", "PATH"})
 
 
+class _ListBoolItemError(ValueError):
+    """A LIST[BOOL] per-item coercion failure, distinct from the JSON-level
+    parse errors shared by all LIST[*] types. The value-collection call site
+    prefixes only these with the parameter name; JSON/scalar errors stay
+    verbatim, matching the other list types.
+    """
+
+
 def _coerce_expr_param_value(param_type_name: str, value: Any) -> Any:
     """Coerce a SUBMITTED string value for an EXPR-typed job parameter to its
     native form, mirroring openjd-rs's ``coerce_from_str``
@@ -96,20 +105,19 @@ def _coerce_expr_param_value(param_type_name: str, value: Any) -> Any:
         if not isinstance(parsed, list):
             raise ValueError(f"Value '{value}' is not valid JSON for a list parameter.")
         if param_type_name == "LIST_BOOL":
-            # §2.15: LIST[BOOL] items accept the same spellings as scalar BOOL;
-            # reuse the scalar's coercion so the two can't drift. Deferred import:
-            # this file is version-agnostic and v2023_09._model imports from this
-            # package, so a top-level import would risk a cycle.
-            from .v2023_09._model import _coerce_bool_value
-
-            return [_coerce_bool_value(item) for item in parsed]
+            # §2.15: LIST[BOOL] items accept the same spellings as scalar BOOL; reuse the scalar's coercion so the two can't drift.
+            try:
+                return [_coerce_bool_value(item) for item in parsed]
+            except ValueError as exc:
+                raise _ListBoolItemError(str(exc)) from exc
         return parsed
     if param_type_name == "LIST_BOOL" and isinstance(value, list):
         # Same §2.15 normalization as the JSON branch above; build a new list,
         # never mutate the caller's input.
-        from .v2023_09._model import _coerce_bool_value
-
-        return [_coerce_bool_value(item) for item in value]
+        try:
+            return [_coerce_bool_value(item) for item in value]
+        except ValueError as exc:
+            raise _ListBoolItemError(str(exc)) from exc
     return value
 
 
@@ -232,8 +240,6 @@ def _collect_defaults_2023_09(
                         # validation normally guarantees success, but validator-bypassing
                         # definitions (e.g. model_copy) can still reach here, hence the
                         # Parameter-name context on failure.
-                        from .v2023_09._model import _coerce_bool_value
-
                         try:
                             default_value = [_coerce_bool_value(item) for item in param.default]
                         except ValueError as exc:
@@ -265,16 +271,14 @@ def _collect_defaults_2023_09(
                 # Raises ValueError (collected by the caller) on bad input.
                 try:
                     value = _coerce_expr_param_value(param.type.name, value)
-                except ValueError as exc:
-                    if param.type.name == "LIST_BOOL":
-                        # RFC 0007 §2.15: per-item coercion runs here during
-                        # value collection, before _check_2023_09/_check_constraints,
-                        # so the error would surface name-free unless named at this
-                        # call site.
-                        # Other EXPR errors keep their verbatim (name-free)
-                        # message, as the scalar BOOL branch does.
-                        raise ValueError(f"Parameter {param.name}: {exc}") from exc
-                    raise
+                except _ListBoolItemError as exc:
+                    # RFC 0007 §2.15: per-item coercion runs here during value
+                    # collection, before _check_2023_09/_check_constraints, so
+                    # a per-item failure would surface name-free unless named
+                    # at this call site. JSON-level and scalar errors are plain
+                    # ValueErrors and keep their verbatim (name-free) message,
+                    # matching the other list types.
+                    raise ValueError(f"Parameter {param.name}: {exc}") from exc
                 return_value[param.name] = ParameterValue(
                     type=ParameterValueType(param.type), value=value
                 )

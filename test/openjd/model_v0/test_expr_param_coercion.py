@@ -209,6 +209,30 @@ class TestListBoolValueCoercion:
         with pytest.raises(ValueError, match=r"not valid JSON for a list parameter"):
             _preprocess(list_bool_template, {"Flags": '{"a": 1}'}, tmp_path)
 
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            pytest.param("[1,2", id="malformed-json"),
+            pytest.param('{"a": 1}', id="json-but-not-a-list"),
+        ],
+    )
+    def test_json_parse_error_not_prefixed_matches_other_list_types(
+        self, list_bool_template, template, tmp_path, bad
+    ) -> None:
+        # The JSON-level parse error is shared by all LIST[*] types and is not a
+        # per-item coercion failure, so LIST[BOOL] must NOT prefix it with the
+        # parameter name; the message must be byte-identical to the one a
+        # LIST[INT] parameter produces for the same bad input.
+        with pytest.raises(ValueError) as bool_exc:
+            _preprocess(list_bool_template, {"Flags": bad}, tmp_path)
+        with pytest.raises(ValueError) as int_exc:
+            _preprocess(template, {"Flag": "true", "Values": bad, "Nested": [[1]]}, tmp_path)
+        # The parse error is the first collected error; the trailing
+        # missing-value line names each template's own list parameter, so
+        # compare the parse-error line itself.
+        assert not str(bool_exc.value).startswith("Parameter")
+        assert str(bool_exc.value).splitlines()[0] == str(int_exc.value).splitlines()[0]
+
     def test_empty_native_list_passes_through(self, list_bool_template, tmp_path) -> None:
         # The LIST[BOOL] definition declares no minLength, so an empty list is
         # accepted and stored unchanged (per-item coercion of [] yields []).

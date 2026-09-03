@@ -122,6 +122,42 @@ class TestCreateJobExprParams:
         job = _create({"name": "Bs", "type": "LIST[BOOL]", "default": []})
         assert _stored_value(job, "Bs") == []
 
+    def test_list_bool_default_template_not_mutated(self) -> None:
+        # create_job coerces a LIST[BOOL] template default to canonical booleans
+        # for the created Job, but must build a NEW list and leave the template's
+        # own default (and its serialized form) with the raw submitted spellings.
+        jt = decode_job_template(
+            template=_template({"name": "Bs", "type": "LIST[BOOL]", "default": ["yes", 0, True]}),
+            supported_extensions=["EXPR"],
+        )
+        job = create_job(job_template=jt, job_parameter_values={})
+        created = _stored_value(job, "Bs")
+        assert created == [True, False, True]
+        # equality alone passes for ints ([1,0,1] == [True,False,True]).
+        assert all(type(x) is bool for x in created)
+        # The template object's default is untouched, with its original item types.
+        default = jt.parameterDefinitions[0].default
+        assert default == ["yes", 0, True]
+        assert [type(x) for x in default] == [str, int, bool]
+        # The serialized template still carries the raw spellings, not the coerced booleans.
+        dumped = model_to_object(model=jt)["parameterDefinitions"][0]["default"]
+        assert dumped == ["yes", 0, True]
+        assert [type(x) for x in dumped] == [str, int, bool]
+
+    def test_list_bool_none_default_flows_without_type_error(self) -> None:
+        # A LIST[BOOL] definition with no default (default None) must not reach
+        # the per-item coercion comprehension: the outer `is not None` check plus
+        # the `isinstance(param.default, list)` guard keep None from being
+        # iterated. Job creation must surface the normal missing-required-value
+        # error, never a TypeError from iterating None.
+        jt = decode_job_template(
+            template=_template({"name": "Bs", "type": "LIST[BOOL]"}),
+            supported_extensions=["EXPR"],
+        )
+        assert jt.parameterDefinitions[0].default is None
+        with pytest.raises(DecodeValidationError, match=r"missing for required job parameters"):
+            create_job(job_template=jt, job_parameter_values={})
+
     def test_list_bool_invalid_default_error_names_parameter(self) -> None:
         # The template-default coercion path must name the offending parameter,
         # matching the submitted-value path. Defaults are normally pre-validated
