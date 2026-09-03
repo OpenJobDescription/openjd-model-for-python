@@ -441,13 +441,12 @@ class TestTaskParameterRangeLength:
 
 
 class TestRangeListElementNormalization:
-    """§3.4.1.1/§3.4.1.2: an `<IntRangeList>` element is `<integer> | <intstring>`
-    and a `<FloatRangeList>` element is `<float> | <floatstring>`. An
-    `<intstring>`/`<floatstring>` is "a string whose value is the string
-    representation of" a number (§2.3, §2.4), so it denotes that number and not
-    its source text — a range of `['1', '02', '003']` is the task values 1, 2 and
-    3. These values reach a task command line, so keeping the text renders
-    `--frame 02`.
+    """§7.5 on a range element: leading zeros go, decimal places stay.
+
+    `['1', '02', '003']` is the task values 1, 2 and 3; keeping the text renders
+    `--frame 02`. But `'2.50'` renders `2.50`, because the string form is how a
+    template asks for a fixed number of decimal places —
+    `EXPR/jobs/expr1.3.4--float-passthrough` pins that for a FLOAT default.
     """
 
     @pytest.mark.parametrize(
@@ -471,96 +470,86 @@ class TestRangeListElementNormalization:
     @pytest.mark.parametrize(
         "element,expected",
         (
-            pytest.param("1.5", "1.5", id="no normalization needed"),
-            pytest.param("02.50", "2.5", id="leading and trailing zeros"),
-            pytest.param("3.500", "3.5", id="trailing zeros"),
-            pytest.param("-02.50", "-2.5", id="negative"),
-            # An integral float keeps one fractional digit. openjd-rs renders
-            # the <floatstring> '1.0' as `1.0` and '007' as `7.0`, so dropping
-            # the fraction would make the same number render two ways depending
-            # on whether it was written as a <float> or a <floatstring>.
-            pytest.param("1.0", "1.0", id="integral float"),
+            pytest.param("1.5", "1.5", id="nothing to strip"),
+            # The rule, in both directions at once.
+            pytest.param("02.50", "2.50", id="leading zero goes, trailing zero stays"),
+            pytest.param("3.500", "3.500", id="trailing zeros stay"),
+            pytest.param("-02.50", "-2.50", id="negative"),
+            pytest.param("+02.50", "+2.50", id="explicit plus sign is kept"),
+            pytest.param("007", "7", id="leading zeros on a whole number"),
+            pytest.param("100", "100", id="a zero that is a significant digit"),
+            # Neither the zero before the point nor the last of an all-zero
+            # integer part is redundant.
+            pytest.param("0.50", "0.50", id="the necessary leading zero stays"),
+            pytest.param("000", "0", id="all zeros keeps one"),
+            pytest.param("0", "0", id="bare zero"),
             pytest.param("0.0", "0.0", id="zero"),
+            pytest.param("0.00", "0.00", id="zero keeps its trailing zeros too"),
+            # Zero has no sign, which openjd-rs and mainline both render away.
+            # Dropping it must not drop the decimal places with it.
             pytest.param("-0.0", "0.0", id="negative zero has no sign"),
-            pytest.param("007", "7.0", id="leading zeros on a whole number"),
-            pytest.param("100", "100.0", id="whole number"),
-            # Exponent notation must never reach a task command line, at any
-            # magnitude and in either direction.
-            pytest.param("1E+2", "100.0", id="exponent notation in the source"),
-            pytest.param(
-                "0.0000001",
-                "0.0000001",
-                id="below 1e-6, where Decimal.__str__ would give 1E-7",
-            ),
-            pytest.param(
-                "1E+30",
-                "1" + "0" * 30 + ".0",
-                id="more digits than the default decimal precision",
-            ),
+            pytest.param("-0.00", "0.00", id="unsigned, but still two places"),
+            # An all-zero mantissa spells zero whatever the exponent.
+            pytest.param("0E+2", "0E+2", id="exponent form of zero"),
+            pytest.param("-0e5", "0e5", id="signed exponent form of zero"),
+            # Underflow is not zero being spelled: the digits are the request.
+            pytest.param("1e-400", "1e-400", id="underflow keeps its digits"),
+            pytest.param("0." + "0" * 400 + "1", "0." + "0" * 400 + "1", id="tiny plain decimal"),
+            # float() ignores surrounding whitespace and this text reaches a
+            # command line, so it is trimmed rather than forwarded.
+            pytest.param("  1.5  ", "1.5", id="surrounding whitespace"),
+            pytest.param("1.0", "1.0", id="integral float keeps its point"),
+            # Exponent notation is the author's own text and is forwarded. The
+            # FLOAT parameter default path does the same for `default: "1E+2"`.
+            pytest.param("1E+2", "1E+2", id="exponent notation"),
+            pytest.param("01E+2", "1E+2", id="leading zero on an exponent form"),
+            pytest.param("0.0000001", "0.0000001", id="below 1e-6"),
             pytest.param(
                 "1.2345678901234567890123456789012345678901",
                 "1.2345678901234567890123456789012345678901",
-                id="more significant digits than the default decimal precision",
+                id="more significant digits than a float can hold",
             ),
         ),
     )
-    def test_floatstring_elements_carry_their_value(self, element: str, expected: str) -> None:
+    def test_floatstring_elements_keep_their_scale(self, element: str, expected: str) -> None:
         # WHEN the instantiation target parses a float range holding a <floatstring>
         model = _parse_model(
             model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
         )
 
-        # THEN the element renders as the number it denotes
+        # THEN it renders as written, less any redundant leading zeros
         assert [str(v) for v in model.range] == [expected]
-
-    @pytest.mark.parametrize(
-        "element",
-        (
-            # Decimal's context bounds arithmetic results, not construction from
-            # a string, so these are finite: 11 characters of template text
-            # whose plain-notation expansion is ~10**9 characters.
-            pytest.param("1e999999999", id="huge positive exponent"),
-            pytest.param("1e-999999999", id="huge negative exponent"),
-            # One character past the cap in each direction: both expand to 1025.
-            pytest.param("1E+1022", id="one past the cap, positive exponent"),
-            pytest.param("1E-1023", id="one past the cap, negative exponent"),
-        ),
-    )
-    def test_element_too_long_to_expand_keeps_its_source_text(self, element: str) -> None:
-        # WHEN the instantiation target parses a <floatstring> whose plain-notation
-        # form would not fit TaskParameterStringValueAsJob's 1024-character cap
-        model = _parse_model(
-            model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
-        )
-
-        # THEN it keeps its source text rather than being expanded. Expanding it
-        # would allocate the whole expansion, and the result could not be carried
-        # as text here anyway: it fails the str member of TaskRangeList's union,
-        # and pydantic then falls through to the numeric members, rendering the
-        # element as an integer, or as inf, or as 0.0.
-        assert [str(v) for v in model.range] == [element]
 
     @pytest.mark.parametrize(
         "element,expected",
         (
-            pytest.param("1E+1021", "1" + "0" * 1021 + ".0", id="positive exponent"),
-            pytest.param("1E-1022", "0." + "0" * 1021 + "1", id="negative exponent"),
+            # An exponent too large for a float still costs only its own
+            # characters, which is the whole point: nothing expands it.
+            pytest.param("1e999999999", "1e999999999", id="huge positive exponent"),
+            pytest.param("1E+1022", "1E+1022", id="positive exponent past the field cap"),
+            # Too small for a float either way, and the digits still stand:
+            # underflowing to 0.0 is a parse limit, not the author writing zero.
+            pytest.param("1e-999999999", "1e-999999999", id="huge negative exponent"),
+            pytest.param("1E-1023", "1E-1023", id="negative exponent past the field cap"),
         ),
     )
-    def test_element_at_the_cap_is_still_normalized(self, element: str, expected: str) -> None:
-        # GIVEN a <floatstring> whose plain-notation form is exactly 1024
-        # characters — at the cap, not past it
-        assert len(expected) == 1024
-
-        # WHEN the instantiation target parses it
+    def test_a_huge_exponent_costs_only_its_own_characters(
+        self, element: str, expected: str
+    ) -> None:
+        # WHEN 11 characters of template text denote a number needing ~10**9
+        # digits in plain notation
         model = _parse_model(
             model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
         )
 
-        # THEN the length bound has not cost it its normalization
+        # THEN nothing expands it, so no bound on the exponent is needed to stop a
+        # template allocating ~10**9 characters. Long *literal* text can still
+        # exceed TaskParameterStringValueAsJob's cap and fall through to a numeric
+        # member of the union, as it does on mainline and in 0.11.6; only the
+        # expansion is gone.
         assert [str(v) for v in model.range] == [expected]
 
-    def test_floatstring_normalization_ignores_the_decimal_context(self) -> None:
+    def test_floatstring_rendering_ignores_the_decimal_context(self) -> None:
         # GIVEN an embedding application that has narrowed the process-wide
         # decimal context, and a <floatstring> with more significant digits
         # than that precision allows
@@ -573,8 +562,8 @@ class TestRangeListElementNormalization:
                 model=RangeListTaskParameterDefinition, obj={"type": "FLOAT", "range": [element]}
             )
 
-        # THEN the value is unrounded: what this library renders is a property of
-        # the template, not of the host application's decimal context
+        # THEN it is unrounded: the rendering is a property of the template, not
+        # of the host application's decimal context
         assert [str(v) for v in model.range] == [element]
 
     @pytest.mark.parametrize(

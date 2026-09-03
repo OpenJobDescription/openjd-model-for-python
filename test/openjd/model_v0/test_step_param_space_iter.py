@@ -613,8 +613,8 @@ class TestRangeListElementValues:
 
     def test_float_range_floatstring_elements(self) -> None:
         # WHEN a FLOAT range is written with <floatstring> elements
-        # THEN each task gets the number the element denotes
-        assert self._task_values("FLOAT", ["1.5", "02.50"]) == ["1.5", "2.5"]
+        # THEN each task gets the element's text, less redundant leading zeros
+        assert self._task_values("FLOAT", ["1.5", "02.50", "3.500"]) == ["1.5", "2.50", "3.500"]
 
     def test_float_range_numeric_literals_keep_their_scale(self) -> None:
         # A <float> literal is not a string representation, so it keeps the scale
