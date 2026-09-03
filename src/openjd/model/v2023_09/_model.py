@@ -1828,6 +1828,13 @@ class StepParameterSpaceDefinition(OpenJDModel_v2023_09):
         reshape_field_to_dict={"taskParameterDefinitions": "name"},
     )
 
+    # §2 makes task parameter type names case-insensitive under EXPR, the same as
+    # job parameter type names. Must run before discriminated-union resolution.
+    @field_validator("taskParameterDefinitions", mode="before")
+    @classmethod
+    def _normalize_parameter_type_case(cls, v: Any, info: ValidationInfo) -> Any:
+        return _normalize_parameter_type_case(v, info)
+
     @field_validator("taskParameterDefinitions")
     @classmethod
     def _validate_parameters(cls, v: TaskParameterList) -> TaskParameterList:
@@ -3967,11 +3974,18 @@ def _expr_param_gate(value: JobParameterType, info: ValidationInfo) -> JobParame
     return value
 
 
+# Parameter type names are ASCII (§2). str.upper() is Unicode-aware and folds
+# U+0131 to 'I', which would make 'ıNT' a spelling of 'INT'.
+_ASCII_UPPERCASE = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
 def _normalize_parameter_type_case(value: Any, info: ValidationInfo) -> Any:
     """Uppercase the ``type`` discriminator of each parameter definition when
     the EXPR extension is enabled (RFC 0007 makes parameter type names
     case-insensitive, e.g. ``int`` == ``INT``, ``list[int]`` == ``LIST[INT]``).
     Runs before discriminated-union resolution.
+
+    Applies to job parameter and task parameter type names alike, per §2.
     """
     context = cast(Optional[ModelParsingContext], info.context)
     if not (context and "EXPR" in context.extensions):
@@ -3981,7 +3995,7 @@ def _normalize_parameter_type_case(value: Any, info: ValidationInfo) -> Any:
     normalized: list[Any] = []
     for item in value:
         if isinstance(item, dict) and isinstance(item.get("type"), str):
-            item = {**item, "type": item["type"].upper()}
+            item = {**item, "type": item["type"].translate(_ASCII_UPPERCASE)}
         normalized.append(item)
     return normalized
 

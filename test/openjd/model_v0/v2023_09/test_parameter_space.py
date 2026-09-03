@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from openjd.model import DecodeValidationError, decode_job_template, parse_model
 from openjd.model._parse import _parse_model
 from openjd.model.v2023_09 import (
     FloatTaskParameterDefinition,
@@ -773,3 +774,300 @@ class TestStepParameterSpaceDefinition:
 
         # THEN
         assert len(excinfo.value.errors()) == expected_num_errors, str(excinfo.value)
+
+
+class TestTaskParameterTypeNameCase:
+    """Template Schemas §2: task parameter type names are case-sensitive in base
+    2023-09 and case-insensitive when the EXPR extension is enabled.
+
+    The conformance fixture is
+    ``EXPR/job_templates/proposed/3.4.1--task-param-type-case-insensitive.yaml``
+    (openjd-specifications#166).
+
+    These go through ``decode_job_template`` rather than the module's usual
+    ``_parse_model`` because the rule is gated on the extension set. The public
+    ``parse_model`` also supplies one for a bare model, which
+    ``test_bare_model_via_public_parse_model_honours_expr`` covers.
+    """
+
+    # Every task parameter type, with a deliberately mis-cased spelling for each.
+    # The mis-cased spellings vary in shape on purpose: all-lower, leading-cap,
+    # alternating, and a bracketed name.
+    TYPES: tuple = (
+        pytest.param("INT", "int", "1-3", None, id="int"),
+        pytest.param("FLOAT", "Float", ["1.0", "2.0"], None, id="float"),
+        pytest.param("STRING", "sTrInG", ["fg", "bg"], None, id="string"),
+        pytest.param("PATH", "pAtH", ["/tmp/a", "/tmp/b"], None, id="path"),
+        pytest.param(
+            "CHUNK[INT]",
+            "chunk[int]",
+            "1-3",
+            {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"},
+            id="chunk-int",
+        ),
+    )
+
+    @staticmethod
+    def _tmpl(type_name: str, range_value: Any, chunks: Any, extensions: tuple[str, ...]) -> dict:
+        param: dict[str, Any] = {"name": "F", "type": type_name, "range": range_value}
+        if chunks is not None:
+            param["chunks"] = chunks
+        template: dict[str, Any] = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "steps": [
+                {
+                    "name": "S",
+                    "parameterSpace": {"taskParameterDefinitions": [param]},
+                    "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}},
+                }
+            ],
+        }
+        if extensions:
+            template["extensions"] = list(extensions)
+        return template
+
+    @staticmethod
+    def _decode(template: dict) -> None:
+        # The caller allowlists both extensions in every case. What varies is whether
+        # the template declares them, because the effective set is the intersection.
+        decode_job_template(template=template, supported_extensions=["EXPR", "TASK_CHUNKING"])
+
+    @staticmethod
+    def _extensions_for(canonical: str, expr: bool) -> tuple[str, ...]:
+        exts = ("TASK_CHUNKING",) if canonical == "CHUNK[INT]" else ()
+        return (*exts, "EXPR") if expr else exts
+
+    # ── The four cases: EXPR on/off x spelling canonical/mis-cased ──
+
+    @pytest.mark.parametrize("canonical, miscased, range_value, chunks", TYPES)
+    def test_no_expr_canonical_case_accepted(
+        self, canonical: str, miscased: str, range_value: Any, chunks: Any
+    ) -> None:
+        # Case 1 of 4. Without EXPR, the spec spelling is the only accepted one,
+        # and it is accepted. Negative control: proves a rejection in case 2 is
+        # about the casing and not about the type being unavailable.
+        self._decode(
+            self._tmpl(canonical, range_value, chunks, self._extensions_for(canonical, expr=False))
+        )
+
+    @pytest.mark.parametrize("canonical, miscased, range_value, chunks", TYPES)
+    def test_no_expr_miscased_rejected(
+        self, canonical: str, miscased: str, range_value: Any, chunks: Any
+    ) -> None:
+        # Case 2 of 4. Without EXPR, type names are case-sensitive, so a mis-cased
+        # spelling must be rejected. This is the case that fails if the normalizer
+        # is registered without its EXPR gate.
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._decode(
+                self._tmpl(
+                    miscased, range_value, chunks, self._extensions_for(canonical, expr=False)
+                )
+            )
+        message = str(excinfo.value)
+        assert "steps[0] -> parameterSpace -> taskParameterDefinitions[0]" in message, message
+        # The author's spelling appears in the diagnostic, not the canonical one.
+        assert f"'{miscased}'" in message, message
+        # Rejected for the casing, not for a missing extension. CHUNK[INT] is the
+        # case that could otherwise fail for the wrong reason.
+        assert "requires the TASK_CHUNKING extension" not in message, message
+
+    @pytest.mark.parametrize("canonical, miscased, range_value, chunks", TYPES)
+    def test_with_expr_canonical_case_accepted(
+        self, canonical: str, miscased: str, range_value: Any, chunks: Any
+    ) -> None:
+        # Case 3 of 4. Enabling EXPR must not break the spec spelling. Negative
+        # control against a fold that rewrites the name into something unmatchable.
+        self._decode(
+            self._tmpl(canonical, range_value, chunks, self._extensions_for(canonical, expr=True))
+        )
+
+    @pytest.mark.parametrize("canonical, miscased, range_value, chunks", TYPES)
+    def test_with_expr_miscased_accepted(
+        self, canonical: str, miscased: str, range_value: Any, chunks: Any
+    ) -> None:
+        # Case 4 of 4. With EXPR, a mis-cased spelling is equivalent to the
+        # canonical one. This is the conformance fixture's assertion, and the case
+        # that fails if the normalizer is not registered at all.
+        self._decode(
+            self._tmpl(miscased, range_value, chunks, self._extensions_for(canonical, expr=True))
+        )
+
+    # ── The gate is on EXPR, not on the extension that supplies the type ──
+
+    def test_chunk_int_miscased_needs_expr_not_only_task_chunking(self) -> None:
+        # TASK_CHUNKING makes CHUNK[INT] available; EXPR is what makes its name
+        # case-insensitive. Declaring only TASK_CHUNKING must still reject
+        # 'chunk[int]', which pins that the fold reads EXPR specifically.
+        with pytest.raises(DecodeValidationError):
+            self._decode(
+                self._tmpl(
+                    "chunk[int]",
+                    "1-3",
+                    {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"},
+                    ("TASK_CHUNKING",),
+                )
+            )
+
+    def test_expr_declared_but_not_allowlisted_is_an_extension_error(self) -> None:
+        # Pins the intersection semantics, not the fold: the rejection comes from
+        # the extension allowlist before the type name is reached.
+        with pytest.raises(DecodeValidationError) as excinfo:
+            decode_job_template(
+                template=self._tmpl("int", "1-3", None, ("EXPR",)),
+                supported_extensions=[],
+            )
+        assert "Unsupported extension names: EXPR" in str(excinfo.value), str(excinfo.value)
+
+    def test_bare_model_via_public_parse_model_honours_expr(self) -> None:
+        # public parse_model builds a context from supported_extensions, so the fold
+        # reaches a bare StepParameterSpaceDefinition with no enclosing template.
+        parse_model(
+            model=StepParameterSpaceDefinition,
+            obj={"taskParameterDefinitions": [{"name": "F", "type": "int", "range": "1-3"}]},
+            supported_extensions=["EXPR"],
+        )
+        with pytest.raises(DecodeValidationError):
+            parse_model(
+                model=StepParameterSpaceDefinition,
+                obj={"taskParameterDefinitions": [{"name": "F", "type": "int", "range": "1-3"}]},
+                supported_extensions=[],
+            )
+
+    # ── The fold is ASCII, so a non-ASCII character is not a spelling variant ──
+
+    # str.upper() folds each of these wholly into the type-name alphabet: U+0131
+    # LATIN SMALL LETTER DOTLESS I to 'I', U+017F LONG S to 'S', U+FB02 ligature fl
+    # to 'FL', U+FB06 ligature st to 'ST'. A Unicode-aware fold reads them as INT,
+    # STRING, FLOAT and STRING.
+    NON_ASCII_LOOKALIKES: tuple = (
+        pytest.param("\u0131NT", id="dotless-i-int"),
+        pytest.param("\u017fTRING", id="long-s-string"),
+        pytest.param("\ufb02OAT", id="fl-ligature-float"),
+        pytest.param("\ufb06RING", id="st-ligature-string"),
+    )
+
+    @pytest.mark.parametrize("type_name", NON_ASCII_LOOKALIKES)
+    def test_non_ascii_lookalike_rejected_with_expr(self, type_name: str) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._decode(self._tmpl(type_name, "1-3", None, ("EXPR",)))
+        assert f"'{type_name}'" in str(excinfo.value), str(excinfo.value)
+
+    @pytest.mark.parametrize("type_name", NON_ASCII_LOOKALIKES)
+    def test_non_ascii_lookalike_rejected_without_expr(self, type_name: str) -> None:
+        # Inert against this change by design: without EXPR no fold runs, so this
+        # cannot fail. Present so the pair covers both extension states.
+        with pytest.raises(DecodeValidationError):
+            self._decode(self._tmpl(type_name, "1-3", None, ()))
+
+    # ── Malformed input reaches the fold now that it runs on this field ──
+
+    @pytest.mark.parametrize(
+        "parameter_space",
+        (
+            pytest.param({"taskParameterDefinitions": None}, id="null-list"),
+            pytest.param({"taskParameterDefinitions": {}}, id="mapping-not-list"),
+            pytest.param({"taskParameterDefinitions": "int"}, id="string-not-list"),
+            pytest.param({"taskParameterDefinitions": ["int"]}, id="list-of-non-dicts"),
+            pytest.param(
+                {"taskParameterDefinitions": [{"name": "F", "type": 3, "range": "1-3"}]},
+                id="type-is-int",
+            ),
+            pytest.param(
+                {"taskParameterDefinitions": [{"name": "F", "type": True, "range": "1-3"}]},
+                id="type-is-bool",
+            ),
+            pytest.param(
+                {"taskParameterDefinitions": [{"name": "F", "type": ["int"], "range": "1-3"}]},
+                id="type-is-list",
+            ),
+            pytest.param(
+                {"taskParameterDefinitions": [{"name": "F", "type": None, "range": "1-3"}]},
+                id="type-is-null",
+            ),
+            pytest.param(
+                {"taskParameterDefinitions": [{"name": "F", "range": "1-3"}]}, id="type-missing"
+            ),
+        ),
+    )
+    def test_malformed_input_is_a_validation_error_not_a_crash(self, parameter_space: Any) -> None:
+        # Registering the fold on this field routed these through it for the first
+        # time, so its isinstance guards became load-bearing here. Without them
+        # these raise TypeError, AttributeError or KeyError out of
+        # decode_job_template instead of DecodeValidationError. pytest.raises
+        # fails on any other exception type, which is the pin.
+        template: dict[str, Any] = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "T",
+            "steps": [
+                {
+                    "name": "S",
+                    "parameterSpace": parameter_space,
+                    "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}},
+                }
+            ],
+        }
+        with pytest.raises(DecodeValidationError):
+            self._decode(template)
+
+    # ── A mis-cased name now reaches the validators that run after the fold ──
+
+    def test_miscased_duplicate_names_report_the_duplicate_not_the_type(self) -> None:
+        # Before the fold ran on this field, 'int' failed at discriminator
+        # resolution and never reached the unique-name rule. Now it does.
+        with pytest.raises(DecodeValidationError, match="Duplicate values for name"):
+            self._decode(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "extensions": ["EXPR"],
+                    "name": "T",
+                    "steps": [
+                        {
+                            "name": "S",
+                            "parameterSpace": {
+                                "taskParameterDefinitions": [
+                                    {"name": "F", "type": "int", "range": "1-3"},
+                                    {"name": "F", "type": "INT", "range": "1-3"},
+                                ]
+                            },
+                            "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}},
+                        }
+                    ],
+                }
+            )
+
+    def test_two_miscased_chunk_int_report_the_one_chunk_rule(self) -> None:
+        # Same reason: the one-CHUNK[INT]-per-step rule is only reachable once the
+        # mis-cased spellings resolve to the CHUNK[INT] variant.
+        chunks = {"defaultTaskCount": 1, "rangeConstraint": "CONTIGUOUS"}
+        with pytest.raises(DecodeValidationError, match="Only one CHUNK\\[INT\\]"):
+            self._decode(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "extensions": ["EXPR", "TASK_CHUNKING"],
+                    "name": "T",
+                    "steps": [
+                        {
+                            "name": "S",
+                            "parameterSpace": {
+                                "taskParameterDefinitions": [
+                                    {
+                                        "name": "A",
+                                        "type": "chunk[int]",
+                                        "range": "1-3",
+                                        "chunks": chunks,
+                                    },
+                                    {
+                                        "name": "B",
+                                        "type": "Chunk[Int]",
+                                        "range": "1-3",
+                                        "chunks": chunks,
+                                    },
+                                ]
+                            },
+                            "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}},
+                        }
+                    ],
+                }
+            )
