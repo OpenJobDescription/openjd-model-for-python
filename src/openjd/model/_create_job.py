@@ -68,12 +68,16 @@ def _coerce_expr_param_value(param_type_name: str, value: Any) -> Any:
     native form, mirroring openjd-rs's ``coerce_from_str``
     (job/create_job/parameters.rs): BOOL accepts the spec's boolean strings,
     and LIST[*] values may be supplied as JSON — the public input type is
-    ``dict[str, str]``, so string forms must be accepted. Native values
-    (bool, list) pass through unchanged.
+    ``dict[str, str]``, so string forms must be accepted. LIST[BOOL] values
+    are additionally normalized per item (RFC 0007 §2.15): each item accepts
+    the same values as a scalar BOOL parameter, whether the value arrives as
+    a native list or as a JSON string. Other native values (bool, list) pass
+    through unchanged.
 
     Raises:
-        ValueError: If a string value cannot be coerced (message shapes match
-            the Rust implementation).
+        ValueError: If a string value cannot be coerced, or a LIST[BOOL] item
+            is not a valid boolean (message shapes match the Rust
+            implementation).
     """
     if param_type_name == "BOOL" and isinstance(value, str):
         lowered = value.lower()
@@ -91,7 +95,25 @@ def _coerce_expr_param_value(param_type_name: str, value: Any) -> Any:
             raise ValueError(f"Value '{value}' is not valid JSON for a list parameter.")
         if not isinstance(parsed, list):
             raise ValueError(f"Value '{value}' is not valid JSON for a list parameter.")
+        if param_type_name == "LIST_BOOL":
+            # RFC 0007 §2.15: each LIST[BOOL] item accepts the same values as a
+            # scalar BOOL parameter (JobBoolParameterDefinition). Normalize the
+            # freshly parsed items; other LIST[*] types pass the parsed list
+            # through unchanged.
+            # Inline import matches the file's deferred v2023_09 import pattern
+            # (avoids a module-level dependency on the version package).
+            from .v2023_09._model import _coerce_bool_value
+
+            return [_coerce_bool_value(item) for item in parsed]
         return parsed
+    if param_type_name == "LIST_BOOL" and isinstance(value, list):
+        # RFC 0007 §2.15: a LIST[BOOL] value submitted as a native list is
+        # normalized per item, same as its JSON-string form above. Build a new
+        # list — never mutate the caller's input.
+        # Inline import matches the file's deferred v2023_09 import pattern.
+        from .v2023_09._model import _coerce_bool_value
+
+        return [_coerce_bool_value(item) for item in value]
     return value
 
 
@@ -208,8 +230,23 @@ def _collect_defaults_2023_09(
                     # default through so the typed symbol-table builder can
                     # coerce it. The PATH-relative-default handling below only
                     # applies to the scalar PATH type.
+                    default_value: Any = param.default
+                    if param.type.name == "LIST_BOOL" and isinstance(param.default, list):
+                        # RFC 0007 §2.15: each LIST[BOOL] item accepts the same
+                        # values as a scalar BOOL parameter. Normalize the
+                        # template default per item (build a new list — never
+                        # mutate param.default), matching the submitted-value
+                        # path so mixed spellings store as canonical booleans.
+                        # Inline import matches the file's deferred v2023_09
+                        # import pattern.
+                        from .v2023_09._model import _coerce_bool_value
+
+                        # Defaults are pre-validated at decode time by
+                        # _check_item (and re-validated on any merge via
+                        # _check_constraints), so this coercion cannot fail.
+                        default_value = [_coerce_bool_value(item) for item in param.default]
                     return_value[param.name] = ParameterValue(
-                        type=ParameterValueType(param.type), value=param.default
+                        type=ParameterValueType(param.type), value=default_value
                     )
                     continue
                 default = str(param.default)
@@ -233,7 +270,18 @@ def _collect_defaults_2023_09(
                 # their native values, then carry through; mirrors
                 # openjd-rs's coerce_from_str.
                 # Raises ValueError (collected by the caller) on bad input.
-                value = _coerce_expr_param_value(param.type.name, value)
+                try:
+                    value = _coerce_expr_param_value(param.type.name, value)
+                except ValueError as exc:
+                    if param.type.name == "LIST_BOOL":
+                        # RFC 0007 §2.15: per-item coercion runs here during
+                        # value collection, before _check_2023_09/_check_constraints,
+                        # so the error would surface name-free unless named at this
+                        # call site.
+                        # Other EXPR errors keep their verbatim (name-free)
+                        # message, as the scalar BOOL branch does.
+                        raise ValueError(f"Parameter {param.name}: {exc}") from exc
+                    raise
                 return_value[param.name] = ParameterValue(
                     type=ParameterValueType(param.type), value=value
                 )
@@ -263,11 +311,11 @@ def _check_2023_09(
     for param in job_parameter_definitions:
         if param.name in job_parameter_values:
             param_value = job_parameter_values[param.name]
-            # The EXPR-extension LIST[*]/RANGE_EXPR definitions don't implement
-            # _check_constraints (BOOL and the original scalars do). Their
-            # template defaults are validated at decode time, and their values
-            # are type-checked when coerced into the typed EXPR symbol table, so
-            # skip the create-time constraint check when it isn't available.
+            # Every 2023_09 job-parameter definition now implements
+            # _check_constraints: the scalars (STRING/PATH/INT/FLOAT/BOOL), the
+            # LIST[*] types via _JobListParameterDefinitionBase, and RANGE_EXPR.
+            # The getattr fallback is retained as defense in case a definition
+            # type without one is ever added; it currently matches none.
             check_constraints = getattr(param, "_check_constraints", None)
             if check_constraints is None:
                 continue

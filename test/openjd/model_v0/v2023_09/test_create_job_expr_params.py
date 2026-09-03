@@ -72,6 +72,68 @@ class TestCreateJobExprParams:
         job = _create({"name": "N", "type": "INT", "default": 7})
         assert _stored_value(job, "N") == "7"
 
+    def test_list_bool_default_mixed_spellings_normalized(self) -> None:
+        # RFC 0007 §2.15: each LIST[BOOL] item accepts the same spellings as a
+        # scalar BOOL and is coerced per item into canonical booleans, not
+        # stored verbatim as a heterogeneous list.
+        job = _create(
+            {"name": "Bs", "type": "LIST[BOOL]", "default": [True, "false", "yes", "off", "1", 0]}
+        )
+        assert _stored_value(job, "Bs") == [True, False, True, False, True, False]
+        # equality alone passes for ints ([1,0,1] == [True,False,True]).
+        assert all(type(x) is bool for x in _stored_value(job, "Bs"))
+
+    def test_list_bool_default_mixed_case_strings_normalized(self) -> None:
+        # Per-item coercion is case-insensitive, matching the scalar BOOL forms.
+        job = _create(
+            {
+                "name": "Bs",
+                "type": "LIST[BOOL]",
+                "default": ["TRUE", "False", "YES", "no", "On", "OFF"],
+            }
+        )
+        assert _stored_value(job, "Bs") == [True, False, True, False, True, False]
+        # equality alone passes for ints ([1,0,1] == [True,False,True]).
+        assert all(type(x) is bool for x in _stored_value(job, "Bs"))
+
+    @pytest.mark.parametrize(
+        "default",
+        [
+            pytest.param([1, 0], id="ints"),
+            pytest.param([1.0, 0.0], id="floats"),
+            pytest.param(["yes", "off"], id="strings"),
+        ],
+    )
+    def test_list_bool_homogeneous_default_normalized(self, default) -> None:
+        # Homogeneous defaults are the silent-failure case: [1, 0] and
+        # [1.0, 0.0] each compare equal to [True, False] in Python, so an
+        # equality-only assertion would pass even if coercion never ran. The
+        # type check is what proves the template default was coerced per item.
+        job = _create({"name": "Bs", "type": "LIST[BOOL]", "default": default})
+        assert _stored_value(job, "Bs") == [True, False]
+        assert all(type(x) is bool for x in _stored_value(job, "Bs"))
+
+    def test_list_bool_empty_default_passes_through(self) -> None:
+        # The LIST[BOOL] definition declares no minLength, so an empty default
+        # is accepted and reaches create_job unchanged (coercion of [] is []).
+        job = _create({"name": "Bs", "type": "LIST[BOOL]", "default": []})
+        assert _stored_value(job, "Bs") == []
+
+    @pytest.mark.parametrize(
+        "param_def,expected",
+        [
+            ({"name": "Ps", "type": "LIST[PATH]", "default": ["/a", "/b"]}, ["/a", "/b"]),
+            ({"name": "Ss", "type": "LIST[STRING]", "default": ["a", "b"]}, ["a", "b"]),
+            ({"name": "Ms", "type": "LIST[LIST[INT]]", "default": [[1, 2], [3]]}, [[1, 2], [3]]),
+        ],
+    )
+    def test_non_bool_list_default_unchanged(self, param_def, expected) -> None:
+        # Per-item BOOL coercion applies ONLY to LIST[BOOL] defaults; other
+        # LIST[*] defaults must reach create_job untouched (no cross-type
+        # effect from the LIST[BOOL] normalization added for RFC 0007 §2.15).
+        job = _create(param_def)
+        assert _stored_value(job, param_def["name"]) == expected
+
 
 class TestRangeExprTypedValidation:
     """A RANGE_EXPR parameter now carries a typed (``range_expr``) EXPR symbol,
