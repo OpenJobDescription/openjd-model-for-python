@@ -529,15 +529,27 @@ def create_job(
 ) -> Job:
     """Create a job from a Job Template and a set of Job Parameter values.
 
-    See :func:`create_job_with_symbol_tables` when you also need the resolved
-    symbol tables — for instance to transport them to a host that will run the
-    job's sessions.
+    The returned ``Job`` does not carry the evaluated step-level ``let`` values.
+    Those bindings are template-scope: they are evaluated once here, in template
+    scope, and kept in the step-scope symbol table rather than lowered onto the
+    step's script. So for a template that declares a step-level ``let`` and
+    references it from the step's script, this ``Job`` alone is not enough to run
+    the step — the session has no binding for the name and the action fails with
+    ``Undefined variable``.
+
+    A caller that intends to *run* such a job must use
+    :func:`create_job_with_symbol_tables` instead, and forward the returned
+    ``step_symbol_tables`` entry for the step to the session that runs it. Callers
+    that only inspect the ``Job`` at creation time — a ``StepDependencyGraph``, a
+    ``StepParameterSpaceIterator``, ``hostRequirements`` — are unaffected, because
+    those fields are resolved during instantiation and already hold their values.
 
     Raises:
         DecodeValidationError
 
     Returns:
-        Job: The job generated.
+        Job: The job generated. Self-contained only if no step declares a
+            template-scope ``let`` that its script references.
     """
     job, _symtab = _create_job_and_symbol_table(
         job_template=job_template,

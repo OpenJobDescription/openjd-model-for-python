@@ -6,7 +6,13 @@ validation."""
 
 import pytest
 
-from openjd.model import DecodeValidationError, decode_job_template
+from openjd.expr import PathFormat
+from openjd.model import (
+    DecodeValidationError,
+    SymbolTable,
+    create_job_with_symbol_tables,
+    decode_job_template,
+)
 
 _EXTS = ["EXPR", "FEATURE_BUNDLE_1"]
 
@@ -234,3 +240,147 @@ class TestSymbolTyping:
                     params=[{"name": "Name", "type": "STRING", "default": "hi"}],
                 )
             )
+
+
+class TestStepScopeIsTemplateScope:
+    """Step-level `let` bindings resolve in *template* scope at job creation, so
+    PATH-typed values render POSIX regardless of the host that creates the job —
+    matching openjd-rs, whose instantiation hardcodes PathFormat::Posix and uses
+    the host's format only inside sessions."""
+
+    def test_step_symtab_renders_paths_posix(self):
+        # GIVEN
+        template = _decode(
+            _job(
+                [
+                    {
+                        "name": "S",
+                        "let": ['p = string(path("/mnt/out"))'],
+                        "script": _onrun("{{p}}"),
+                    }
+                ]
+            )
+        )
+
+        # WHEN
+        symtab = template.steps[0]._extend_step_symtab(SymbolTable())
+
+        # THEN
+        assert str(symtab["p"]) == "/mnt/out"
+
+    def test_step_symtab_path_predicate_is_host_independent(self):
+        # The conformance failure this guards: on Windows a host-format
+        # rendering makes a POSIX-prefix test false at create time.
+        # GIVEN
+        template = _decode(
+            _job(
+                [
+                    {
+                        "name": "S",
+                        "let": ['under = startswith(path("/foo/bar"), "/foo")'],
+                        "script": _onrun("{{under}}"),
+                    }
+                ]
+            )
+        )
+
+        # WHEN
+        symtab = template.steps[0]._extend_step_symtab(SymbolTable())
+
+        # THEN
+        assert str(symtab["under"]) == "true"
+
+
+class TestStepLetIsNotMergedIntoScript:
+    """A step-level `let` is resolved once, in template scope, at job creation,
+    and its values travel in the step's symbol table. It is therefore *not*
+    merged into the script's own `let`: doing so would have the session
+    re-evaluate the same bindings in the host's scope, re-rendering PATH values
+    and overwriting the correctly formatted seeded value."""
+
+    @staticmethod
+    def _resolved_script(step):
+        template = _decode(_job([step], extensions=("EXPR", "FEATURE_BUNDLE_1")))
+        return template.steps[0].resolve_syntax_sugar().script
+
+    def test_script_branch_keeps_only_the_scripts_own_let(self):
+        # GIVEN / WHEN
+        script = self._resolved_script(
+            {
+                "name": "S",
+                "let": ["a = 1", "b = 2"],
+                "script": {"let": ["c = 3"], **_onrun("{{a}}{{c}}")},
+            }
+        )
+
+        # THEN
+        assert script.let == ["c = 3"]
+
+    @pytest.mark.parametrize("interpreter", ("python", "bash", "cmd", "powershell", "node"))
+    def test_simple_action_branch_keeps_only_the_actions_own_let(self, interpreter):
+        # The de-sugaring path builds a fresh script, so it has to make the same
+        # choice independently of the `script:` branch.
+        # GIVEN / WHEN
+        script = self._resolved_script(
+            {
+                "name": "S",
+                "let": ["a = 1", "b = 2"],
+                interpreter: {"script": "print(1)", "let": ["c = 3"]},
+            }
+        )
+
+        # THEN
+        assert script.let == ["c = 3"]
+
+
+class TestStepLetTravelsInTheStepSymbolTable:
+    """The transport that replaces the merge: `create_job_with_symbol_tables`
+    resolves the step-level `let` at creation and hands the values over in the
+    step's symbol table, PATH values stored so each host renders them itself."""
+
+    @staticmethod
+    def _tables(step):
+        template = _decode(_job([step]))
+        return create_job_with_symbol_tables(job_template=template, job_parameter_values={})
+
+    _STEP = {
+        "name": "S",
+        "let": ["a = 1", 'root = path("/foo/bar")', 'txt = string(path("/mnt/out"))'],
+        "script": {"let": ["scriptonly = 7"], **_onrun("{{a}}{{scriptonly}}")},
+    }
+
+    def test_step_let_values_are_carried_and_paths_render_per_host(self):
+        # GIVEN
+        result = self._tables(self._STEP)
+        table = result.step_symbol_tables["S"]
+
+        # WHEN
+        posix = table.to_symtab(path_format=PathFormat.POSIX)
+        windows = table.to_symtab(path_format=PathFormat.WINDOWS)
+
+        # THEN: the values the deleted merge used to have the session recompute
+        # are already here, and the PATH one is stored so it renders in each
+        # host's own format rather than the creating host's.
+        assert str(posix["a"]) == "1"
+        assert str(posix["root"]) == "/foo/bar"
+        assert str(windows["root"]) == "\\foo\\bar"
+        # Rendered to a string at create time, in template scope, so it stays
+        # POSIX on every host -- this is what re-evaluating in host scope broke.
+        assert str(posix["txt"]) == "/mnt/out"
+        assert str(windows["txt"]) == "/mnt/out"
+        # AND: the script still carries only its own bindings, for the session
+        # to evaluate in host scope.
+        assert result.job.steps[0].script.let == ["scriptonly = 7"]
+
+    def test_script_let_is_not_in_the_step_symbol_table(self):
+        # A script-level binding resolves at session time in host scope, so it
+        # must not be evaluated into -- or leak into -- the create-time table.
+        # GIVEN
+        result = self._tables(self._STEP)
+
+        # WHEN
+        symtab = result.step_symbol_tables["S"].to_symtab(path_format=PathFormat.POSIX)
+
+        # THEN
+        assert "scriptonly" not in symtab
+        assert "a" in symtab

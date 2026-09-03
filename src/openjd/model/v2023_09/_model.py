@@ -3468,8 +3468,9 @@ class Step(OpenJDModel_v2023_09):
     # RFC 0007 (EXPR): the step-level `let` bindings, preserved from the
     # StepTemplate so the runtime can seed them when entering the step's
     # environments — a step environment's variables and actions may reference
-    # them. The step's own script carries a merged copy (step bindings first)
-    # for the task-run path.
+    # them. Their *values* are already resolved at job creation and travel in
+    # the step's symbol table (see create_job_with_symbol_tables), so they are
+    # not merged into the script's own `let` for the runtime to re-evaluate.
     let: Optional[list[str]] = None
 
 
@@ -3527,6 +3528,15 @@ class StepTemplate(OpenJDModel_v2023_09):
         them. Script-level ``let`` bindings are *not* evaluated here — they
         resolve at session time.
 
+        Template scope renders PATH-typed values with ``PathFormat.POSIX``,
+        matching openjd-rs, whose job instantiation hardcodes POSIX
+        (``create_job/instantiate.rs``) and uses the host's format only inside
+        sessions. Without it a binding's create-time value would depend on the
+        host that created the job: on Windows ``startswith(path("/foo/bar"),
+        "/foo")`` is false against a backslash rendering but true against a
+        POSIX one, so the job would behave differently depending on where it
+        was created.
+
         ``Step.Name`` and ``let`` references only pass template validation
         with the EXPR extension enabled, so seeding them unconditionally does
         not change the behavior of non-EXPR templates.
@@ -3534,9 +3544,16 @@ class StepTemplate(OpenJDModel_v2023_09):
         step_symtab = SymbolTable(source=symtab)
         step_symtab["Step.Name"] = str(self.name)
         if self.let:
+            # Both imports are deferred: `openjd.expr` is the native extension,
+            # and importing openjd.model must not load it. Only an EXPR template
+            # reaches this branch, so the load is conditional on EXPR use.
+            from openjd.expr import PathFormat
+
             from .._let_bindings import evaluate_let_bindings
 
-            evaluate_let_bindings(symtab=step_symtab, let_bindings=self.let)
+            evaluate_let_bindings(
+                symtab=step_symtab, let_bindings=self.let, path_format=PathFormat.POSIX
+            )
         return step_symtab
 
     _template_variable_sources = {
@@ -3653,17 +3670,13 @@ class StepTemplate(OpenJDModel_v2023_09):
             StepTemplate: A new StepTemplate with de-sugared script, or self if no sugar.
         """
         if self.script:
-            # Step-level `let` (RFC 0007) is excluded from the instantiated Step
-            # by the job-creation metadata, so fold it into the script's own
-            # `let` (step bindings first, then the script's) so it survives into
-            # the Job and the runtime resolves it. The model has already
-            # validated reference/shadowing rules across both scopes at decode.
-            if self.let:
-                # The step's own `let` is preserved too (Step.let): the
-                # runtime seeds it when entering the step's environments.
-                merged_let = [*self.let, *(self.script.let or [])]
-                new_script = self.script.model_copy(update={"let": merged_let})
-                return self.model_copy(update={"script": new_script})
+            # The step-level `let` (RFC 0007) is *not* folded into the script's
+            # own `let`. It is evaluated in template scope at job creation and
+            # its resolved values travel in the step's symbol table
+            # (create_job_with_symbol_tables().step_symbol_tables[name]), which
+            # the runtime seeds the session with. Merging it here would have the
+            # session re-evaluate those bindings in host scope, re-rendering
+            # PATH values and overwriting the correctly formatted seeded value.
             return self
 
         for name, (command, ext, arg_prefix) in _INTERPRETER_MAP.items():
@@ -3688,32 +3701,33 @@ class StepTemplate(OpenJDModel_v2023_09):
             args.extend(simple_action.args)
 
         # Construct directly - inputs are already validated
+        new_script = StepScript.model_construct(
+            actions=StepActions.model_construct(
+                onRun=Action.model_construct(
+                    command=CommandString(command),
+                    args=args,
+                    timeout=simple_action.timeout,
+                    cancelation=simple_action.cancelation,
+                )
+            ),
+            # Only the SimpleAction's own `let` (RFC 0007) — the step-level one
+            # is resolved at job creation and travels in the step's symbol
+            # table, as in the `script:` branch above.
+            let=simple_action.let,
+            embeddedFiles=[
+                EmbeddedFileText.model_construct(
+                    name=embedded_name,
+                    type=EmbeddedFileTypes.TEXT,
+                    filename=f"{embedded_name}{ext}",
+                    runnable=True,
+                    data=simple_action.script,
+                )
+            ],
+        )
         return StepTemplate.model_construct(
             name=self.name,
             description=self.description,
-            script=StepScript.model_construct(
-                actions=StepActions.model_construct(
-                    onRun=Action.model_construct(
-                        command=CommandString(command),
-                        args=args,
-                        timeout=simple_action.timeout,
-                        cancelation=simple_action.cancelation,
-                    )
-                ),
-                # Carry step-level `let` (RFC 0007) and the SimpleAction's own
-                # `let` onto the de-sugared script (step bindings first) so they
-                # are preserved into the Job and resolved at runtime.
-                let=([*(self.let or []), *(simple_action.let or [])] or None),
-                embeddedFiles=[
-                    EmbeddedFileText.model_construct(
-                        name=embedded_name,
-                        type=EmbeddedFileTypes.TEXT,
-                        filename=f"{embedded_name}{ext}",
-                        runnable=True,
-                        data=simple_action.script,
-                    )
-                ],
-            ),
+            script=new_script,
             stepEnvironments=self.stepEnvironments,
             parameterSpace=self.parameterSpace,
             hostRequirements=self.hostRequirements,
