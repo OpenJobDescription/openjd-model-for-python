@@ -817,8 +817,10 @@ class TestChunksTaskCountOverride:
         """``__getitem__`` builds a fresh iterator, so it has to carry the override too,
         or indexing reports chunks iteration never yields.
 
-        Uses NONCONTIGUOUS because random access needs a non-sequential space, and a
-        CONTIGUOUS chunked space is always sequential (see the test below).
+        NONCONTIGUOUS because that is what the assertions below depend on: it renders a
+        single-task chunk as a bare ``"1"``, where CONTIGUOUS renders ``"1-1"``. Both
+        support random access — see
+        ``test_a_contiguous_space_supports_indexing_with_or_without_the_override``.
         """
         it = StepParameterSpaceIterator(
             step=self._step({"defaultTaskCount": 5, "rangeConstraint": "NONCONTIGUOUS"}),
@@ -863,14 +865,30 @@ class TestChunksTaskCountOverride:
     def test_an_adaptive_space_still_refuses_indexing(self) -> None:
         """The negative control for the test above, and the remaining limitation
         recorded in ``specs/python-model-interface.md``: an adaptive space has no
-        knowable count, so ``len()`` raises and every index is out of range. Iteration
-        still yields, which is what distinguishes "unknown count" from "empty"."""
+        knowable count, so ``len()`` raises and every index is refused. Iteration
+        still yields, which is what distinguishes "unknown count" from "empty".
+
+        The refusal is enforced rather than incidental. ``__getitem__`` resolves a
+        negative index against the length ``__len__`` declines to report, so leaving
+        the rejection to ``get`` would let ``it[-1]`` answer against that hidden count
+        if ``get`` were extended to adaptive spaces, as 0.6.0 extended it to
+        contiguous ones. The message therefore names the reason instead of saying
+        "index out of range", and it is the pure-Python reference's wording.
+        """
         it = StepParameterSpaceIterator(step=self._step(self._ADAPTIVE))
         assert it.chunks_adaptive is True
-        for index in (0, -1):
+        for index in (0, 1, -1, -100):
             with pytest.raises(IndexError) as excinfo:
                 _ = it[index]
-            assert str(excinfo.value) == "index out of range"
+            assert str(excinfo.value) == (
+                "Items cannot be retrieved by index because the parameter space "
+                "uses adaptive chunking."
+            )
+        # v0 raises a bare LookupError here, not an IndexError. IndexError is a
+        # LookupError subclass, so a caller catching either is served by both
+        # implementations; the type itself still differs, which the spec records.
+        with pytest.raises(LookupError):
+            _ = it[0]
         assert self._frames(StepParameterSpaceIterator(step=self._step(self._ADAPTIVE))) == [
             "1-5",
             "6-10",

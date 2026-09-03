@@ -1201,9 +1201,23 @@ the template's.
 
 One current-implementation limitation remains. An *adaptive* space has no
 knowable count until it is walked, so `len(it)` raises `ValueError` and
-every index — including `-1` — raises `IndexError`. Iteration still
+`it[i]` is refused for every index, negative included. Iteration still
 yields, which is what distinguishes an unknown count from an empty space.
 Supplying the override makes the space static and lifts both.
+
+That refusal is enforced rather than incidental: `__getitem__` rejects an
+adaptive space before it resolves a negative index, because the
+arithmetic for a negative index would otherwise run against the length
+`__len__` declines to report.
+
+One divergence from the v0 reference here, in the exception *type*. v0
+raises a bare `LookupError` for an adaptive `it[i]`; v1 raises
+`IndexError`, which is a `LookupError` subclass, so a caller catching
+either type is served by both implementations. The messages agree.
+Because `IndexError` also means "past the end" in v1, the two conditions
+are told apart by the message rather than the type — the adaptive refusal
+says `Items cannot be retrieved by index because the parameter space uses
+adaptive chunking.` where a real overrun says `index out of range`.
 
 ### `StepDependencyGraph`
 
