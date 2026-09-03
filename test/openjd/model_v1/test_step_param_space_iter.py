@@ -14,7 +14,7 @@ definition as a dict literal of the form
 ``{type, range, [chunks]}`` matching the YAML/JSON template syntax.
 """
 
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import pytest
 
@@ -741,21 +741,79 @@ class TestChunksTaskCountOverride:
         assert fresh[9]["Frame"].value == yielded[-1]
         assert fresh[-1]["Frame"].value == yielded[-1]
 
-    def test_a_contiguous_space_refuses_indexing_with_or_without_the_override(self) -> None:
-        """Pre-existing behaviour the override does not change: openjd-model requires
-        sequential iteration for contiguous chunking, so ``get`` always declines.
-        Pinned here so a future change to random access is a deliberate one. Its
-        counterpart is ``test_known_gaps.py::test_a_contiguous_chunked_space_supports_indexing``,
-        a strict xfail asserting the opposite: closing that gap fails there as an xpass
-        *and* here as a hard assertion, so both move together, along with the
-        limitation noted in ``specs/python-model-interface.md``."""
-        for override in (None, 1):
-            it = StepParameterSpaceIterator(
-                step=self._step(self._STATIC), chunks_task_count_override=override
-            )
+    def test_a_contiguous_space_supports_indexing_with_or_without_the_override(self) -> None:
+        """openjd-model 0.6.0 (openjd-rs#355) gave a contiguous chunked space random
+        access, so ``get`` now answers where it used to decline. Promoted from
+        ``test_known_gaps.py::test_a_contiguous_chunked_space_supports_indexing``,
+        which pinned the v0 reading as a strict xfail.
+
+        Indexing observes the override, same as the NONCONTIGUOUS case above, and the
+        end of the space is still an ``IndexError``.
+        """
+        it = StepParameterSpaceIterator(step=self._step(self._STATIC))
+        assert [it[0]["Frame"].value, it[1]["Frame"].value, it[-1]["Frame"].value] == [
+            "1-5",
+            "6-10",
+            "6-10",
+        ]
+        with pytest.raises(IndexError) as excinfo:
+            _ = it[2]
+        assert str(excinfo.value) == "index out of range"
+
+        overridden = StepParameterSpaceIterator(
+            step=self._step(self._STATIC), chunks_task_count_override=1
+        )
+        assert [overridden[0]["Frame"].value, overridden[-1]["Frame"].value] == ["1-1", "10-10"]
+
+    def test_an_adaptive_space_still_refuses_indexing(self) -> None:
+        """The negative control for the test above, and the remaining limitation
+        recorded in ``specs/python-model-interface.md``: an adaptive space has no
+        knowable count, so ``len()`` raises and every index is out of range. Iteration
+        still yields, which is what distinguishes "unknown count" from "empty"."""
+        it = StepParameterSpaceIterator(step=self._step(self._ADAPTIVE))
+        assert it.chunks_adaptive is True
+        for index in (0, -1):
             with pytest.raises(IndexError) as excinfo:
-                _ = it[0]
+                _ = it[index]
             assert str(excinfo.value) == "index out of range"
+        assert self._frames(StepParameterSpaceIterator(step=self._step(self._ADAPTIVE))) == [
+            "1-5",
+            "6-10",
+        ]
+
+    @pytest.mark.parametrize(
+        "chunks,override,expected_count",
+        [
+            # Statically chunked: no override involved, the template's own size.
+            ({"defaultTaskCount": 5, "rangeConstraint": "CONTIGUOUS"}, None, 5),
+            # Statically chunked, re-chunked by the override.
+            ({"defaultTaskCount": 5, "rangeConstraint": "CONTIGUOUS"}, 1, 1),
+            # Adaptive, turned static by the override, which becomes the size.
+            (
+                {
+                    "defaultTaskCount": 5,
+                    "targetRuntimeSeconds": 60,
+                    "rangeConstraint": "CONTIGUOUS",
+                },
+                1,
+                1,
+            ),
+        ],
+        ids=["static", "static-overridden", "adaptive-overridden"],
+    )
+    def test_chunk_metadata_is_reported_for_a_non_adaptive_space(
+        self, chunks: dict[str, Any], override: Optional[int], expected_count: int
+    ) -> None:
+        """openjd-model 0.6.0 (openjd-rs#355) reports ``chunks_parameter_name`` and
+        ``chunks_default_task_count`` for any chunked space, not only an adaptive one,
+        which is what the v0 reference has always done. Promoted from
+        ``test_known_gaps.py``, where it was a strict xfail."""
+        it = StepParameterSpaceIterator(
+            step=self._step(chunks), chunks_task_count_override=override
+        )
+        assert it.chunks_adaptive is False
+        assert it.chunks_parameter_name == "Frame"
+        assert it.chunks_default_task_count == expected_count
 
     def test_an_intermediate_override_regroups_the_chunks(self) -> None:
         """Not just 1: any positive size regroups the space."""

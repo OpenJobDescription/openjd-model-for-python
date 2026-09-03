@@ -1176,20 +1176,16 @@ least 1, so 0 would otherwise silently mean 1, and the
 `chunks_default_task_count` setter already rejects it. The pure-Python
 reference does not validate this argument.
 
-Two current-implementation limitations, both divergences from the v0
-reference rather than intended behaviour. Each has a `strict` xfail in
-`test/openjd/model_v1/test_known_gaps.py`, so clearing either will fail
-CI until this text is updated with it.
+Indexing observes the override. `openjd-model` 0.6.0 gave a `CONTIGUOUS`
+chunked space random access, so `it[i]` answers there as it does for a
+`NONCONTIGUOUS` one, and reports the overridden granularity rather than
+the template's.
 
-- Indexing observes the override only for a space that supports random
-  access. A `CONTIGUOUS` chunked space requires sequential iteration, so
-  `it[i]` raises `IndexError` for any index — with or without the
-  override — even though `len(it)` reports a count. See
-  `test_a_contiguous_chunked_space_supports_indexing`.
-- `chunks_parameter_name` and `chunks_default_task_count` both return
-  `None` once the space is non-adaptive, which supplying the override
-  makes it. v0 reports the parameter name and the override value. See
-  `test_chunk_metadata_is_reported_for_a_non_adaptive_space`.
+One current-implementation limitation remains. An *adaptive* space has no
+knowable count until it is walked, so `len(it)` raises `ValueError` and
+every index — including `-1` — raises `IndexError`. Iteration still
+yields, which is what distinguishes an unknown count from an empty space.
+Supplying the override makes the space static and lifts both.
 
 ### `StepDependencyGraph`
 
