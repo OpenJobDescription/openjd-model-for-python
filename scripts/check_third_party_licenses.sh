@@ -158,8 +158,9 @@ awk -v re="^[*][*] ($workspace_pattern); version " '
     cat "$rust_section"
 } > "$generated"
 
-# Ensure consistent EOL.
-sed -i 's/\r//' "$generated"
+# Ensure consistent EOL. Rewritten through a temp file rather than `sed -i`,
+# which needs a backup suffix on BSD sed and rejects one on GNU sed.
+sed 's/\r//' "$generated" > "$generated.eol" && mv "$generated.eol" "$generated"
 
 if [[ "$mode" == "update" ]]; then
     cp "$generated" "$OUTPUT_FILE"
