@@ -9,6 +9,8 @@ natively (lists/bools) into the instantiated ``JobParameter`` so the typed EXPR
 symbol table can coerce them.
 """
 
+from pathlib import Path
+
 import pytest
 
 from openjd.model import (
@@ -16,6 +18,7 @@ from openjd.model import (
     create_job,
     decode_job_template,
     model_to_object,
+    preprocess_job_parameters,
 )
 
 
@@ -71,6 +74,125 @@ class TestCreateJobExprParams:
         # The original scalar types still round-trip as strings.
         job = _create({"name": "N", "type": "INT", "default": 7})
         assert _stored_value(job, "N") == "7"
+
+    def test_list_bool_default_mixed_spellings_normalized(self) -> None:
+        # RFC 0007 §2.15: each LIST[BOOL] item accepts the same spellings as a
+        # scalar BOOL and is coerced per item into canonical booleans, not
+        # stored verbatim as a heterogeneous list.
+        job = _create(
+            {"name": "Bs", "type": "LIST[BOOL]", "default": [True, "false", "yes", "off", "1", 0]}
+        )
+        assert _stored_value(job, "Bs") == [True, False, True, False, True, False]
+        # equality alone passes for ints ([1,0,1] == [True,False,True]).
+        assert all(type(x) is bool for x in _stored_value(job, "Bs"))
+
+    def test_list_bool_default_mixed_case_strings_normalized(self) -> None:
+        # Per-item coercion is case-insensitive, matching the scalar BOOL forms.
+        job = _create(
+            {
+                "name": "Bs",
+                "type": "LIST[BOOL]",
+                "default": ["TRUE", "False", "YES", "no", "On", "OFF"],
+            }
+        )
+        assert _stored_value(job, "Bs") == [True, False, True, False, True, False]
+        # equality alone passes for ints ([1,0,1] == [True,False,True]).
+        assert all(type(x) is bool for x in _stored_value(job, "Bs"))
+
+    @pytest.mark.parametrize(
+        "default",
+        [
+            pytest.param([1, 0], id="ints"),
+            pytest.param([1.0, 0.0], id="floats"),
+            pytest.param(["yes", "off"], id="strings"),
+        ],
+    )
+    def test_list_bool_homogeneous_default_normalized(self, default) -> None:
+        # Homogeneous defaults are the silent-failure case: [1, 0] and
+        # [1.0, 0.0] each compare equal to [True, False] in Python, so an
+        # equality-only assertion would pass even if coercion never ran. The
+        # type check is what proves the template default was coerced per item.
+        job = _create({"name": "Bs", "type": "LIST[BOOL]", "default": default})
+        assert _stored_value(job, "Bs") == [True, False]
+        assert all(type(x) is bool for x in _stored_value(job, "Bs"))
+
+    def test_list_bool_empty_default_passes_through(self) -> None:
+        # The LIST[BOOL] definition declares no minLength, so an empty default
+        # is accepted and reaches create_job unchanged (coercion of [] is []).
+        job = _create({"name": "Bs", "type": "LIST[BOOL]", "default": []})
+        assert _stored_value(job, "Bs") == []
+
+    def test_list_bool_default_template_not_mutated(self) -> None:
+        # create_job coerces a LIST[BOOL] template default to canonical booleans
+        # for the created Job, but must build a NEW list and leave the template's
+        # own default (and its serialized form) with the raw submitted spellings.
+        jt = decode_job_template(
+            template=_template({"name": "Bs", "type": "LIST[BOOL]", "default": ["yes", 0, True]}),
+            supported_extensions=["EXPR"],
+        )
+        job = create_job(job_template=jt, job_parameter_values={})
+        created = _stored_value(job, "Bs")
+        assert created == [True, False, True]
+        # equality alone passes for ints ([1,0,1] == [True,False,True]).
+        assert all(type(x) is bool for x in created)
+        # The template object's default is untouched, with its original item types.
+        default = jt.parameterDefinitions[0].default
+        assert default == ["yes", 0, True]
+        assert [type(x) for x in default] == [str, int, bool]
+        # The serialized template still carries the raw spellings, not the coerced booleans.
+        dumped = model_to_object(model=jt)["parameterDefinitions"][0]["default"]
+        assert dumped == ["yes", 0, True]
+        assert [type(x) for x in dumped] == [str, int, bool]
+
+    def test_list_bool_none_default_flows_without_type_error(self) -> None:
+        # A LIST[BOOL] definition with no default (default None) must not reach
+        # the per-item coercion comprehension: the outer `is not None` check plus
+        # the `isinstance(param.default, list)` guard keep None from being
+        # iterated. Job creation must surface the normal missing-required-value
+        # error, never a TypeError from iterating None.
+        jt = decode_job_template(
+            template=_template({"name": "Bs", "type": "LIST[BOOL]"}),
+            supported_extensions=["EXPR"],
+        )
+        assert jt.parameterDefinitions[0].default is None
+        with pytest.raises(DecodeValidationError, match=r"missing for required job parameters"):
+            create_job(job_template=jt, job_parameter_values={})
+
+    def test_list_bool_invalid_default_error_names_parameter(self) -> None:
+        # The template-default coercion path must name the offending parameter,
+        # matching the submitted-value path. Defaults are normally pre-validated
+        # at decode, so bypass decode validation with model_copy to place an
+        # invalid item on the default (mirroring the merge path's model_copy
+        # carry-over, which skips validators) and reach collection-time coercion.
+        jt = decode_job_template(
+            template=_template({"name": "Flags", "type": "LIST[BOOL]", "default": [True]}),
+            supported_extensions=["EXPR"],
+        )
+        bad_param = jt.parameterDefinitions[0].model_copy(update={"default": ["maybe"]})
+        bad_jt = jt.model_copy(update={"parameterDefinitions": [bad_param]})
+        with pytest.raises(ValueError, match=r"Parameter Flags"):
+            preprocess_job_parameters(
+                job_template=bad_jt,
+                job_parameter_values={},
+                job_template_dir=Path(),
+                current_working_dir=Path(),
+                allow_job_template_dir_walk_up=True,
+            )
+
+    @pytest.mark.parametrize(
+        "param_def,expected",
+        [
+            ({"name": "Ps", "type": "LIST[PATH]", "default": ["/a", "/b"]}, ["/a", "/b"]),
+            ({"name": "Ss", "type": "LIST[STRING]", "default": ["a", "b"]}, ["a", "b"]),
+            ({"name": "Ms", "type": "LIST[LIST[INT]]", "default": [[1, 2], [3]]}, [[1, 2], [3]]),
+        ],
+    )
+    def test_non_bool_list_default_unchanged(self, param_def, expected) -> None:
+        # Per-item BOOL coercion applies ONLY to LIST[BOOL] defaults; other
+        # LIST[*] defaults must reach create_job untouched (no cross-type
+        # effect from the LIST[BOOL] normalization added for RFC 0007 §2.15).
+        job = _create(param_def)
+        assert _stored_value(job, param_def["name"]) == expected
 
 
 class TestRangeExprTypedValidation:
