@@ -15,6 +15,15 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
       - name: Approve a PR
+        # Hold back cargo minors and majors: the openjd-* crates are 0.x, where
+        # cargo treats a minor as breaking, so those most need a human to look.
+        # `update-type` is the highest change in the PR, so a grouped cargo PR
+        # containing a minor is held back too. Scoped to cargo because the pip
+        # and github-actions groups bundle minor with patch, so gating on patch
+        # alone would stop auto-approving nearly every PR from them.
+        if: >-
+          steps.metadata.outputs.package-ecosystem != 'cargo' ||
+          steps.metadata.outputs.update-type == 'version-update:semver-patch'
         run: gh pr review --approve "$PR_URL"
         env:
           PR_URL: ${{ github.event.pull_request.html_url }}
