@@ -1,3 +1,18 @@
+## 0.12.0 (2026-09-04)
+
+
+
+### Bug Fixes
+* coerce LIST[BOOL] items per RFC 0007 §2.15 (#352) ([`105dff2`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/105dff25abc4dfc6970945d881e119438e04fb6c))
+* coerce LIST[BOOL] items per RFC 0007 §2.15 ([`105dff2`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/105dff25abc4dfc6970945d881e119438e04fb6c))
+* Evaluate step-level let bindings in template scope (#341) ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
+* Evaluate step-level let bindings in template scope ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
+* Record the template-scope let boundary at the merge, and verify it ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
+* Record the let boundary on the de-sugared script too ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
+* Never lower the template-scope let marker ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
+* Stop merging step-level let into the script ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
+
+
 ## 0.11.8 (2026-09-03)
 
 
