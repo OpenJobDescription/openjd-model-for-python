@@ -1,16 +1,9 @@
 ## 0.11.9 (2026-09-04)
 
 
-
 ### Bug Fixes
-* coerce LIST[BOOL] items per RFC 0007 §2.15 (#352) ([`105dff2`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/105dff25abc4dfc6970945d881e119438e04fb6c))
-* coerce LIST[BOOL] items per RFC 0007 §2.15 ([`105dff2`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/105dff25abc4dfc6970945d881e119438e04fb6c))
-* Evaluate step-level let bindings in template scope (#341) ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
-* Evaluate step-level let bindings in template scope ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
-* Record the template-scope let boundary at the merge, and verify it ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
-* Record the let boundary on the de-sugared script too ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
-* Never lower the template-scope let marker ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
-* Stop merging step-level let into the script ([`b136693`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/b1366933e74bea30a98f19496115b200626f22e4))
+* A `LIST[BOOL]` job parameter now holds real booleans in the created job, so a list item accepts every spelling Template Schemas §2.15 allows for a scalar `BOOL`: the case-insensitive strings `true`/`yes`/`on`/`1` and `false`/`no`/`off`/`0`, and the numbers `0` and `1`. A mixed list such as `["yes", 0, true]` previously failed to validate with `List contains incompatible types`, and a uniform list such as `["yes", "no"]` was accepted as a list of strings and then failed only once a boolean operator touched an element. `["yes", "no"]` now interpolates as `true`/`false`. A decoded template is unchanged and still round-trips the spellings its author wrote. (#352)
+* A step's template-scope `let` (Template Schemas §3.6) is resolved once, at job creation, using POSIX path format so a created job does not depend on the host that created it. It is no longer merged into the script's own `let`. The merge left the bindings to be evaluated a second time in the host's format when the session ran, and that second value overwrote the first: on Windows, `startswith(path("/foo/bar"), "/foo")` went from true at job creation to false in the session. This is a breaking change for a consumer that calls `StepTemplate.resolve_syntax_sugar()`: the step's resolved bindings now travel in `create_job_with_symbol_tables(...).step_symbol_tables[step_name]` and must be forwarded to the session that runs the step. A consumer that does not forward them loses step-level bindings silently rather than failing. `openjd-cli` forwards them as of OpenJobDescription/openjd-cli#237. (#341)
 
 
 ## 0.11.8 (2026-09-03)
