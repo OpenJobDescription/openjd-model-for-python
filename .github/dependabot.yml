@@ -25,6 +25,36 @@ updates:
         update-types:
           - "minor"
           - "patch"
+  - package-ecosystem: "cargo"
+    directory: "/" # Workspace root; rust-bindings is discovered as a member
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "chore(deps):"
+    # openjd-* minor bumps get a PR each: they are 0.x, where cargo treats a
+    # minor as breaking, and they carry the API surface these bindings wrap.
+    # Everything else is grouped — tokio, uuid and serde_json are 1.x, where a
+    # minor is additive, and transitive Cargo.lock bumps are noise.
+    #
+    # Every cargo PR needs `scripts/check_third_party_licenses.sh --update`
+    # committed onto its branch: that check renders crate versions from
+    # Cargo.lock and dependabot cannot regenerate it.
+    groups:
+      # Matched first, so an openjd-* patch groups here and only minors reach
+      # the exclusion below. Majors match no group and so get a PR each.
+      cargo-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+      cargo-minor:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "openjd-*"
+        update-types:
+          - "minor"
   - package-ecosystem: "github-actions"
     directory: "/" # Location of package manifests
     schedule:
