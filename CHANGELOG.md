@@ -1,3 +1,11 @@
+## 0.11.10 (2026-09-09)
+
+
+
+### Bug Fixes
+* Make task parameter type names case-insensitive under EXPR (#350) ([`546fa3e`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/546fa3e084613b6694406bd0f88103ba8ffb3940))
+
+
 ## 0.11.9 (2026-09-04)
 
 
