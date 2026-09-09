@@ -2535,8 +2535,8 @@ limitations under the License.
 ** libc; version 0.2.189 -- https://crates.io/crates/libc
 ** manyhow-macros; version 0.11.4 -- https://crates.io/crates/manyhow-macros
 ** openjd-expr; version 0.6.0 -- https://crates.io/crates/openjd-expr
-** openjd-model; version 0.6.0 -- https://crates.io/crates/openjd-model
-** openjd-sessions; version 0.5.5 -- https://crates.io/crates/openjd-sessions
+** openjd-model; version 0.6.1 -- https://crates.io/crates/openjd-model
+** openjd-sessions; version 0.5.6 -- https://crates.io/crates/openjd-sessions
 ** pin-project-lite; version 0.2.17 -- https://crates.io/crates/pin-project-lite
 ** portable-atomic; version 1.15.0 -- https://crates.io/crates/portable-atomic
 ** proc-macro2; version 1.0.107 -- https://crates.io/crates/proc-macro2
