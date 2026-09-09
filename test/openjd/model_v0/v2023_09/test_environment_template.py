@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from openjd.model import DecodeValidationError, decode_environment_template
 from openjd.model._parse import _parse_model
 from openjd.model.v2023_09 import EnvironmentTemplate
 
@@ -256,3 +257,72 @@ class TestEnvironmentTemplate:
 
         # THEN
         assert len(excinfo.value.errors()) == expected_num_errors
+
+
+class TestEnvironmentTemplateParameterTypeNameCase:
+    """Template Schemas §2: job parameter type names are case-sensitive in base
+    2023-09 and case-insensitive when the EXPR extension is enabled. An
+    environment template's ``parameterDefinitions`` carries the same
+    ``JobParameterDefinition`` union as a job template's, so the same rule applies.
+
+    ``EnvironmentTemplate`` is the third registration site of the shared fold, and
+    it is the one an audit found unpinned: neutering it left the whole model_v0
+    suite green. The job template counterpart is
+    ``test_list_parameters.py::TestJobParameterTypeNameCase`` and the task
+    parameter one is ``test_parameter_space.py::TestTaskParameterTypeNameCase``.
+    """
+
+    @staticmethod
+    def _tmpl(type_name: str, *, extensions: tuple[str, ...] = ("EXPR",)) -> dict[str, Any]:
+        template: dict[str, Any] = {
+            "specificationVersion": "environment-2023-09",
+            "parameterDefinitions": [{"name": "P", "type": type_name}],
+            "environment": ENVIRONMENT,
+        }
+        if extensions:
+            template["extensions"] = list(extensions)
+        return template
+
+    @staticmethod
+    def _decode(template: dict[str, Any]) -> None:
+        decode_environment_template(template=template, supported_extensions=["EXPR"])
+
+    # (canonical spelling, a mis-cased spelling)
+    TYPES: tuple = (
+        pytest.param("STRING", "string", id="string"),
+        pytest.param("INT", "iNt", id="int"),
+        pytest.param("PATH", "pAtH", id="path"),
+    )
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_no_expr_canonical_case_accepted(self, canonical: str, miscased: str) -> None:
+        # Case 1 of 4.
+        self._decode(self._tmpl(canonical, extensions=()))
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_no_expr_miscased_rejected(self, canonical: str, miscased: str) -> None:
+        # Case 2 of 4. Fails if the fold is registered without its EXPR gate.
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._decode(self._tmpl(miscased, extensions=()))
+        message = str(excinfo.value)
+        assert "parameterDefinitions[0]" in message, message
+        assert f"'{miscased}'" in message, message
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_with_expr_canonical_case_accepted(self, canonical: str, miscased: str) -> None:
+        # Case 3 of 4.
+        self._decode(self._tmpl(canonical))
+
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_with_expr_miscased_accepted(self, canonical: str, miscased: str) -> None:
+        # Case 4 of 4. Fails if the fold is not registered on this model at all,
+        # which is the state an audit found untested.
+        self._decode(self._tmpl(miscased))
+
+    @pytest.mark.parametrize("type_name", ("\u0131NT", "\u017fTRING", "\ufb02OAT"))
+    def test_non_ascii_lookalike_rejected_with_expr(self, type_name: str) -> None:
+        # str.upper() folds U+0131 to 'I', U+017F to 'S' and U+FB02 (ﬂ) to 'FL',
+        # so a Unicode-aware fold would read these as INT, STRING and FLOAT.
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._decode(self._tmpl(type_name))
+        assert f"'{type_name}'" in str(excinfo.value), str(excinfo.value)
