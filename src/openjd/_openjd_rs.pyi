@@ -915,8 +915,15 @@ class FormatString:
         checking through the expression tree.
 
         Mirrors the Rust crate's
-        `FormatString::validate_expressions(symtab, lib)`. Returns
-        `None` on success.
+        `FormatString::validate_expressions(symtab, lib, target_type)`.
+        Returns `None` on success.
+
+        `target_type` is passed as `None` because `resolve` and
+        `resolve_string` above resolve without one; validation has to
+        observe the same values resolution will produce. The crate
+        returns a `StaticResolution` (resolved-length bound and, when
+        fully concrete, the resolved value); this binding is pass/fail
+        only and discards it.
         """
 
     def __str__(self) -> builtins.str: ...

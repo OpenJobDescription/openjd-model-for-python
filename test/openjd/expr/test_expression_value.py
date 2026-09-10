@@ -377,6 +377,12 @@ class TestExprValueReprEscaping:
     # category -- U+0085, U+00A0, U+00AD, U+2028, U+2029, U+3000, U+200B,
     # a private-use character and an astral non-printable -- alongside
     # printable non-ASCII that must survive verbatim.
+    #
+    # "a b" is the negative half of the Zs discrimination: U+0020,
+    # U+00A0 and U+3000 are all Zs, and CPython escapes only the latter
+    # two. It is the case that isolates that distinction -- the quote
+    # cases above also carry a U+0020, but they vary the delimiter at
+    # the same time.
     ESCAPING_CASES = [
         "it's",
         'say "hi"',
