@@ -106,8 +106,15 @@ impl PyFormatString {
     /// checking through the expression tree.
     ///
     /// Mirrors the Rust crate's
-    /// `FormatString::validate_expressions(symtab, lib)`. Returns
-    /// `None` on success.
+    /// `FormatString::validate_expressions(symtab, lib, target_type)`.
+    /// Returns `None` on success.
+    ///
+    /// `target_type` is passed as `None` because `resolve` and
+    /// `resolve_string` above resolve without one; validation has to
+    /// observe the same values resolution will produce. The crate
+    /// returns a `StaticResolution` (resolved-length bound and, when
+    /// fully concrete, the resolved value); this binding is pass/fail
+    /// only and discards it.
     #[pyo3(signature = (symtab, *, profile=None))]
     fn validate_expressions(
         &self,
@@ -117,7 +124,8 @@ impl PyFormatString {
         let st = extract_symtab(symtab)?;
         let lib = profile_for_call(profile);
         self.inner
-            .validate_expressions(&st, &lib)
+            .validate_expressions(&st, &lib, None)
+            .map(|_| ())
             .map_err(format_string_validation_err_to_py)
     }
 

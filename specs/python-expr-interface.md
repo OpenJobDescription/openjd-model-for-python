@@ -816,7 +816,11 @@ except FormatStringValidationError as e:
 The error message embeds the ``[start, end]`` byte offsets of the
 failing ``{{...}}`` pair so callers can produce structured
 diagnostics or syntax-highlight the failing segment. Mirrors the
-Rust crate's ``FormatString::validate_expressions(symtab, lib)``.
+Rust crate's
+``FormatString::validate_expressions(symtab, lib, target_type)``,
+which the binding calls with ``target_type=None`` to match ``resolve``
+and ``resolve_string``. The crate returns a ``StaticResolution``; the
+binding is pass/fail only and discards it.
 
 **Equality and hashability.** `FormatString` implements `__eq__` and
 `__hash__` on the raw source string. Two format strings compare equal
