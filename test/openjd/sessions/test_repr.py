@@ -21,6 +21,8 @@ escaping is by construction whatever the running interpreter produces.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from openjd._openjd_rs import (
@@ -128,8 +130,16 @@ class TestActionStatusRepr:
         )
 
 
+@pytest.mark.skipif(os.name != "posix", reason="PosixSessionUser is constructible only on posix")
 class TestPosixSessionUserRepr:
-    """``user`` and ``group`` arrive from outside."""
+    """``user`` and ``group`` arrive from outside.
+
+    The binding gates construction on ``#[cfg(unix)]`` and raises
+    ``RuntimeError: Only available on posix systems.`` elsewhere, so these
+    mirror that with ``os.name``. ``WindowsSessionUser`` has no counterpart
+    here: off the process user it demands a password or a logon token, so
+    it cannot be built with an arbitrary name just to read its repr.
+    """
 
     @pytest.mark.parametrize("value", HOSTILE_STRINGS)
     def test_repr_parses_for_user(self, value: str) -> None:
@@ -158,6 +168,9 @@ class TestReprNegativeControls:
             "ActionResult(state=ActionState.SUCCESS, exit_code=0, stdout='ok')"
         )
 
+    @pytest.mark.skipif(
+        os.name != "posix", reason="PosixSessionUser is constructible only on posix"
+    )
     def test_plain_posix_session_user(self) -> None:
         assert repr(PosixSessionUser(user="alice", group="staff")) == (
             "PosixSessionUser(user='alice', group='staff')"
