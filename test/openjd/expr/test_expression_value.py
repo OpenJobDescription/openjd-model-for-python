@@ -337,27 +337,127 @@ class TestExprValueRepr:
 
     @pytest.mark.parametrize("pf", [PathFormat.POSIX, PathFormat.WINDOWS])
     def test_repr_list_path_with_format(self, pf: PathFormat) -> None:
-        import re
-
         v = ExprValue(["/a", "/b"], type="list[path]", path_format=pf)
-        r = repr(v)
-        assert re.match(
-            r"ExprValue\(\['(/|\\)a', '(/|\\)b'\], type='list\[path\]', "
-            rf"path_format=PathFormat\.{pf.name}\)",
-            r,
+        # Under WINDOWS the leading "/" normalises to "\", which the
+        # literal must escape -- so the expectation comes from CPython's
+        # repr of the normalised items rather than a regex that would
+        # accept either spelling. openjd-rs#374; before it, the WINDOWS
+        # case emitted '\a', which Python parses as BEL.
+        assert repr(v) == (
+            f"ExprValue({v.item()!r}, type='list[path]', path_format=PathFormat.{pf.name})"
         )
+        assert eval(repr(v)) == v
 
     @pytest.mark.parametrize("pf", [PathFormat.POSIX, PathFormat.WINDOWS])
     def test_repr_list_list_path_with_format(self, pf: PathFormat) -> None:
-        import re
-
         v = ExprValue([["/a"], ["/b"]], type="list[list[path]]", path_format=pf)
-        r = repr(v)
-        assert re.match(
-            r"ExprValue\(\[\['(/|\\)a'\], \['(/|\\)b'\]\], type='list\[list\[path\]\]', "
-            rf"path_format=PathFormat\.{pf.name}\)",
-            r,
+        assert repr(v) == (
+            f"ExprValue({v.item()!r}, type='list[list[path]]', path_format=PathFormat.{pf.name})"
         )
+        assert eval(repr(v)) == v
+
+
+class TestExprValueReprEscaping:
+    """``__repr__`` escapes its embedded Python literal.
+
+    ``repr_python`` previously escaped nothing, not even the quote or the
+    backslash, so a value carrying a quote, a backslash or a control
+    character produced a literal CPython cannot parse (a raw newline
+    terminates the string; a NUL cannot appear in source at all) or, worse,
+    one that parses as a different value (``'a\\b'`` is a backspace).
+    Fixed upstream in openjd-rs#374, reachable here via ``__repr__``.
+
+    Expression Language 2.2.6 defines the escaping as following Python's
+    own ``repr``, so ``repr(str)`` is the oracle rather than a hand-written
+    expectation.
+    """
+
+    # Quotes and backslashes (delimiter selection and doubling), the C0
+    # controls, DEL, and the non-ASCII characters CPython escapes by
+    # category -- U+0085, U+00A0, U+00AD, U+2028, U+2029, U+3000, U+200B,
+    # a private-use character and an astral non-printable -- alongside
+    # printable non-ASCII that must survive verbatim.
+    ESCAPING_CASES = [
+        "it's",
+        'say "hi"',
+        'it\'s a "x"',
+        "'",
+        "a\\b",
+        "a\\",
+        "\\'",
+        "hello\nworld",
+        "a\rb",
+        "a\r\nb",
+        "a\tb",
+        "a\x00b",
+        "a\x1bb",
+        "a\x7fb",
+        "a\x0b\x0cb",
+        "café",
+        "a\U0001f600b",
+        "a\x85b",
+        "a\xa0b",
+        "a\xadb",
+        "a\u2028b",
+        "a\u2029b",
+        "a\u3000b",
+        "a\u200bb",
+        "a b",
+        "a\ue000b",
+        "a\U00100000b",
+        "a\U000e0100b",
+    ]
+
+    @pytest.mark.parametrize("s", ESCAPING_CASES)
+    def test_repr_string_matches_cpython(self, s: str) -> None:
+        assert repr(ExprValue(s)) == f"ExprValue({s!r})"
+
+    @pytest.mark.parametrize("s", ESCAPING_CASES)
+    def test_repr_string_round_trips(self, s: str) -> None:
+        # The point of escaping: the literal parses back to the value.
+        assert eval(repr(ExprValue(s))) == ExprValue(s)
+
+    @pytest.mark.parametrize("s", ESCAPING_CASES)
+    def test_repr_list_element_matches_cpython(self, s: str) -> None:
+        # ``repr_python_list`` renders elements through the same writer; a
+        # list-only regression would go unnoticed by the scalar cases.
+        assert repr(ExprValue([s])) == f"ExprValue({[s]!r}, type='list[string]')"
+
+    def test_repr_list_selects_delimiter_per_element(self) -> None:
+        # CPython picks a delimiter per element, so these two differ.
+        assert repr(ExprValue(["it's", "a\nb"])) == (
+            "ExprValue([\"it's\", 'a\\nb'], type='list[string]')"
+        )
+
+    def test_repr_nested_list_element_escaped(self) -> None:
+        assert repr(ExprValue([["a\nb"]])) == r"ExprValue([['a\nb']], type='list[list[string]]')"
+
+    def test_repr_path_escaped(self) -> None:
+        v = ExprValue("/tmp/a\nb.txt", type="path", path_format=PathFormat.POSIX)
+        assert repr(v) == r"ExprValue('/tmp/a\nb.txt', type='path', path_format=PathFormat.POSIX)"
+
+    def test_repr_list_path_escaped(self) -> None:
+        # ``String`` and ``Path`` share one match arm; splitting them would
+        # leave ``list[path]`` unescaped.
+        v = ExprValue(["/a\nb"], type="list[path]", path_format=PathFormat.POSIX)
+        assert repr(v) == r"ExprValue(['/a\nb'], type='list[path]', path_format=PathFormat.POSIX)"
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (42, "ExprValue(42)"),
+            (True, "ExprValue(True)"),
+            (None, "ExprValue(None)"),
+            (Decimal("3.500"), "ExprValue('3.500', type='float')"),
+        ],
+    )
+    def test_repr_non_string_text_unaltered(self, value: object, expected: str) -> None:
+        # Negative control: numeric and keyword text needs no escaping, so
+        # routing it through the shared writer must not change it.
+        assert repr(ExprValue(value)) == expected
+
+    def test_repr_range_expr_unaltered(self) -> None:
+        assert repr(ExprValue("1-5", type="range_expr")) == "ExprValue('1-5', type='range_expr')"
 
 
 class TestMemorySize:
