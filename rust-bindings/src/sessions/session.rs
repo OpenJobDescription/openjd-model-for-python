@@ -691,8 +691,12 @@ impl PySession {
         }
     }
 
-    fn __repr__(&self) -> String {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         let snap = lock_recover(&self.snapshot);
-        format!("Session(id={:?}, state={:?})", snap.session_id, snap.state)
+        Ok(format!(
+            "Session(id={}, state=SessionState.{})",
+            crate::py_repr::py_str(py, &snap.session_id)?,
+            crate::sessions::types::PySessionState::from(snap.state).name()
+        ))
     }
 }
