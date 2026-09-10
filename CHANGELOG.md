@@ -1,3 +1,10 @@
+## 0.11.11 (2026-09-10)
+
+
+### Bug Fixes
+* Bump the openjd-rs crates for their latest fixes: openjd-expr 0.7.0, openjd-model 0.7.0, openjd-sessions 0.5.7. (#359)
+
+
 ## 0.11.10 (2026-09-09)
 
 
