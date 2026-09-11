@@ -4,24 +4,38 @@
 //! Rendering values into `__repr__` output that Python can parse.
 //!
 //! `format!("{:?}", s)` is not a Python literal writer. Rust's `Debug` for
-//! `str` happens to agree with Python on the quote, the backslash and the
-//! C0 controls, but it renders anything else non-printable as `\u{a0}`,
-//! and CPython wants exactly four hex digits after `\u`. A repr carrying
-//! such a character does not parse at all, so a value that arrives from
-//! outside -- captured process output, a template-supplied name -- can
-//! corrupt the repr of the object holding it.
+//! `str` special-cases only the quote, the backslash, and NUL, tab, CR and
+//! LF; every other control character and every non-printable falls through
+//! to Rust's brace form, `\u{1b}` or `\u{a0}`. Python wants exactly four
+//! hex digits after `\u`, so those do not parse. ESC is the one to keep in
+//! mind: ANSI colour sequences in captured process output hit this far more
+//! often than any exotic codepoint does.
 //!
-//! Delegating to CPython's own `repr()` retires the bug class instead of
+//! Delegating to CPython's own `repr()` removes the guesswork rather than
 //! reimplementing its escaping table: the output is by construction
 //! whatever the running interpreter produces, including its per-string
 //! choice of quote character.
+//!
+//! Scope: the `sessions` reprs route through here. Reprs under `model/`
+//! and the rest of `expr/` still use `{:?}` or hand-rolled quoting and
+//! carry the same defect — see the tracking note in the pull request that
+//! introduced this module. A new repr should use these helpers.
+//!
+//! Callers must not hold a lock across `py_str`: it re-enters the
+//! interpreter, which can run arbitrary Python (allocation may trigger a
+//! GC pass and with it `__del__` and weakref callbacks). Read what you
+//! need out from under the guard, drop it, then format.
 
 use pyo3::prelude::*;
-use pyo3::types::PyString;
+use pyo3::types::{PyString, PyStringMethods};
 
 /// CPython's `repr()` of `value`, ready to embed in a `__repr__`.
 pub(crate) fn py_str(py: Python<'_>, value: &str) -> PyResult<String> {
-    Ok(PyString::new(py, value).repr()?.to_string())
+    // `to_cow` reads the UTF-8 directly and propagates failure. Going via
+    // `to_string()` would resolve to PyO3's `Display`, which calls `str()`
+    // on the object -- a second interpreter round-trip whose error has
+    // nowhere to go but a panic out of `__repr__`.
+    Ok(PyString::new(py, value).repr()?.to_cow()?.into_owned())
 }
 
 /// An optional `int` as Python spells it. `Debug` would emit `Some(0)`,

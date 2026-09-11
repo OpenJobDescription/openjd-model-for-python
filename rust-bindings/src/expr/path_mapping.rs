@@ -122,16 +122,22 @@ impl PyPathMappingRule {
         &self.inner.destination_path
     }
 
-    fn __repr__(&self) -> String {
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
         // Render `source_path_format` using its Python name
         // (`PathFormat.POSIX`) rather than the underlying Rust
         // enum's `Debug` name (`Posix`). Matches the Python
         // convention for enum repr.
         let fmt: PyPathFormat = self.inner.source_path_format.into();
-        format!(
-            "PathMappingRule(source_path_format=PathFormat.{}, source_path='{}', destination_path='{}')",
-            fmt.variant_name(), self.inner.source_path, self.inner.destination_path
-        )
+        // The paths go through CPython's repr rather than `'{}'`. Hand-rolled
+        // quoting corrupted a Windows destination silently: `C:\temp` emitted
+        // `'C:\temp'`, which Python reads as `C:` + TAB + `emp`, and an
+        // apostrophe in a path closed the literal early.
+        Ok(format!(
+            "PathMappingRule(source_path_format=PathFormat.{}, source_path={}, destination_path={})",
+            fmt.variant_name(),
+            crate::py_repr::py_str(py, &self.inner.source_path)?,
+            crate::py_repr::py_str(py, &self.inner.destination_path)?,
+        ))
     }
 
     /// Two `PathMappingRule`s compare equal when they have the

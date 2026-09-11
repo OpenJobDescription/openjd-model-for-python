@@ -29,15 +29,25 @@ from openjd._openjd_rs import (
     ActionResult,
     ActionState,
     ActionStatus,
+    PathFormat,
+    PathMappingRule,
     PosixSessionUser,
+    Session,
+    SessionState,
 )
 
-# The characters Rust's Debug renders as \u{...}: non-printable outside
-# ASCII (U+00A0, U+3000, U+0085) plus non-printable ASCII (U+007F). Then
-# the ones Debug does escape correctly, kept as controls against a
-# hand-rolled replacement getting them wrong, and printable non-ASCII
-# that must survive verbatim.
+# The characters Rust's Debug renders in its brace form, which Python
+# cannot parse. Debug special-cases only the quote, the backslash, and
+# NUL/tab/CR/LF; every OTHER control falls through, so ESC is included
+# deliberately -- ANSI colour sequences in captured stdout are the most
+# likely trigger of this bug in the field, far more so than any exotic
+# codepoint. Then the escapes Debug does get right, kept as controls
+# against a hand-rolled replacement breaking them, and printable
+# non-ASCII that must survive verbatim.
 HOSTILE_STRINGS = [
+    "esc\x1b[0m",
+    "a\x01b",
+    "a\x1fb",
     "a\xa0b",
     "a\u3000b",
     "a\x85b",
@@ -114,15 +124,34 @@ class TestActionResultRepr:
 
 
 class TestActionStatusRepr:
-    """No string field, but the same ``Option`` and enum defects."""
+    """No string field, but the same ``Option`` and enum defects.
+
+    This repr is deliberately lossy: it shows ``state`` and ``exit_code``,
+    not the other five fields ``__eq__`` compares. So it is *evaluable*
+    but does not round-trip, and it cannot be made to -- ``started_at``
+    and ``ended_at`` are not constructor arguments. Do not read the
+    Python-literal spelling as a round-trip guarantee; the lossiness is
+    pinned below so a later change to the field list is a deliberate one.
+    """
 
     @pytest.mark.parametrize("exit_code", [0, 1, -9, None])
     def test_repr_is_evaluable(self, exit_code: int | None) -> None:
         status = ActionStatus(state=ActionState.SUCCESS, exit_code=exit_code)
         assert_parses(repr(status))
-        # Evaluates without NameError; ActionStatus has no __eq__ against a
-        # rebuilt instance's other fields, so this asserts evaluability only.
+        # The defect this pins: `Some(0)` and a bare `SUCCESS` both raised
+        # NameError. Evaluability only -- see the class docstring.
         eval(repr(status), dict(EVAL_NS))
+
+    def test_repr_omits_fields_that_eq_compares(self) -> None:
+        # Guards the class docstring's claim rather than asserting a
+        # round-trip that cannot hold.
+        status = ActionStatus(
+            state=ActionState.SUCCESS, exit_code=0, progress=50.0, status_message="halfway"
+        )
+        assert repr(status) == "ActionStatus(state=ActionState.SUCCESS, exit_code=0)"
+        rebuilt = eval(repr(status), dict(EVAL_NS))
+        assert rebuilt != status
+        assert rebuilt.progress is None and status.progress == 50.0
 
     def test_repr_renders_none_exit_code(self) -> None:
         assert repr(ActionStatus(state=ActionState.FAILED, exit_code=None)) == (
@@ -160,8 +189,80 @@ class TestPosixSessionUserRepr:
         )
 
 
+class TestSessionRepr:
+    """``session_id`` is supplied by the caller, so it needs escaping too.
+
+    A real ``Session`` creates a working directory, so each case calls
+    ``cleanup()``. The keyword must match the constructor: the repr used to
+    say ``id=``, which parsed but raised ``TypeError`` on eval.
+    """
+
+    @staticmethod
+    def _session(session_id: str) -> Session:
+        return Session(session_id=session_id, job_parameter_values={})
+
+    # `session_id` becomes a path component of the working directory, so NUL
+    # is refused by the filesystem before any repr is taken ("file name
+    # contained an unexpected NUL byte"). That is a constructor constraint,
+    # not a repr gap -- ActionResult covers NUL through the same helper.
+    SESSION_ID_CASES = [s for s in HOSTILE_STRINGS if "\x00" not in s]
+
+    @pytest.mark.parametrize("session_id", SESSION_ID_CASES)
+    def test_repr_matches_cpython_for_session_id(self, session_id: str) -> None:
+        session = self._session(session_id)
+        try:
+            assert repr(session) == (
+                f"Session(session_id={session_id!r}, state=SessionState.READY)"
+            )
+            assert_parses(repr(session))
+        finally:
+            session.cleanup()
+
+    def test_repr_uses_the_constructor_keyword(self) -> None:
+        # `id=` parsed but was not a real argument, so eval raised TypeError.
+        session = self._session("s1")
+        try:
+            r = repr(session)
+            assert "session_id=" in r and "(id=" not in r
+            # `job_parameter_values` is required and absent from the repr, so
+            # a full round-trip is not available; this pins the keyword only.
+            with pytest.raises(TypeError):
+                eval(r, {"Session": Session, "SessionState": SessionState})
+        finally:
+            session.cleanup()
+
+
+class TestPathMappingRuleRepr:
+    """Hand-rolled ``'{}'`` quoting corrupted Windows paths silently.
+
+    ``C:\\temp`` rendered as ``'C:\\temp'``, which Python reads as ``C:`` +
+    TAB + ``emp`` -- it parses, and yields the wrong string. An apostrophe
+    in a path closed the literal early instead.
+    """
+
+    @pytest.mark.parametrize("path", HOSTILE_STRINGS + ["C:\\temp", "C:\\x", "/home/o'brien"])
+    def test_repr_matches_cpython_for_both_paths(self, path: str) -> None:
+        rule = PathMappingRule(
+            source_path_format=PathFormat.POSIX, source_path=path, destination_path=path
+        )
+        assert repr(rule) == (
+            "PathMappingRule(source_path_format=PathFormat.POSIX, "
+            f"source_path={path!r}, destination_path={path!r})"
+        )
+
+    @pytest.mark.parametrize("path", ["C:\\temp", "C:\\users", "/home/o'brien/scenes"])
+    def test_repr_round_trips_a_windows_path(self, path: str) -> None:
+        # The silent-corruption case: this used to parse and give back a
+        # different string.
+        rule = PathMappingRule(
+            source_path_format=PathFormat.WINDOWS, source_path="/mnt/s", destination_path=path
+        )
+        rebuilt = eval(repr(rule), {"PathMappingRule": PathMappingRule, "PathFormat": PathFormat})
+        assert rebuilt.destination_path == path
+        assert rebuilt == rule
+
+
 class TestReprNegativeControls:
-    """Text needing no escaping must pass through unaltered."""
 
     def test_plain_action_result(self) -> None:
         assert repr(ActionResult(state=ActionState.SUCCESS, exit_code=0, stdout="ok")) == (
