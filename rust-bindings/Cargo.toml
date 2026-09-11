@@ -13,8 +13,8 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 openjd-expr = "0.7.0"
-openjd-model = "0.7.0"
-openjd-sessions = "0.5.7"
+openjd-model = "0.7.1"
+openjd-sessions = "0.5.8"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 uuid = { version = "1", features = ["v4"] }
 serde_json = "1"
