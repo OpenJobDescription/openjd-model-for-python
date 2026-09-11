@@ -2,7 +2,7 @@
 
 
 import pytest
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 from openjd.model import create_job, decode_job_template
 from openjd.model._errors import DecodeValidationError
@@ -14,8 +14,12 @@ from openjd.model.v2023_09 import (
     ArgString,
     AmountRequirementTemplate,
     CancelationMethodNotifyThenTerminate,
+    CommandString,
+    DataString,
     EmbeddedFileText,
+    Environment,
     ExtensionName,
+    JobName,
     JobTemplate,
     EnvironmentTemplate,
     ModelParsingContext,
@@ -1342,3 +1346,337 @@ class TestStepResolveSyntaxSugar:
 
         assert step.script is not None
         assert step.script.actions.onRun.timeout == 60
+
+
+# FEATURE_BUNDLE_1 raises the length ceilings for a job name, environment name,
+# embedded-file name, and embedded-file filename during template decode. The
+# job-creation path re-instantiates the models without a parsing context, so a
+# name that decode accepted under FEATURE_BUNDLE_1 must still survive
+# create_job. The group-A and group-F tests below assert that survival: these
+# failed before create_job seeded the FEATURE_BUNDLE_1 parsing context.
+_FB1_SUPPORTED = [ExtensionName.FEATURE_BUNDLE_1]
+
+
+class TestCreateJobPreservesFeatureBundle1Lengths:
+    """Length-ceiling behaviour for names/filenames across decode and create_job.
+
+    FEATURE_BUNDLE_1 decode accepts the raised length ceilings (512 for names,
+    256 for filenames); create_job's re-validation of the instantiated models
+    must apply the same extension-aware limits, so a value decode accepted
+    survives create_job, and the resolved job name is still checked against the
+    128/512 limit after the format string has been resolved.
+
+    Groups:
+      A. FEATURE_BUNDLE_1 decode -> create_job SURVIVE: a 512/512/512/256 name/name/name/filename accepted at decode must be
+         preserved by create_job.
+      B. FEATURE_BUNDLE_1 decode ceiling (expected PASS): one past the ceiling
+         is rejected at decode.
+      C. Non-FEATURE_BUNDLE_1 decode (expected PASS): the default 128/64/64/64
+         ceilings apply.
+      D. static type ceilings without a parsing context (expected PASS): 512 for
+         ``JobName``/``Identifier``/``EnvironmentName``, 256 for ``Filename``.
+         Says nothing about the extension-specific validators, which apply the
+         base limits when no context is present.
+      E. Separator (expected PASS): a filename containing a path separator is
+         rejected both during FEATURE_BUNDLE_1 decode and during direct
+         ``EmbeddedFileText.model_validate`` with no context.
+      F. Round trip: all four lengthened fields survive
+         create_job simultaneously.
+      G. Resolved job name (matrix): the resolved job name is checked against
+         the extension-aware 128/512 limit after format-string substitution.
+    """
+
+    @staticmethod
+    def _template(
+        *,
+        job_name: str = "J",
+        env_name: str = "Env1",
+        ef_name: str = "Run",
+        ef_filename: str = "run.sh",
+        declare_fb1: bool = True,
+    ) -> dict:
+        """Build a minimal valid template with one step, one embedded file, and one job environment.
+
+        The onRun command does not reference the embedded file, so the file's
+        name length is exercised without a Task.File.* reference constraining it.
+        """
+        template: dict = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": job_name,
+            "steps": [
+                {
+                    "name": "s",
+                    "script": {
+                        "actions": {"onRun": {"command": "echo"}},
+                        "embeddedFiles": [
+                            {
+                                "name": ef_name,
+                                "type": "TEXT",
+                                "data": "echo hi",
+                                "filename": ef_filename,
+                            }
+                        ],
+                    },
+                }
+            ],
+            "jobEnvironments": [
+                {
+                    "name": env_name,
+                    "script": {"actions": {"onEnter": {"command": "echo enter"}}},
+                }
+            ],
+        }
+        if declare_fb1:
+            template["extensions"] = ["FEATURE_BUNDLE_1"]
+        return template
+
+    @staticmethod
+    def _create(template: dict):
+        """Decode the template with FEATURE_BUNDLE_1 supported, then create a job from it."""
+        job_template = decode_job_template(template=template, supported_extensions=_FB1_SUPPORTED)
+        return create_job(job_template=job_template, job_parameter_values={})
+
+    # ---- Group A: FEATURE_BUNDLE_1 decode -> create_job SURVIVE ----
+
+    def test_job_name_512_chars_fb1_create_job_preserved(self) -> None:
+        """A 512-char job name accepted by FEATURE_BUNDLE_1 decode must survive create_job."""
+        job = self._create(self._template(job_name="a" * 512))
+        assert len(job.name) == 512
+
+    def test_environment_name_512_chars_fb1_create_job_preserved(self) -> None:
+        """A 512-char job-environment name must survive create_job."""
+        job = self._create(self._template(env_name="a" * 512))
+        assert len(job.jobEnvironments[0].name) == 512
+
+    def test_embedded_file_name_512_chars_fb1_create_job_preserved(self) -> None:
+        """A 512-char embedded-file name must survive create_job."""
+        job = self._create(self._template(ef_name="a" * 512))
+        assert len(job.steps[0].script.embeddedFiles[0].name) == 512
+
+    def test_embedded_file_filename_256_chars_fb1_create_job_preserved(self) -> None:
+        """A 256-char embedded-file filename must survive create_job."""
+        job = self._create(self._template(ef_filename="a" * 256))
+        assert len(job.steps[0].script.embeddedFiles[0].filename) == 256
+
+    # ---- Group B: FEATURE_BUNDLE_1 decode ceiling (PASS) ----
+
+    def test_job_name_513_chars_fb1_decode_rejected(self) -> None:
+        """One past the 512 job-name ceiling is rejected at FEATURE_BUNDLE_1 decode."""
+        with pytest.raises(DecodeValidationError, match="512"):
+            decode_job_template(
+                template=self._template(job_name="a" * 513),
+                supported_extensions=_FB1_SUPPORTED,
+            )
+
+    def test_environment_name_513_chars_fb1_decode_rejected(self) -> None:
+        """One past the 512 environment-name ceiling is rejected at FEATURE_BUNDLE_1 decode."""
+        with pytest.raises(DecodeValidationError, match="512"):
+            decode_job_template(
+                template=self._template(env_name="a" * 513),
+                supported_extensions=_FB1_SUPPORTED,
+            )
+
+    def test_embedded_file_name_513_chars_fb1_decode_rejected(self) -> None:
+        """One past the 512 embedded-file-name ceiling is rejected at FEATURE_BUNDLE_1 decode."""
+        with pytest.raises(DecodeValidationError, match="512"):
+            decode_job_template(
+                template=self._template(ef_name="a" * 513),
+                supported_extensions=_FB1_SUPPORTED,
+            )
+
+    def test_embedded_file_filename_257_chars_fb1_decode_rejected(self) -> None:
+        """One past the 256 embedded-file-filename ceiling is rejected at FEATURE_BUNDLE_1 decode."""
+        with pytest.raises(DecodeValidationError, match="256"):
+            decode_job_template(
+                template=self._template(ef_filename="a" * 257),
+                supported_extensions=_FB1_SUPPORTED,
+            )
+
+    # ---- Group C: non-FEATURE_BUNDLE_1 decode default ceilings (PASS) ----
+
+    def test_job_name_128_chars_no_extension_decode_accepted(self) -> None:
+        """Without FEATURE_BUNDLE_1 the default 128 job-name ceiling accepts 128 chars."""
+        result = decode_job_template(
+            template=self._template(job_name="a" * 128, declare_fb1=False),
+            supported_extensions=[],
+        )
+        assert len(result.name) == 128
+
+    def test_job_name_129_chars_no_extension_decode_rejected(self) -> None:
+        """Without FEATURE_BUNDLE_1 a 129-char job name is rejected at the default 128 ceiling."""
+        with pytest.raises(DecodeValidationError, match="128"):
+            decode_job_template(
+                template=self._template(job_name="a" * 129, declare_fb1=False),
+                supported_extensions=[],
+            )
+
+    def test_environment_name_64_chars_no_extension_decode_accepted(self) -> None:
+        """Without FEATURE_BUNDLE_1 the default 64 environment-name ceiling accepts 64 chars."""
+        result = decode_job_template(
+            template=self._template(env_name="a" * 64, declare_fb1=False),
+            supported_extensions=[],
+        )
+        assert len(result.jobEnvironments[0].name) == 64
+
+    def test_environment_name_65_chars_no_extension_decode_rejected(self) -> None:
+        """Without FEATURE_BUNDLE_1 a 65-char environment name is rejected at the default 64 ceiling."""
+        with pytest.raises(DecodeValidationError, match="64"):
+            decode_job_template(
+                template=self._template(env_name="a" * 65, declare_fb1=False),
+                supported_extensions=[],
+            )
+
+    def test_embedded_file_name_64_chars_no_extension_decode_accepted(self) -> None:
+        """Without FEATURE_BUNDLE_1 the default 64 embedded-file-name ceiling accepts 64 chars."""
+        result = decode_job_template(
+            template=self._template(ef_name="a" * 64, declare_fb1=False),
+            supported_extensions=[],
+        )
+        assert len(result.steps[0].script.embeddedFiles[0].name) == 64
+
+    def test_embedded_file_name_65_chars_no_extension_decode_rejected(self) -> None:
+        """Without FEATURE_BUNDLE_1 a 65-char embedded-file name is rejected at the default 64 ceiling."""
+        with pytest.raises(DecodeValidationError, match="64"):
+            decode_job_template(
+                template=self._template(ef_name="a" * 65, declare_fb1=False),
+                supported_extensions=[],
+            )
+
+    def test_embedded_file_filename_64_chars_no_extension_decode_accepted(self) -> None:
+        """Without FEATURE_BUNDLE_1 the default 64 embedded-file-filename ceiling accepts 64 chars."""
+        result = decode_job_template(
+            template=self._template(ef_filename="a" * 64, declare_fb1=False),
+            supported_extensions=[],
+        )
+        assert len(result.steps[0].script.embeddedFiles[0].filename) == 64
+
+    def test_embedded_file_filename_65_chars_no_extension_decode_rejected(self) -> None:
+        """Without FEATURE_BUNDLE_1 a 65-char embedded-file filename is rejected at the default 64 ceiling."""
+        with pytest.raises(DecodeValidationError, match="64"):
+            decode_job_template(
+                template=self._template(ef_filename="a" * 65, declare_fb1=False),
+                supported_extensions=[],
+            )
+
+    # ---- Group D: static type ceilings, no parsing context (PASS) ----
+
+    def test_job_name_512_chars_type_adapter_no_context_accepted(self) -> None:
+        """The JobName type alias alone accepts 512 chars: its static ceiling is 512."""
+        adapter = TypeAdapter(JobName)
+        assert len(adapter.validate_python("a" * 512)) == 512
+
+    def test_job_name_513_chars_type_adapter_no_context_rejected(self) -> None:
+        """Direct construction semantics: 513 chars exceeds the static JobName type ceiling (512)."""
+        adapter = TypeAdapter(JobName)
+        with pytest.raises(ValidationError, match="512"):
+            adapter.validate_python("a" * 513)
+
+    @staticmethod
+    def _direct_env(name: str) -> dict:
+        """A context-free Environment dict: the script command is a pre-built
+        CommandString instance so no parsing context is required, leaving the
+        name validator as the only length gate exercised."""
+        return {
+            "name": name,
+            "script": {"actions": {"onEnter": {"command": CommandString("echo")}}},
+        }
+
+    @staticmethod
+    def _direct_ef(**overrides) -> dict:
+        """A context-free EmbeddedFileText dict: ``data`` is a pre-built
+        DataString instance (DynamicConstrainedStr._validate takes the
+        ``type(value) is cls`` branch), so no parsing context is required."""
+        d: dict = {"name": "Run", "type": "TEXT", "data": DataString("x")}
+        d.update(overrides)
+        return d
+
+    def test_environment_name_513_chars_no_context_rejected(self) -> None:
+        """Direct construction: 513 chars exceeds the static EnvironmentName type ceiling (512)."""
+        with pytest.raises(ValidationError, match="512"):
+            Environment.model_validate(self._direct_env("a" * 513))
+
+    def test_embedded_file_name_513_chars_no_context_rejected(self) -> None:
+        """Direct construction: 513 chars exceeds the static Identifier type ceiling (512)."""
+        with pytest.raises(ValidationError, match="512"):
+            EmbeddedFileText.model_validate(self._direct_ef(name="a" * 513))
+
+    def test_embedded_file_filename_257_chars_no_context_rejected(self) -> None:
+        """Direct construction: 257 chars exceeds the static Filename type ceiling (256)."""
+        with pytest.raises(ValidationError, match="256"):
+            EmbeddedFileText.model_validate(self._direct_ef(filename="a" * 257))
+
+    # ---- Group E: filename path separator (PASS) ----
+
+    def test_embedded_file_filename_forward_slash_fb1_decode_rejected(self) -> None:
+        """A filename containing '/' is rejected during FEATURE_BUNDLE_1 decode."""
+        with pytest.raises(DecodeValidationError, match="path separators"):
+            decode_job_template(
+                template=self._template(ef_filename="a/b"),
+                supported_extensions=_FB1_SUPPORTED,
+            )
+
+    def test_embedded_file_filename_backslash_fb1_decode_rejected(self) -> None:
+        """A filename containing '\\' is rejected during FEATURE_BUNDLE_1 decode."""
+        with pytest.raises(DecodeValidationError, match="path separators"):
+            decode_job_template(
+                template=self._template(ef_filename="a\\b"),
+                supported_extensions=_FB1_SUPPORTED,
+            )
+
+    def test_embedded_file_filename_forward_slash_no_context_rejected(self) -> None:
+        """Direct construction: a filename containing '/' is rejected by the
+        path-separator check, which runs regardless of parsing context."""
+        with pytest.raises(ValidationError, match="path separators"):
+            EmbeddedFileText.model_validate(self._direct_ef(filename="a/b"))
+
+    def test_embedded_file_filename_backslash_no_context_rejected(self) -> None:
+        """Direct construction: a filename containing '\\' is rejected by the
+        path-separator check, which runs regardless of parsing context."""
+        with pytest.raises(ValidationError, match="path separators"):
+            EmbeddedFileText.model_validate(self._direct_ef(filename="a\\b"))
+
+    # ---- Group F: round trip, all four fields at once ----
+
+    def test_all_four_fields_at_ceiling_fb1_create_job_preserved(self) -> None:
+        """All four FEATURE_BUNDLE_1-lengthened fields must survive create_job simultaneously."""
+        job = self._create(
+            self._template(
+                job_name="a" * 512,
+                env_name="a" * 512,
+                ef_name="a" * 512,
+                ef_filename="a" * 256,
+            )
+        )
+        assert (
+            len(job.name),
+            len(job.jobEnvironments[0].name),
+            len(job.steps[0].script.embeddedFiles[0].name),
+            len(job.steps[0].script.embeddedFiles[0].filename),
+        ) == (512, 512, 512, 256)
+
+    # ---- Group G: resolved job name matrix ----
+
+    def _create_with_resolved_job_name(self, declare_fb1: bool, resolved_len: int):
+        """Decode a template whose job name is ``{{Param.N}}`` and create a job
+        whose parameter resolves the name to ``resolved_len`` characters, so the
+        resolved-value length is checked (not the literal template value)."""
+        template = self._template(job_name="{{Param.N}}", declare_fb1=declare_fb1)
+        template.setdefault("parameterDefinitions", []).append({"name": "N", "type": "STRING"})
+        supported = [ExtensionName.FEATURE_BUNDLE_1] if declare_fb1 else []
+        decoded = decode_job_template(template=template, supported_extensions=supported)
+        values = {"N": ParameterValue(type=ParameterValueType.STRING, value="a" * resolved_len)}
+        return create_job(job_template=decoded, job_parameter_values=values)
+
+    def test_resolved_job_name_512_chars_fb1_create_job_preserved(self) -> None:
+        assert len(self._create_with_resolved_job_name(True, 512).name) == 512
+
+    def test_resolved_job_name_513_chars_fb1_create_job_rejected(self) -> None:
+        with pytest.raises(DecodeValidationError, match="512"):
+            self._create_with_resolved_job_name(True, 513)
+
+    def test_resolved_job_name_128_chars_no_extension_create_job_accepted(self) -> None:
+        assert len(self._create_with_resolved_job_name(False, 128).name) == 128
+
+    def test_resolved_job_name_129_chars_no_extension_create_job_rejected(self) -> None:
+        with pytest.raises(DecodeValidationError, match="128"):
+            self._create_with_resolved_job_name(False, 129)
