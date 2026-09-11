@@ -405,3 +405,69 @@ environment:
     def test_invalid_yaml_raises(self) -> None:
         with pytest.raises(DecodeValidationError):
             decode_environment_template_str(": not a mapping")
+
+
+class TestStepEnvironmentNameScope(object):
+    """A Step Environment's ``name`` is scoped to the Step that defines it (Template
+    Schemas §3 StepTemplate, §4 Environment): unique within that Step's list, and
+    distinct from every Job Environment. Different Steps may reuse a name.
+
+    openjd-model 0.7.1 (openjd-rs#381) relaxed an over-strict check that held every
+    environment name in the template in one set, so the second Step to declare
+    ``StepEnv`` was rejected. The v0 path always accepted this; this is the v1 path,
+    which had no coverage.
+    """
+
+    @staticmethod
+    def _environment(name: str) -> dict[str, Any]:
+        return {
+            "name": name,
+            "script": {"actions": {"onEnter": {"command": "echo", "args": [name]}}},
+        }
+
+    @classmethod
+    def _step(cls, name: str, environment_names: list[str]) -> dict[str, Any]:
+        return {
+            "name": name,
+            "stepEnvironments": [cls._environment(n) for n in environment_names],
+            "script": {"actions": {"onRun": {"command": "echo", "args": [name]}}},
+        }
+
+    @classmethod
+    def _template(cls, steps: list[dict[str, Any]]) -> dict[str, Any]:
+        return {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "jobEnvironments": [cls._environment("JobEnv")],
+            "steps": steps,
+        }
+
+    def test_same_name_across_steps_is_accepted(self) -> None:
+        """Four Steps each declare ``StepEnv``. Only one Step's environments are ever
+        active in a Session, so these names never collide."""
+        template = self._template([self._step(f"Step{i}", ["StepEnv"]) for i in range(4)])
+        job_template = decode_job_template(template=template, supported_extensions=[])
+        names = [[e.name for e in (s.step_environments or [])] for s in job_template.steps]
+        assert names == [["StepEnv"]] * 4
+
+    def test_duplicate_within_one_step_is_rejected(self) -> None:
+        """Control for §3 rule 1: the per-Step uniqueness check must survive the relaxation."""
+        template = self._template(
+            [self._step("Step0", ["StepEnv"]), self._step("Step1", ["StepEnv", "StepEnv"])]
+        )
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=template, supported_extensions=[])
+        message = str(excinfo.value)
+        assert "steps[1] -> stepEnvironments[1]" in message
+        assert "duplicate environment name: 'StepEnv'" in message
+
+    def test_step_env_named_like_job_env_is_rejected(self) -> None:
+        """Control for §3 rule 2: a Step Environment may not reuse a Job Environment name."""
+        template = self._template(
+            [self._step("Step0", ["StepEnv"]), self._step("Step1", ["JobEnv"])]
+        )
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=template, supported_extensions=[])
+        message = str(excinfo.value)
+        assert "steps[1] -> stepEnvironments[0]" in message
+        assert "duplicate environment name: 'JobEnv'" in message

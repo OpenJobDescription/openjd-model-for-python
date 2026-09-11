@@ -696,9 +696,9 @@ dependencies = [
 
 [[package]]
 name = "openjd-model"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fdfffa82b1dbb94865d10c935cd547b4319932280f37b87db475dca961b7ef91"
+checksum = "ca2537f12cbe572cb0f0a36bca44c858e8e943a30603c583c959aa8453a2c62d"
 dependencies = [
  "indexmap",
  "openjd-expr",
@@ -728,9 +728,9 @@ dependencies = [
 
 [[package]]
 name = "openjd-sessions"
-version = "0.5.7"
+version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "877446585bd38cff6a40c68293f62b2147e5fa4f0997a83a39c5d2af38585449"
+checksum = "9dc782dfcc53e6850422c30526e94fb80657650c7123152f05166b9873e20e49"
 dependencies = [
  "bitflags",
  "futures-util",
