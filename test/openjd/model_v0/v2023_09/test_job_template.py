@@ -180,6 +180,26 @@ class TestJobTemplate:
                 },
                 id="job and step env names all differ",
             ),
+            pytest.param(
+                {
+                    "specificationVersion": "jobtemplate-2023-09",
+                    "name": "Foo",
+                    "steps": [
+                        {
+                            "name": "StepOne",
+                            "script": STEP_SCRIPT,
+                            "stepEnvironments": [{"name": "StepEnv", "script": ENV_SCRIPT}],
+                        },
+                        {
+                            "name": "StepTwo",
+                            "script": STEP_SCRIPT,
+                            "stepEnvironments": [{"name": "StepEnv", "script": ENV_SCRIPT}],
+                        },
+                    ],
+                    "jobEnvironments": [{"name": "JobEnv", "script": ENV_SCRIPT}],
+                },
+                id="step env name reused across steps",
+            ),
         ),
     )
     def test_parse_success(self, data: dict[str, Any]) -> None:
