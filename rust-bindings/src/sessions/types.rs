@@ -53,7 +53,7 @@ impl From<SessionState> for PySessionState {
 impl PySessionState {
     /// Variant name as a string (e.g. `"READY"`).
     #[getter]
-    fn name(&self) -> &'static str {
+    pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::READY => "READY",
             Self::RUNNING => "RUNNING",
@@ -323,8 +323,9 @@ impl PyActionStatus {
 
     fn __repr__(&self) -> String {
         format!(
-            "ActionStatus(state={:?}, exit_code={:?})",
-            self.inner.state, self.inner.exit_code
+            "ActionStatus(state=ActionState.{}, exit_code={})",
+            self.state().name(),
+            crate::py_repr::py_opt_int(self.inner.exit_code)
         )
     }
 
@@ -525,13 +526,13 @@ impl PyActionResult {
         }
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "ActionResult(state={}, exit_code={:?}, stdout={:?})",
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "ActionResult(state=ActionState.{}, exit_code={}, stdout={})",
             self.state.name(),
-            self.exit_code,
-            self.stdout,
-        )
+            crate::py_repr::py_opt_int(self.exit_code),
+            crate::py_repr::py_str(py, &self.stdout)?,
+        ))
     }
 
     fn __eq__(&self, other: &Self) -> bool {

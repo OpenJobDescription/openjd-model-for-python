@@ -63,12 +63,12 @@ impl PyPosixSessionUser {
         self.inner.is_process_user()
     }
 
-    fn __repr__(&self) -> String {
-        format!(
-            "PosixSessionUser(user={:?}, group={:?})",
-            self.inner.user(),
-            self.inner.group()
-        )
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "PosixSessionUser(user={}, group={})",
+            crate::py_repr::py_str(py, self.inner.user())?,
+            crate::py_repr::py_str(py, self.inner.group())?
+        ))
     }
 
     /// Pickle support — round-trips through `__init__(user, *, group=...)`.
@@ -307,8 +307,11 @@ impl PyWindowsSessionUser {
         self.inner.is_process_user()
     }
 
-    fn __repr__(&self) -> String {
-        format!("WindowsSessionUser(user={:?})", self.inner.user())
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        Ok(format!(
+            "WindowsSessionUser(user={})",
+            crate::py_repr::py_str(py, self.inner.user())?
+        ))
     }
 
     /// Pickle support — round-trips through `__init__(user, *,
