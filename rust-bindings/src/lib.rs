@@ -4,6 +4,7 @@
 mod expr;
 mod model;
 mod pickle_helpers;
+mod py_repr;
 mod sessions;
 
 use pyo3::prelude::*;

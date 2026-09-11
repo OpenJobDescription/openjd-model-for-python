@@ -691,8 +691,19 @@ impl PySession {
         }
     }
 
-    fn __repr__(&self) -> String {
-        let snap = lock_recover(&self.snapshot);
-        format!("Session(id={:?}, state={:?})", snap.session_id, snap.state)
+    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
+        // Read out from under the guard and drop it before calling into
+        // CPython: `py_str` allocates, an allocation can trigger a GC pass,
+        // and a finalizer run by that pass may re-enter this Session and
+        // re-lock `snapshot`, which is not reentrant.
+        let (session_id, state) = {
+            let snap = lock_recover(&self.snapshot);
+            (snap.session_id.clone(), snap.state)
+        };
+        Ok(format!(
+            "Session(session_id={}, state=SessionState.{})",
+            crate::py_repr::py_str(py, &session_id)?,
+            crate::sessions::types::PySessionState::from(state).name()
+        ))
     }
 }
