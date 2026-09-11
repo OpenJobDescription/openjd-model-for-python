@@ -87,6 +87,16 @@ def assert_parses(text: str) -> None:
     compile(text, "<repr>", "eval")
 
 
+# Characters no portable filename may contain: the C0 controls plus the
+# punctuation Windows reserves. Used to bound the `Session` cases, whose
+# session_id becomes a directory name on disk.
+_WINDOWS_RESERVED_IN_FILENAMES = frozenset('<>:"/\\|?*')
+
+
+def is_portable_filename(value: str) -> bool:
+    return not any(c in _WINDOWS_RESERVED_IN_FILENAMES or ord(c) < 0x20 for c in value)
+
+
 class TestActionResultRepr:
     """``ActionResult.stdout`` is captured process output."""
 
@@ -192,20 +202,33 @@ class TestPosixSessionUserRepr:
 class TestSessionRepr:
     """``session_id`` is supplied by the caller, so it needs escaping too.
 
-    A real ``Session`` creates a working directory, so each case calls
-    ``cleanup()``. The keyword must match the constructor: the repr used to
-    say ``id=``, which parsed but raised ``TypeError`` on eval.
+    A real ``Session`` creates a working directory *named after the
+    session_id*, so the inputs here are bounded by what a filename may
+    contain, not by what the repr can render. Anything the most restrictive
+    supported filesystem rejects fails in the constructor, before a repr is
+    ever taken -- on Windows that is the C0 controls plus ``<>:"/\\|?*``.
+
+    The excluded characters are not left unverified: they go through the
+    same ``py_repr::py_str`` helper via ``ActionResult`` and
+    ``PosixSessionUser`` above, which touch no disk. What is verified here
+    is that ``Session`` routes through that helper at all, and that the
+    keyword matches its constructor.
     """
+
+    # Computed rather than hand-listed so a new HOSTILE_STRINGS entry is
+    # classified automatically instead of silently breaking Windows CI.
+    SESSION_ID_CASES = [s for s in HOSTILE_STRINGS if is_portable_filename(s)]
 
     @staticmethod
     def _session(session_id: str) -> Session:
         return Session(session_id=session_id, job_parameter_values={})
 
-    # `session_id` becomes a path component of the working directory, so NUL
-    # is refused by the filesystem before any repr is taken ("file name
-    # contained an unexpected NUL byte"). That is a constructor constraint,
-    # not a repr gap -- ActionResult covers NUL through the same helper.
-    SESSION_ID_CASES = [s for s in HOSTILE_STRINGS if "\x00" not in s]
+    def test_the_case_filter_keeps_the_canonical_trigger(self) -> None:
+        # Guards against the filter quietly emptying out and the sweep below
+        # asserting nothing. U+00A0 is the character this PR exists for.
+        assert "a\xa0b" in self.SESSION_ID_CASES
+        assert "a\u3000b" in self.SESSION_ID_CASES
+        assert len(self.SESSION_ID_CASES) >= 8
 
     @pytest.mark.parametrize("session_id", SESSION_ID_CASES)
     def test_repr_matches_cpython_for_session_id(self, session_id: str) -> None:
