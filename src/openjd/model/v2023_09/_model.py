@@ -734,11 +734,13 @@ class EnvironmentActions(OpenJDModel_v2023_09):
         any_wrap = any(v is not None for v in wrap_values.values())
 
         if any_wrap:
-            # Extension gating is a template-decode concern and only applies
-            # when a parsing context is present. During job instantiation
-            # (create_job re-validates the model without a ModelParsingContext)
-            # the template has already been validated at decode time, so the
-            # extension-requirement checks are skipped then -- mirroring the
+            # Extension gating only applies when a parsing context is present.
+            # At decode time the context carries the supported set; during job
+            # instantiation create_job re-validates the model with a context
+            # seeded from the template's declared extensions (see
+            # _internal/_create_job.py), so this check reproduces its decode-time
+            # result. A missing context only occurs for model classes that bind no
+            # parsing-context type, and the check is skipped then -- mirroring the
             # `if context` guard the other extension gates in this module use.
             if context is not None:
                 if "WRAP_ACTIONS" not in extensions:
@@ -898,7 +900,8 @@ class EmbeddedFileText(OpenJDModel_v2023_09):
         if v is None:
             return v
         context = cast(Optional[ModelParsingContext], info.context)
-        # Skip extension check if no context (e.g., during job creation from validated template)
+        # Skip only when there is no parsing context (model classes that bind no
+        # context type); create_job seeds one from the template's declared extensions.
         if context and "FEATURE_BUNDLE_1" not in context.extensions:
             raise ValueError("The endOfLine property requires the FEATURE_BUNDLE_1 extension.")
         return v
