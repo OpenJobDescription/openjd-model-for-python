@@ -1,7 +1,7 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 from contextlib import contextmanager
-from typing import Annotated, Any, Union, Dict
+from typing import Annotated, Any, Optional, Union, Dict
 
 from pydantic import ValidationError
 from pydantic import TypeAdapter
@@ -9,7 +9,7 @@ from pydantic_core import InitErrorDetails
 
 from .._symbol_table import SymbolTable
 from .._format_strings import FormatString
-from .._types import OpenJDModel
+from .._types import ModelParsingContextInterface, OpenJDModel
 
 __all__ = ("instantiate_model", "resolve_whole_field_typed_list")
 
@@ -147,7 +147,7 @@ def capture_validation_errors(
         )
 
 
-def instantiate_model(  # noqa: C901
+def instantiate_model(
     model: OpenJDModel,
     symtab: SymbolTable,
 ) -> OpenJDModel:
@@ -166,6 +166,33 @@ def instantiate_model(  # noqa: C901
 
     Returns:
         OpenJDModel: The transformed model.
+
+    Target models are constructed with a parsing context seeded from the root
+    template's declared extensions, so extension-aware limits (e.g. FEATURE_BUNDLE_1
+    name lengths) apply to resolved values exactly as they did at decode time.
+    """
+    # Models whose class does not bind a parsing-context type (revision-agnostic
+    # models, e.g. internal test fixtures) are validated without a context, exactly
+    # as before; every v2023_09 model binds it via its base class.
+    context_type = getattr(type(model), "model_parsing_context_type", None)
+    context: Optional[ModelParsingContextInterface]
+    if context_type is None:
+        context = None
+    else:
+        context = context_type(supported_extensions=getattr(model, "extensions", None) or [])
+    return _instantiate_model(model, symtab, context=context)
+
+
+def _instantiate_model(  # noqa: C901
+    model: OpenJDModel,
+    symtab: SymbolTable,
+    *,
+    context: Optional[ModelParsingContextInterface],
+) -> OpenJDModel:
+    """Recursive worker for :func:`instantiate_model`.
+
+    Carries the seeded parsing ``context`` down the depth-first traversal so
+    each target model is constructed with it.
     """
     errors = list[InitErrorDetails]()
     instantiated_fields = dict[str, Any]()
@@ -239,16 +266,20 @@ def instantiate_model(  # noqa: C901
                 if field_name in model._job_creation_metadata.reshape_field_to_dict:
                     key_field = model._job_creation_metadata.reshape_field_to_dict[field_name]
                     instantiated = _instantiate_list_field_as_dict(
-                        field_value, symtab, needs_resolve, key_field
+                        field_value, symtab, needs_resolve, key_field, context=context
                     )
                 else:
                     instantiated = _instantiate_list_field_as_list(
-                        field_value, symtab, needs_resolve
+                        field_value, symtab, needs_resolve, context=context
                     )
             elif isinstance(field_value, dict):
-                instantiated = _instantiate_dict_field(field_value, symtab, needs_resolve)
+                instantiated = _instantiate_dict_field(
+                    field_value, symtab, needs_resolve, context=context
+                )
             else:
-                instantiated = _instantiate_noncollection_value(field_value, symtab, needs_resolve)
+                instantiated = _instantiate_noncollection_value(
+                    field_value, symtab, needs_resolve, context=context
+                )
 
             # Validate as the target field type using cached TypeAdapter
             type_adapter = get_type_adapter(target_field_type)
@@ -261,7 +292,7 @@ def instantiate_model(  # noqa: C901
             instantiated_fields.update(**new_fields)
 
         with capture_validation_errors(output_errors=errors, loc=(), input=field_value):
-            result = target_model(**instantiated_fields)
+            result = target_model.model_validate(instantiated_fields, context=context)
 
     if errors:
         raise ValidationError.from_exception_data(
@@ -275,6 +306,8 @@ def _instantiate_noncollection_value(
     value: Any,
     symtab: SymbolTable,
     needs_resolve: bool,
+    *,
+    context: Optional[ModelParsingContextInterface],
 ) -> Any:
     """Instantiate a single value that must not be a collection type (list, dict, etc).
 
@@ -289,7 +322,7 @@ def _instantiate_noncollection_value(
     ``instantiate_model`` resolves them once up front.
     """
     if isinstance(value, OpenJDModel):
-        return instantiate_model(value, symtab)
+        return _instantiate_model(value, symtab, context=context)
     elif isinstance(value, FormatString) and needs_resolve:
         value = value.resolve(symtab=symtab)
 
@@ -300,6 +333,8 @@ def _instantiate_list_field_as_list(  # noqa: C901
     value: list[Any],
     symtab: SymbolTable,
     needs_resolve: bool,
+    *,
+    context: Optional[ModelParsingContextInterface],
 ) -> list[Any]:
     """As _instantiate_noncollection_value, but where the value is a list.
 
@@ -319,6 +354,7 @@ def _instantiate_list_field_as_list(  # noqa: C901
                     item,
                     symtab,
                     needs_resolve,
+                    context=context,
                 )
             )
 
@@ -331,7 +367,12 @@ def _instantiate_list_field_as_list(  # noqa: C901
 
 
 def _instantiate_list_field_as_dict(  # noqa: C901
-    value: list[Any], symtab: SymbolTable, needs_resolve: bool, key_field: str
+    value: list[Any],
+    symtab: SymbolTable,
+    needs_resolve: bool,
+    key_field: str,
+    *,
+    context: Optional[ModelParsingContextInterface],
 ) -> dict[str, Any]:
     """As _instantiate_noncollection_value, but where the value is a list.
 
@@ -351,6 +392,7 @@ def _instantiate_list_field_as_dict(  # noqa: C901
                 item,
                 symtab,
                 needs_resolve,
+                context=context,
             )
 
     if errors:
@@ -365,6 +407,8 @@ def _instantiate_dict_field(
     value: dict[str, Any],
     symtab: SymbolTable,
     needs_resolve: bool,
+    *,
+    context: Optional[ModelParsingContextInterface],
 ) -> dict[str, Any]:
     """As _instantiate_noncollection_value, but where the value is a dict.
 
@@ -382,6 +426,7 @@ def _instantiate_dict_field(
                 item,
                 symtab,
                 needs_resolve,
+                context=context,
             )
 
     if errors:
