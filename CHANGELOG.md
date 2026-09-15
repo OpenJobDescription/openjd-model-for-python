@@ -1,3 +1,13 @@
+## 0.11.12 (2026-09-14)
+
+
+
+### Bug Fixes
+* **deps**: Accept a stepEnvironment name reused across steps on the v1 path (#363) ([`d8174e3`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d8174e3c3c13346627e1ed43a37e983b21429e29))
+* validate instantiated job models with the template's extension context (#362) ([`ebac419`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/ebac4191d0cbabc8747ed004afc92b5ff43e418e))
+* **sessions**: Escape strings in the sessions __repr__ output (#361) ([`a3d4f4e`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/a3d4f4e45814520032cc7d3ea8f72260325806db))
+
+
 ## 0.11.11 (2026-09-10)
 
 
