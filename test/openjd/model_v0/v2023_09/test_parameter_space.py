@@ -23,6 +23,7 @@ from openjd.model.v2023_09 import (
     StepParameterSpaceDefinition,
     StringTaskParameterDefinition,
 )
+from openjd.model.v2023_09._model import _identifier_chars
 
 
 class TestIntTaskParameterDefinition:
@@ -1090,6 +1091,13 @@ class TestCombinationExprCharacterClass:
     these go through the model rather than
     ``openjd.model._internal._combination_expr.Parser`` (which accepted ``_``
     all along).
+
+    Whitespace is the other place the pattern and that parser disagree, and it is
+    left disagreeing on purpose: §3.4.3 allows "the space", so U+0020 only, while
+    the shared ``TokenStream`` folds every whitespace run to a space before
+    lexing. Widening the class to ``\\s`` would accept a multi-line expression
+    that openjd-rs rejects, so the pattern stays the narrower, conformant side.
+    ``test_disallowed_characters_still_rejected`` pins that.
     """
 
     @staticmethod
@@ -1130,12 +1138,20 @@ class TestCombinationExprCharacterClass:
             pytest.param("Frame-Range * Quality", id="hyphen"),
             pytest.param("Frame.Range * Quality", id="dot"),
             pytest.param("Frame+Range * Quality", id="plus"),
-            pytest.param("Frame\tRange * Quality", id="tab is not the allowed space"),
+            pytest.param("Frame\tRange * Quality", id="tab"),
+            pytest.param("Frame *\nRange * Quality", id="newline"),
         ),
     )
     def test_disallowed_characters_still_rejected(self, combination: str) -> None:
         # Negative control. Widening the class to admit '_' must not admit
-        # anything else, and the pattern in the diagnostic must show the '_'.
+        # anything else, and the rejection must come from the pattern rather than
+        # from the expression parser downstream of it.
+        #
+        # The tab and newline cases are deliberate, not incidental: §3.4.3 allows
+        # "the space", and the shared TokenStream folds all whitespace to U+0020
+        # before lexing, so ``CombinationExpressionParser`` on its own accepts
+        # both. This is the narrower, conformant side of that disagreement, and it
+        # is what openjd-rs does too.
         # WHEN
         with pytest.raises(ValidationError) as excinfo:
             _parse_model(
@@ -1143,10 +1159,13 @@ class TestCombinationExprCharacterClass:
                 obj=self._space(["Frame", "Range", "Quality"], combination),
             )
 
-        # THEN
+        # THEN it failed on the character class, and that class is the shared
+        # constant. Asserting the constant rather than the rendered pattern keeps
+        # a deliberate widening of it from breaking a test about hyphens.
         message = str(excinfo.value)
         assert "combination" in message, message
-        assert r"String should match pattern '(?-m:^[A-Za-z0-9_\*\(\), ]+\z)'" in message, message
+        assert "String should match pattern" in message, message
+        assert _identifier_chars in message, message
 
     def test_underscore_name_iterates_the_full_parameter_space(self) -> None:
         # The character class was the only gate, so a template that clears it must

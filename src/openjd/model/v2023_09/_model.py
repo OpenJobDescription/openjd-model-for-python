@@ -1779,10 +1779,10 @@ TaskParameterList = Annotated[
         max_length=16,
     ),
 ]
-# Limit the CombinationExpr to characters allowed in an Identifier plus whitespace
-# and the operator characters. The identifier class is shared with Identifier so
-# the two cannot drift: a task parameter name this rejects could never be
-# referenced, which is what happened while '_' was missing here.
+# §3.4.3: an Identifier's characters plus the space and the operators. Only the
+# character class is shared with Identifier, not its leading-character rule.
+# The space is deliberately just U+0020. The shared TokenStream folds all
+# whitespace, which is wider than §3.4.3 allows, so a newline is refused here.
 CombinationExpr = Annotated[
     str,
     StringConstraints(
