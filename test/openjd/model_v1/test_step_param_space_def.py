@@ -112,6 +112,25 @@ class TestParameterSpaceAccessor:
         )
         assert step.parameter_space.combination == "A * B"
 
+    def test_combination_accepts_underscore_names(self) -> None:
+        """Template Schemas §3.4.3 constraint 1 gives a combination expression
+        the characters of an ``<Identifier>``, and §7.1 puts ``_`` among them.
+
+        Control for the v0 side, where the character class omitted ``_`` and made
+        such names unreferenceable. This path already accepted them, so the two
+        lanes disagreed; this pins the v1 half of the parity.
+        """
+        step = _decode_step(
+            {
+                "taskParameterDefinitions": [
+                    {"name": "Frame_Range", "type": "INT", "range": [1, 2]},
+                    {"name": "_Quality", "type": "STRING", "range": ["x", "y"]},
+                ],
+                "combination": "Frame_Range * _Quality",
+            }
+        )
+        assert step.parameter_space.combination == "Frame_Range * _Quality"
+
     def test_camelcase_alias(self) -> None:
         """``taskParameterDefinitions`` is a camelCase alias for
         ``task_parameter_definitions``."""
