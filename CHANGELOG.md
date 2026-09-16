@@ -1,7 +1,17 @@
 ## 0.11.13 (2026-09-16)
 
 
+### Features
+* Expose `FormatString.segment_count` and `FormatString.literal_segments` on `openjd.expr.FormatString` (#365)
 
+### Bug Fixes
+* Bump the openjd-rs crates for their latest fixes: openjd-expr 0.8.0, openjd-model 0.8.0, openjd-sessions 0.6.0 (#365) ([`1d0cc51`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/1d0cc512c08f36198d698cb56f371f4ad420fe2f))
+* Type-check an `in`/`not in` item against the list's element type, so `'a' in [1, 2]` raises rather than returning False (openjd-rs#396)
+* Check resolved-value constraints at template validation, so an over-long interpolated job name or an undeclared parameter in a `chunks` `defaultTaskCount` is rejected at decode (openjd-rs#383)
+* Accept a single-valued `allOf` of one literal and one whole-field expression, and re-check the resolved count at job creation (openjd-rs#397)
+* Render a NONCONTIGUOUS chunk range as an explicit list to match the v0 reference: `[1, 2, 4, 6]` is `1,2,4,6` (openjd-rs#398)
+* Accept `preprocess_job_parameters` output as its own input for a `LIST[PATH]` parameter defaulting to `[]` (openjd-rs#384)
+* Reject an embedded filename of `.` or `..`, or one containing a null byte, at template validation (openjd-rs#359)
 
 
 ## 0.11.12 (2026-09-14)
