@@ -1581,3 +1581,138 @@ class TestTokenErrorRemovedFromV1:
     def test_import_raises_import_error(self) -> None:
         with pytest.raises(ImportError):
             from openjd.model._v1 import TokenError  # type: ignore[attr-defined]  # noqa: F401
+
+
+class TestPreprocessAcceptsItsOwnEmptyListPath:
+    """``preprocess_job_parameters`` must accept every value it emits, because
+    callers feed it its own output (preprocess, then ``create_job``, which
+    re-checks constraints). openjd-model 0.8.0 (openjd-rs#384) fixes the one
+    value that broke this: a ``LIST[PATH]`` parameter defaulting to ``[]``, which
+    0.7.1 refused on the second pass with ``Cannot coerce list to LIST[PATH]``.
+    """
+
+    @staticmethod
+    def _template() -> Any:
+        return decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "extensions": ["EXPR"],
+                "parameterDefinitions": [{"name": "Empty", "type": "LIST[PATH]", "default": []}],
+                "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+            },
+            supported_extensions=["EXPR"],
+        )
+
+    def test_second_pass_accepts_the_first_pass_output(self) -> None:
+        template = self._template()
+        first = preprocess_job_parameters(
+            job_template=template,
+            job_parameter_values={},
+            job_template_dir=Path.cwd(),
+            current_working_dir=Path.cwd(),
+        )
+        second = preprocess_job_parameters(
+            job_template=template,
+            job_parameter_values=first,
+            job_template_dir=Path.cwd(),
+            current_working_dir=Path.cwd(),
+        )
+        assert first == second
+        assert first["Empty"].type == JobParameterType.LIST_PATH
+        assert first["Empty"].value == "[]"
+
+    def test_create_job_accepts_the_preprocessed_value(self) -> None:
+        template = self._template()
+        values = preprocess_job_parameters(
+            job_template=template,
+            job_parameter_values={},
+            job_template_dir=Path.cwd(),
+            current_working_dir=Path.cwd(),
+        )
+        job = create_job(job_template=template, job_parameter_values=values)
+        assert job.parameters["Empty"].value.item() == []
+
+
+class TestResolvedJobNameControlCharacters:
+    """Template Schemas §1.1.1 forbids Cc characters in the job name. When the name
+    is interpolated, the resolved value is only known at ``create_job``, which
+    since openjd-model 0.8.0 (openjd-rs#397) rejects a control character there.
+    0.7.1 re-checked only emptiness and length, so ``Suffix = "a\\nb"`` produced a
+    job named ``render-a\\nb``.
+    """
+
+    @staticmethod
+    def _template() -> Any:
+        return decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "render-{{ Param.Suffix }}",
+                "extensions": ["EXPR"],
+                "parameterDefinitions": [{"name": "Suffix", "type": "STRING"}],
+                "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+            },
+            supported_extensions=["EXPR"],
+        )
+
+    @pytest.mark.parametrize("suffix", ["a\nb", "a\tb", "\x7f"], ids=["newline", "tab", "DEL"])
+    def test_control_character_in_the_resolved_name_is_rejected(self, suffix: str) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            create_job(job_template=self._template(), job_parameter_values={"Suffix": suffix})
+        assert "Job name must not contain control characters" in str(excinfo.value)
+
+    def test_clean_resolved_name_is_accepted(self) -> None:
+        job = create_job(job_template=self._template(), job_parameter_values={"Suffix": "ok"})
+        assert job.name == "render-ok"
+
+
+class TestDeferredSingleValuedAllOfIsRecheckedAtJobCreation:
+    """Companion to ``test_parse.py::TestResolvedValueConstraintsAtTemplateValidation``.
+    A whole-field expression element of a single-valued ``allOf`` passes template
+    validation because it may resolve to ``null`` and skip itself. openjd-model
+    0.8.0 (openjd-rs#397) then re-checks the resolved element count at job creation.
+    """
+
+    @staticmethod
+    def _template() -> Any:
+        return decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "extensions": ["EXPR"],
+                "parameterDefinitions": [{"name": "X", "type": "STRING"}],
+                "steps": [
+                    {
+                        "name": "S",
+                        "script": {"actions": {"onRun": {"command": "echo"}}},
+                        "hostRequirements": {
+                            "attributes": [
+                                {
+                                    "name": "attr.worker.os.family",
+                                    "allOf": [
+                                        "linux",
+                                        "{{ Param.X if Param.X != 'skip' else null }}",
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                ],
+            },
+            supported_extensions=["EXPR"],
+        )
+
+    def test_a_second_resolved_value_is_rejected(self) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            create_job(job_template=self._template(), job_parameter_values={"X": "windows"})
+        assert (
+            "steps[0] -> hostRequirements -> attributes[0] -> allOf: "
+            "single-valued attribute cannot have more than 1 element after resolution"
+        ) in str(excinfo.value)
+
+    def test_a_null_skipped_element_leaves_one_value(self) -> None:
+        job = create_job(job_template=self._template(), job_parameter_values={"X": "skip"})
+        host_requirements = job.steps[0].host_requirements
+        assert host_requirements is not None
+        assert host_requirements.attributes is not None
+        assert host_requirements.attributes[0].all_of == ["linux"]

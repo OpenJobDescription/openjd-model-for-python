@@ -1008,3 +1008,65 @@ class TestChunksTaskCountOverride:
         fresh = StepParameterSpaceIterator(step=step, chunks_task_count_override=1)
         for params in list(it):
             assert params in fresh
+
+
+class TestNoncontiguousChunkRendering:
+    """A NONCONTIGUOUS chunk renders its values the way the v0 reference's
+    ``IntRangeExpr.from_list`` does: commit to the first gap as the step, and
+    consume a consecutive pair atomically. openjd-model 0.8.0 (openjd-rs#398).
+    0.7.1 used a compressor that only collapsed runs of three or more agreeing
+    gaps, so ``[1, 2, 4, 6]`` rendered as ``1,2-6:2``. Every spelling parses to
+    the same integers, which is why nothing caught the divergence; the rendered
+    text is what a task sees in ``{{Task.Param.Frame}}``.
+
+    Expected values are the v0 reference's output for the same template, checked
+    by running both paths side by side when this test was written.
+    """
+
+    @staticmethod
+    def _frames(range_values: list[str], default_task_count: int) -> list[str]:
+        t = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "extensions": ["TASK_CHUNKING"],
+                "steps": [
+                    {
+                        "name": "S",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {
+                                    "name": "Frame",
+                                    "type": "CHUNK[INT]",
+                                    "range": range_values,
+                                    "chunks": {
+                                        "defaultTaskCount": default_task_count,
+                                        "rangeConstraint": "NONCONTIGUOUS",
+                                    },
+                                }
+                            ]
+                        },
+                        "script": {
+                            "actions": {
+                                "onRun": {"command": "echo", "args": ["{{Task.Param.Frame}}"]}
+                            }
+                        },
+                    }
+                ],
+            },
+            supported_extensions=["TASK_CHUNKING"],
+        )
+        step = create_job(job_template=t, job_parameter_values={}).steps[0]
+        return [params["Frame"].value for params in StepParameterSpaceIterator(step=step)]
+
+    @pytest.mark.parametrize(
+        "range_values, expected",
+        [
+            pytest.param(["1", "2", "4", "6"], "1,2,4,6", id="pair then even progression"),
+            pytest.param(["1", "3", "4", "5"], "1,3,4,5", id="gap then consecutive run"),
+            pytest.param(["7", "8"], "7,8", id="lone pair"),
+            pytest.param(["1", "3", "5", "7"], "1-7:2", id="control: uniform step compresses"),
+        ],
+    )
+    def test_chunk_renders_like_the_reference(self, range_values: list[str], expected: str) -> None:
+        assert self._frames(range_values, default_task_count=4) == [expected]

@@ -510,6 +510,99 @@ class TestListMembership:
         )
 
 
+class TestListMembershipElementTypeCheck:
+    """``in`` / ``not in`` type-check the item against the list's element type
+    (Expression Language §2.1.3: ``__contains__(list: list[T], item: T)``).
+
+    openjd-expr 0.8.0 (openjd-rs#396). Before it, ``'a' in [1, 2]`` evaluated to
+    ``False`` where the spec gives it no signature at all. Cases mirror the
+    upstream ``test_comparison.rs``; the int/float and path/string coercions the
+    equality rule already allowed are kept.
+    """
+
+    @pytest.mark.parametrize(
+        "expr, detail",
+        [
+            (
+                "'1' in [1, 2, 3]",
+                "item of type string is not compatible with the element type int of list[int]",
+            ),
+            (
+                "1 in ['a', 'b']",
+                "item of type int is not compatible with the element type string of list[string]",
+            ),
+            (
+                "true in [1, 2]",
+                "item of type bool is not compatible with the element type int of list[int]",
+            ),
+            (
+                "null in [1, 2]",
+                "item of type nulltype is not compatible with the element type int of list[int]",
+            ),
+            (
+                "['a'] in [[1], [2]]",
+                "item of type list[string] is not compatible with the element type list[int] of list[list[int]]",
+            ),
+            (
+                "'a' in [x for x in [1, 2]]",
+                "item of type string is not compatible with the element type int of list[int]",
+            ),
+            (
+                "[1, 2] in [1, 2]",
+                "item of type list[int] is not compatible with the element type int of list[int]",
+            ),
+        ],
+    )
+    def test_incompatible_item_type_is_refused(self, expr: str, detail: str) -> None:
+        with pytest.raises(ExpressionError) as excinfo:
+            evaluate_expression(expr)
+        assert f"Cannot use 'in' operator: {detail}" in str(excinfo.value)
+
+    def test_not_in_is_refused_the_same_way(self) -> None:
+        with pytest.raises(ExpressionError) as excinfo:
+            evaluate_expression("'a' not in [1, 2]")
+        assert (
+            "Cannot use 'not in' operator: item of type string is not compatible "
+            "with the element type int of list[int]"
+        ) in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "expr, expected",
+        [
+            ("1 in [1.0, 2.0]", True),
+            ("3 in [1.0, 2.0]", False),
+            ("1.0 in [1, 2]", True),
+            ("1.5 in [1, 2]", False),
+            ("[1] in [[1.0], [2.0]]", True),
+            ("[1.5] in [[1], [2]]", False),
+        ],
+    )
+    def test_int_float_coercion_is_kept(self, expr: str, expected: bool) -> None:
+        assert evaluate_expression(expr).item() is expected
+
+    @pytest.mark.parametrize(
+        "expr, expected",
+        [
+            ("path(['/a']) in ['/a', '/b']", True),
+            ("'/a' in [path(['/a']), path(['/b'])]", True),
+            ("'/c' in [path(['/a']), path(['/b'])]", False),
+        ],
+    )
+    def test_path_string_coercion_is_kept(self, expr: str, expected: bool) -> None:
+        assert evaluate_expression(expr, path_format=PathFormat.POSIX).item() is expected
+
+    @pytest.mark.parametrize(
+        "expr",
+        ["1 in []", "'a' in []", "path(['/a']) in []", "[1] in []", "[] in []"],
+    )
+    def test_empty_list_accepts_any_item_type(self, expr: str) -> None:
+        assert evaluate_expression(expr, path_format=PathFormat.POSIX).item() is False
+
+    def test_empty_list_item_against_nested_lists(self) -> None:
+        assert evaluate_expression("[] in [[1]]").item() is False
+        assert evaluate_expression("[] in [[]]").item() is True
+
+
 class TestSortedReversed:
     """Tests for sorted() and reversed() functions."""
 

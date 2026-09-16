@@ -893,6 +893,25 @@ class FormatString:
     def has_complex_expressions(self) -> builtins.bool: ...
     def expression_names(self) -> builtins.list[builtins.str]: ...
     def is_literal(self) -> builtins.bool: ...
+    def segment_count(self) -> builtins.int:
+        r"""
+        Number of parsed segments: literal runs and ``{{...}}`` expressions.
+
+        A format string with more than one segment always concatenates to
+        a single string on resolution; only a whole-field single-expression
+        format string can resolve to ``None`` or to a list. ``is_literal``
+        distinguishes the two single-segment cases.
+        """
+
+    def literal_segments(self) -> builtins.list[builtins.str]:
+        r"""
+        The literal (non-expression) text runs, in order.
+
+        Literal runs appear verbatim in every possible resolution, so a
+        property that holds for one holds for every string this format
+        string can resolve to. Expression source text is not included.
+        """
+
     def copy_used_symtab_values(self, source: SymbolTable, dest: typing.Any) -> None:
         r"""
         Copy symbol table entries referenced by this format string's expressions

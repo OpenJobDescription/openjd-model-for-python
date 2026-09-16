@@ -80,6 +80,28 @@ impl PyFormatString {
         self.inner.is_literal()
     }
 
+    /// Number of parsed segments: literal runs and ``{{...}}`` expressions.
+    ///
+    /// A format string with more than one segment always concatenates to
+    /// a single string on resolution; only a whole-field single-expression
+    /// format string can resolve to ``None`` or to a list. ``is_literal``
+    /// distinguishes the two single-segment cases.
+    fn segment_count(&self) -> usize {
+        self.inner.segment_count()
+    }
+
+    /// The literal (non-expression) text runs, in order.
+    ///
+    /// Literal runs appear verbatim in every possible resolution, so a
+    /// property that holds for one holds for every string this format
+    /// string can resolve to. Expression source text is not included.
+    fn literal_segments(&self) -> Vec<String> {
+        self.inner
+            .literal_segments()
+            .map(|s| s.to_string())
+            .collect()
+    }
+
     /// Copy symbol table entries referenced by this format string's expressions
     /// from `source` into `dest`. Only copies the actual values referenced,
     /// stopping at property/method access (e.g. for `Param.Name.upper()`,

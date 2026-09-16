@@ -504,3 +504,162 @@ class TestStepEnvironmentNameScope(object):
                 caller_limits=CallerLimits(max_env_count=4),
             )
         assert "total environments (5) exceeds caller limit of 4" in str(excinfo.value)
+
+
+def _one_step_template(**overrides: Any) -> dict[str, Any]:
+    """Minimal 2023-09 job template with one echo step; ``overrides`` replace
+    top-level fields."""
+    template: dict[str, Any] = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "name": "T",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+    }
+    template.update(overrides)
+    return template
+
+
+class TestEmbeddedFileFilenameIsASinglePathComponent(object):
+    """openjd-sessions joins an embedded file's ``filename`` to the session
+    directory, so openjd-model requires it to be a plain single path component.
+    Template Schemas §6.1.1 only says "characters allowed in filenames on the host
+    operating system", so this is the implementation's rule, not a conformance one.
+    openjd-model 0.8.0 (openjd-rs#359) rejects ``.``, ``..`` and a null byte; 0.7.1
+    only rejected ``/`` and ``\\``. The v0 reference accepts all three, so this pins
+    a v1 behaviour v0 does not share.
+    """
+
+    @staticmethod
+    def _template(filename: str) -> dict[str, Any]:
+        return _one_step_template(
+            steps=[
+                {
+                    "name": "S",
+                    "script": {
+                        "actions": {"onRun": {"command": "echo"}},
+                        "embeddedFiles": [
+                            {"name": "F", "type": "TEXT", "filename": filename, "data": "x"}
+                        ],
+                    },
+                }
+            ]
+        )
+
+    @pytest.mark.parametrize(
+        "filename, detail",
+        [
+            pytest.param(".", "must not be '.'.", id="dot"),
+            pytest.param("..", "must not be '..'.", id="dot-dot"),
+            pytest.param("a\x00b", "must not contain null characters.", id="null byte"),
+        ],
+    )
+    def test_unsafe_filename_is_rejected(self, filename: str, detail: str) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=self._template(filename))
+        message = str(excinfo.value)
+        assert "steps[0] -> script -> embeddedFiles[0] -> filename" in message
+        assert detail in message
+
+    def test_plain_filename_is_accepted(self) -> None:
+        """Control: a dotted basename is still a single component."""
+        assert decode_job_template(template=self._template("scene.v2.ma"))
+
+
+class TestResolvedValueConstraintsAtTemplateValidation(object):
+    """Constraints the spec places on what a format string resolves to are
+    checked at template validation when the value is statically knowable.
+    openjd-model 0.8.0 (openjd-rs#383, follow-ups in #397). Each test says what
+    0.7.1 did with the same template; two cases below are controls 0.7.1 already
+    handled, kept so the checks they exercise cannot regress together.
+    """
+
+    def test_job_name_that_resolves_over_128_characters_is_rejected(self) -> None:
+        """Template Schemas §1.1.1: the job name resolves to at most 128 characters.
+        The expression has no free symbols, so the length is known at validation.
+        0.7.1 accepted this template."""
+        template = _one_step_template(extensions=["EXPR"], name="{{ 'x' * 129 }}")
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=template, supported_extensions=["EXPR"])
+        message = str(excinfo.value)
+        assert "name:" in message
+        assert "resolves to at least 129 characters, exceeding the maximum of 128." in message
+
+    def test_job_name_that_resolves_to_128_characters_is_accepted(self) -> None:
+        """Boundary control."""
+        template = _one_step_template(extensions=["EXPR"], name="{{ 'x' * 128 }}")
+        assert decode_job_template(template=template, supported_extensions=["EXPR"])
+
+    def test_control_character_in_a_literal_run_of_an_interpolated_name_is_rejected(
+        self,
+    ) -> None:
+        """A literal run appears verbatim in every resolution, so a tab there is a
+        certain §1.1.1 violation even though ``Param.S`` is unknown until job
+        creation. 0.8.0 checks ``FormatString.literal_segments``; 0.7.1 also
+        rejected this, by scanning the raw string, so this is a control."""
+        template = _one_step_template(
+            extensions=["EXPR"],
+            name="a\t-{{ Param.S }}",
+            parameterDefinitions=[{"name": "S", "type": "STRING"}],
+        )
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=template, supported_extensions=["EXPR"])
+        message = str(excinfo.value)
+        assert "name:" in message
+        assert "contains control characters." in message
+
+    def test_interpolated_name_with_clean_literal_runs_is_accepted(self) -> None:
+        """Control: what the expression resolves to is not this check's business."""
+        template = _one_step_template(
+            extensions=["EXPR"],
+            name="a-{{ Param.S }}",
+            parameterDefinitions=[{"name": "S", "type": "STRING"}],
+        )
+        assert decode_job_template(template=template, supported_extensions=["EXPR"])
+
+    @staticmethod
+    def _os_family_all_of(values: list[str]) -> dict[str, Any]:
+        return _one_step_template(
+            extensions=["EXPR"],
+            parameterDefinitions=[{"name": "X", "type": "STRING"}],
+            steps=[
+                {
+                    "name": "S",
+                    "script": {"actions": {"onRun": {"command": "echo"}}},
+                    "hostRequirements": {
+                        "attributes": [{"name": "attr.worker.os.family", "allOf": values}]
+                    },
+                }
+            ],
+        )
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            pytest.param(["linux", "windows"], id="two literals"),
+            pytest.param(["linux", "{{ Param.X }}-y"], id="literal and multi-segment"),
+            pytest.param(["{{ Param.X }}-a", "{{ Param.X }}-b"], id="two multi-segment"),
+        ],
+    )
+    def test_two_certain_allof_values_on_a_single_valued_attribute_are_rejected(
+        self, values: list[str]
+    ) -> None:
+        """A host has one ``attr.worker.os.family`` (Template Schemas §3.3.2), so an
+        ``allOf`` with two elements is unsatisfiable. An element is certain to be
+        present when it is a literal or has more than one segment: a multi-segment
+        format string always concatenates to one string (Expression Language §1.3.2).
+        0.7.1 rejected all three shapes too; this is the control for the deferral
+        test below."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=self._os_family_all_of(values), supported_extensions=["EXPR"]
+            )
+        message = str(excinfo.value)
+        assert "steps[0] -> hostRequirements -> attributes[0] -> allOf" in message
+        assert "single-valued attribute cannot have more than 1 element." in message
+
+    def test_a_whole_field_expression_allof_element_is_deferred_to_job_creation(self) -> None:
+        """Only a whole-field single-expression element can resolve to ``null`` and skip
+        itself, so its contribution is unknowable at validation. 0.8.0 (openjd-rs#397)
+        accepts the template here; 0.7.1 rejected it. Job creation re-checks the
+        resolved count, so the constraint is deferred, not dropped."""
+        template = self._os_family_all_of(["linux", "{{ Param.X }}"])
+        assert decode_job_template(template=template, supported_extensions=["EXPR"])

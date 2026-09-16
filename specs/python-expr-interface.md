@@ -763,6 +763,13 @@ fs.is_literal()           # False
 fs.expression_names()     # ["Param.Frame"]
 fs.has_complex_expressions()  # False (simple name reference)
 
+# Static shape: literal runs appear verbatim in every resolution, and a
+# format string with more than one segment always concatenates to a
+# single string (only a whole-field single expression can resolve to
+# None or to a list).
+fs.segment_count()        # 2
+fs.literal_segments()     # ["render --frame "]
+
 # Resolve
 st = SymbolTable({"Param.Frame": 42})
 fs.resolve_string(st)     # "render --frame 42"
