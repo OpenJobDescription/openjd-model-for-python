@@ -86,7 +86,13 @@ class TestExpressionErrorMapping:
         """A CHUNK[INT] ``defaultTaskCount`` format string that
         resolves to a non-integer value at ``create_job`` time
         raises ``ExpressionError`` (not the generic
-        ``ModelValidationError``)."""
+        ``ModelValidationError``).
+
+        The message is the evaluator's int coercion failure: since
+        openjd-model 0.8.0 the whole-field expression resolves with
+        target type ``int`` (Expression Language §1.2.3), so the
+        STRING value is refused inside the expression rather than by a
+        parse of the concatenated text."""
         t = decode_job_template(
             template={
                 "specificationVersion": "jobtemplate-2023-09",
@@ -128,5 +134,8 @@ class TestExpressionErrorMapping:
             },
             supported_extensions=["TASK_CHUNKING"],
         )
-        with pytest.raises(ExpressionError, match="not a valid integer"):
+        with pytest.raises(
+            ExpressionError,
+            match=r"chunks\.defaultTaskCount: Cannot convert 'not-an-integer' to int",
+        ):
             create_job(job_template=t, job_parameter_values={})

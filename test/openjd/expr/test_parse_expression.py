@@ -218,6 +218,39 @@ class TestFormatString:
         assert not FormatString("{{Param.Name}}").has_complex_expressions()
         assert FormatString("{{Param.A + Param.B}}").has_complex_expressions()
 
+    @pytest.mark.parametrize(
+        "raw, count",
+        [
+            ("hello", 1),
+            ("{{Param.X}}", 1),
+            ("v{{Param.X}}", 2),
+            ("{{Param.X}}-{{Param.Y}}", 3),
+            ("", 0),
+        ],
+    )
+    def test_segment_count(self, raw: str, count: int):
+        # Cases mirror openjd-expr's segment_count_by_shape. A single literal
+        # run and a whole-field expression are both one segment.
+        assert FormatString(raw).segment_count() == count
+
+    def test_segment_count_single_segment_disambiguated_by_is_literal(self):
+        assert FormatString("hello").is_literal()
+        assert not FormatString("{{Param.X}}").is_literal()
+        assert FormatString("").is_literal()
+
+    @pytest.mark.parametrize(
+        "raw, literals",
+        [
+            ("a-{{ Param.X }}-b{{ 'y' }}", ["a-", "-b"]),
+            ("{{ Param.X }}", []),
+            ("plain", ["plain"]),
+            ("", []),
+        ],
+    )
+    def test_literal_segments(self, raw: str, literals: list[str]):
+        # Expression source text is excluded, so "'y'" never appears.
+        assert FormatString(raw).literal_segments() == literals
+
     def test_literal_resolve(self):
         fs = FormatString("no interpolation")
         st = SymbolTable()

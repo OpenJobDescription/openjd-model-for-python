@@ -24,8 +24,11 @@ Plus ``ChunksDefinition`` for the chunks payload (mirrors
 See report finding #11 (`StepTemplate.parameter_space` exposure).
 """
 
+import pytest
+
 from openjd.expr import FormatString
 from openjd.model._v1 import decode_job_template
+from openjd.model._v1.errors import ModelValidationError
 from openjd.model._v1.template import (
     ChunkIntTaskParameterDefinition,
     ChunksDefinition,
@@ -37,7 +40,7 @@ from openjd.model._v1.template import (
 )
 
 
-def _decode_step(parameter_space=None, *, extensions=None):
+def _decode_step(parameter_space=None, *, extensions=None, parameter_definitions=None):
     """Build a one-step template with the supplied ``parameterSpace``
     block and run it through ``decode_job_template``.
 
@@ -55,6 +58,8 @@ def _decode_step(parameter_space=None, *, extensions=None):
     }
     if parameter_space is not None:
         template["steps"][0]["parameterSpace"] = parameter_space
+    if parameter_definitions is not None:
+        template["parameterDefinitions"] = parameter_definitions
     if extensions:
         template["extensions"] = list(extensions)
     t = decode_job_template(
@@ -297,6 +302,7 @@ class TestChunkIntTaskParameterDefinition:
         an ``int``."""
         step = _decode_step(
             extensions=["TASK_CHUNKING", "EXPR"],
+            parameter_definitions=[{"name": "ChunkSize", "type": "INT"}],
             parameter_space={
                 "taskParameterDefinitions": [
                     {
@@ -315,6 +321,32 @@ class TestChunkIntTaskParameterDefinition:
         chunks = d.chunks
         assert isinstance(chunks.default_task_count, FormatString)
         assert chunks.default_task_count.raw() == "{{Param.ChunkSize}}"
+
+    def test_chunks_default_task_count_undeclared_symbol_rejected(self) -> None:
+        """A ``defaultTaskCount`` expression naming a job parameter the
+        template does not declare fails at decode, as it does on the v0
+        reference. openjd-model 0.8.0 validates chunk fields at template
+        validation (openjd-rs#383); 0.7.1 accepted this template at decode."""
+        with pytest.raises(ModelValidationError) as exc_info:
+            _decode_step(
+                extensions=["TASK_CHUNKING", "EXPR"],
+                parameter_space={
+                    "taskParameterDefinitions": [
+                        {
+                            "name": "F",
+                            "type": "CHUNK[INT]",
+                            "range": "1-100",
+                            "chunks": {
+                                "defaultTaskCount": "{{Param.ChunkSize}}",
+                                "rangeConstraint": "CONTIGUOUS",
+                            },
+                        }
+                    ]
+                },
+            )
+        msg = str(exc_info.value)
+        assert "taskParameterDefinitions[0] -> chunks -> defaultTaskCount" in msg
+        assert "Undefined variable: 'Param.ChunkSize'" in msg
 
 
 # ── Mixed dispatch ──
