@@ -193,7 +193,9 @@ _Cc_characters = r"\u0000-\u001F\u007F-\u009F"
 _standard_string_regex = rf"(?-m:^[^{_Cc_characters}]+\z)"
 
 # Latin alphanumeric, starting with a letter
-_identifier_regex = r"(?-m:^[A-Za-z_][A-Za-z0-9_]*\z)"
+# Shared with CombinationExpr, which §3.4.3 defines in terms of these characters.
+_identifier_chars = r"A-Za-z0-9_"
+_identifier_regex = rf"(?-m:^[A-Za-z_][{_identifier_chars}]*\z)"
 
 # Regex for defining file filter patterns allowed for use in file dialogs.
 # 1. Allowable values: "*", "*.*", and "*.[:file-extension-chars:]+".
@@ -1777,12 +1779,17 @@ TaskParameterList = Annotated[
         max_length=16,
     ),
 ]
-# Limit the CombinationExpr to characters allowed in an Identifier plus whitespace
-# and the operator characters.
+# §3.4.3: an Identifier's characters plus the space and the operators. Only the
+# character class is shared with Identifier, not its leading-character rule.
+# The space is deliberately just U+0020. The shared TokenStream folds all
+# whitespace, which is wider than §3.4.3 allows, so a newline is refused here.
 CombinationExpr = Annotated[
     str,
     StringConstraints(
-        min_length=1, max_length=1280, strict=True, pattern=r"(?-m:^[A-Za-z0-9\*\(\), ]+\z)"
+        min_length=1,
+        max_length=1280,
+        strict=True,
+        pattern=rf"(?-m:^[{_identifier_chars}\*\(\), ]+\z)",
     ),
 ]
 

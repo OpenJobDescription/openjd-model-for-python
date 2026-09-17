@@ -6,7 +6,13 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from openjd.model import DecodeValidationError, decode_job_template, parse_model
+from openjd.model import (
+    DecodeValidationError,
+    StepParameterSpaceIterator,
+    create_job,
+    decode_job_template,
+    parse_model,
+)
 from openjd.model._parse import _parse_model
 from openjd.model.v2023_09 import (
     FloatTaskParameterDefinition,
@@ -17,6 +23,7 @@ from openjd.model.v2023_09 import (
     StepParameterSpaceDefinition,
     StringTaskParameterDefinition,
 )
+from openjd.model.v2023_09._model import _identifier_chars
 
 
 class TestIntTaskParameterDefinition:
@@ -1071,3 +1078,132 @@ class TestTaskParameterTypeNameCase:
                     ],
                 }
             )
+
+
+class TestCombinationExprCharacterClass:
+    """Template Schemas §3.4.3 constraint 1 gives a combination expression the
+    characters of an ``<Identifier>`` plus the space and the operators. §7.1
+    puts ``_`` in an ``<Identifier>``, so a parameter named ``Frame_Range`` must
+    be referenceable. The character class omitted ``_``, which made every such
+    name unusable: the name itself parsed, and the reference to it did not.
+
+    The rejection landed on the pattern, before the expression parser ran, so
+    these go through the model rather than
+    ``openjd.model._internal._combination_expr.Parser`` (which accepted ``_``
+    all along).
+
+    Whitespace is the other place the pattern and that parser disagree, and it is
+    left disagreeing on purpose: §3.4.3 allows "the space", so U+0020 only, while
+    the shared ``TokenStream`` folds every whitespace run to a space before
+    lexing. Widening the class to ``\\s`` would accept a multi-line expression
+    that openjd-rs rejects, so the pattern stays the narrower, conformant side.
+    ``test_disallowed_characters_still_rejected`` pins that.
+    """
+
+    @staticmethod
+    def _space(names: list[str], combination: str) -> dict[str, Any]:
+        return {
+            "taskParameterDefinitions": [
+                {"name": name, "type": "INT", "range": [1, 2]} for name in names
+            ],
+            "combination": combination,
+        }
+
+    @pytest.mark.parametrize(
+        "names,combination",
+        (
+            pytest.param(
+                ["Frame_Range", "Quality"], "Frame_Range * Quality", id="interior underscore"
+            ),
+            pytest.param(["_Frame", "_Quality"], "(_Frame, _Quality)", id="leading underscore"),
+            pytest.param(["A_", "B_"], "A_ * B_", id="trailing underscore"),
+            pytest.param(["_", "A"], "_ * A", id="name is a bare underscore"),
+            pytest.param(
+                ["A_1", "B_2", "C_3"], "A_1 * ( B_2, C_3 )", id="underscore inside an association"
+            ),
+        ),
+    )
+    def test_underscore_names_accepted(self, names: list[str], combination: str) -> None:
+        # WHEN
+        model = _parse_model(
+            model=StepParameterSpaceDefinition, obj=self._space(names, combination)
+        )
+
+        # THEN the expression is carried through verbatim
+        assert model.combination == combination
+
+    @pytest.mark.parametrize(
+        "combination",
+        (
+            pytest.param("Frame-Range * Quality", id="hyphen"),
+            pytest.param("Frame.Range * Quality", id="dot"),
+            pytest.param("Frame+Range * Quality", id="plus"),
+            pytest.param("Frame\tRange * Quality", id="tab"),
+            pytest.param("Frame *\nRange * Quality", id="newline"),
+        ),
+    )
+    def test_disallowed_characters_still_rejected(self, combination: str) -> None:
+        # Negative control. Widening the class to admit '_' must not admit
+        # anything else, and the rejection must come from the pattern rather than
+        # from the expression parser downstream of it.
+        #
+        # The tab and newline cases are deliberate, not incidental: §3.4.3 allows
+        # "the space", and the shared TokenStream folds all whitespace to U+0020
+        # before lexing, so ``CombinationExpressionParser`` on its own accepts
+        # both. This is the narrower, conformant side of that disagreement, and it
+        # is what openjd-rs does too.
+        # WHEN
+        with pytest.raises(ValidationError) as excinfo:
+            _parse_model(
+                model=StepParameterSpaceDefinition,
+                obj=self._space(["Frame", "Range", "Quality"], combination),
+            )
+
+        # THEN it failed on the character class, and that class is the shared
+        # constant. Asserting the constant rather than the rendered pattern keeps
+        # a deliberate widening of it from breaking a test about hyphens.
+        message = str(excinfo.value)
+        assert "combination" in message, message
+        assert "String should match pattern" in message, message
+        assert _identifier_chars in message, message
+
+    def test_underscore_name_iterates_the_full_parameter_space(self) -> None:
+        # The character class was the only gate, so a template that clears it must
+        # produce the same space as one with underscore-free names: 3 x 2 = 6 tasks
+        # keyed by the underscore-bearing name.
+        # GIVEN
+        template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "steps": [
+                    {
+                        "name": "S",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {"name": "Frame_Range", "type": "INT", "range": "1-3"},
+                                {"name": "Quality", "type": "STRING", "range": ["low", "high"]},
+                            ],
+                            "combination": "Frame_Range * Quality",
+                        },
+                        "script": {"actions": {"onRun": {"command": "echo", "args": ["hi"]}}},
+                    }
+                ],
+            }
+        )
+        job = create_job(job_template=template, job_parameter_values={})
+
+        # WHEN
+        space = StepParameterSpaceIterator(space=job.steps[0].parameterSpace)
+
+        # THEN
+        assert space.names == {"Frame_Range", "Quality"}
+        tasks = [(params["Frame_Range"].value, params["Quality"].value) for params in space]
+        assert tasks == [
+            ("1", "low"),
+            ("1", "high"),
+            ("2", "low"),
+            ("2", "high"),
+            ("3", "low"),
+            ("3", "high"),
+        ]
