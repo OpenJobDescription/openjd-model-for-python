@@ -1,11 +1,23 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
 
+from pathlib import Path
+from typing import Optional
+
 import pytest
 from pydantic import TypeAdapter, ValidationError
 
-from openjd.model import create_job, decode_job_template
+from openjd.model import (
+    create_job,
+    decode_environment_template,
+    decode_job_template,
+    preprocess_job_parameters,
+)
 from openjd.model._errors import DecodeValidationError
+from openjd.model._merge_job_parameter import (
+    SourcedParamDefinition,
+    merge_job_parameter_definitions_for_one,
+)
 from openjd.model._format_strings import FormatString
 from openjd.model._parse import _parse_model
 from openjd.model._types import ParameterValue, ParameterValueType
@@ -1384,6 +1396,10 @@ class TestCreateJobPreservesFeatureBundle1Lengths:
          create_job simultaneously.
       G. Resolved job name (matrix): the resolved job name is checked against
          the extension-aware 128/512 limit after format-string substitution.
+      H. Job parameter name: a 512-char parameter name survives the job-parameter
+         merge inside preprocess_job_parameters, which create_job also reaches, for
+         every type the merge re-validates and for both of its branches. Includes
+         the base-limit and static-ceiling controls.
     """
 
     @staticmethod
@@ -1680,3 +1696,215 @@ class TestCreateJobPreservesFeatureBundle1Lengths:
     def test_resolved_job_name_129_chars_no_extension_create_job_rejected(self) -> None:
         with pytest.raises(DecodeValidationError, match="128"):
             self._create_with_resolved_job_name(False, 129)
+
+    # ---- Group H: job parameter name through the merge ----
+    #
+    # Groups A-G build templates with no parameterDefinitions, so none of them reaches
+    # the job-parameter merge inside preprocess_job_parameters. That merge re-validates
+    # each merged definition through parse_model, and it ran with an empty extension
+    # set, enforcing the base 64-character limit on a name decode had accepted at 512.
+    # create_job calls preprocess_job_parameters itself, so both were affected.
+
+    #: The four scalar types whose merged definition is re-validated through
+    #: ``parse_model``. The EXPR-extension types take the ``model_copy`` branch instead
+    #: and are covered separately at the end of the group.
+    _LEGACY_TYPE_DEFAULTS = {
+        "STRING": "v",
+        "PATH": "/tmp/v",
+        "INT": "1",
+        "FLOAT": "1.5",
+    }
+
+    def _template_with_param(
+        self,
+        param_name: str,
+        *,
+        param_type: str = "STRING",
+        default: object = "v",
+        declare_fb1: bool = True,
+    ) -> dict:
+        """A minimal template carrying one job parameter definition."""
+        template = self._template(declare_fb1=declare_fb1)
+        template["parameterDefinitions"] = [
+            {"name": param_name, "type": param_type, "default": default}
+        ]
+        return template
+
+    @staticmethod
+    def _preprocess(
+        template: dict,
+        supported: list,
+        environment_templates: Optional[list[EnvironmentTemplate]] = None,
+    ) -> dict:
+        """Decode the template and run it through preprocess_job_parameters.
+
+        Paths do not matter to a name-length check, so this uses the walk-up form
+        rather than real directories.
+        """
+        job_template = decode_job_template(template=template, supported_extensions=supported)
+        return preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+            environment_templates=environment_templates,
+        )
+
+    @pytest.mark.parametrize("param_type", sorted(_LEGACY_TYPE_DEFAULTS))
+    def test_parameter_name_512_chars_fb1_preprocess_preserved(self, param_type: str) -> None:
+        """A 512-char parameter name accepted at FEATURE_BUNDLE_1 decode must survive the
+        merge inside preprocess_job_parameters, for every type the merge re-validates."""
+        name = "a" * 512
+        template = self._template_with_param(
+            name, param_type=param_type, default=self._LEGACY_TYPE_DEFAULTS[param_type]
+        )
+        assert name in self._preprocess(template, _FB1_SUPPORTED)
+
+    @pytest.mark.parametrize("param_type", sorted(_LEGACY_TYPE_DEFAULTS))
+    def test_parameter_name_512_chars_fb1_create_job_preserved(self, param_type: str) -> None:
+        """The same name must survive create_job, which reaches the merge through its own
+        preprocess_job_parameters call."""
+        name = "a" * 512
+        job = self._create(
+            self._template_with_param(
+                name, param_type=param_type, default=self._LEGACY_TYPE_DEFAULTS[param_type]
+            )
+        )
+        assert name in job.parameters
+
+    def test_parameter_name_512_chars_merged_from_two_sources_preserved(self) -> None:
+        """The merge's actual job is combining definitions from more than one source. A
+        512-char name must survive when constraints are genuinely merged, not only when
+        a single definition is passed through."""
+        name = "a" * 512
+        env_template = decode_environment_template(
+            template={
+                "specificationVersion": "environment-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "parameterDefinitions": [
+                    {"name": name, "type": "STRING", "minLength": 1, "default": "v"}
+                ],
+                "environment": {
+                    "name": "Env",
+                    "script": {"actions": {"onEnter": {"command": "echo enter"}}},
+                },
+            },
+            supported_extensions=_FB1_SUPPORTED,
+        )
+        template = self._template_with_param(name)
+        template["parameterDefinitions"][0]["maxLength"] = 8
+        values = self._preprocess(template, _FB1_SUPPORTED, environment_templates=[env_template])
+        assert name in values
+
+    def test_parameter_name_512_chars_from_environment_template_preserved(self) -> None:
+        """A 512-char name declared by an environment template that enables
+        FEATURE_BUNDLE_1 survives even though the job template does not enable it,
+        because the merge honours every contributing template's extensions."""
+        name = "a" * 512
+        env_template = decode_environment_template(
+            template={
+                "specificationVersion": "environment-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "parameterDefinitions": [{"name": name, "type": "STRING", "default": "v"}],
+                "environment": {
+                    "name": "Env",
+                    "script": {"actions": {"onEnter": {"command": "echo enter"}}},
+                },
+            },
+            supported_extensions=_FB1_SUPPORTED,
+        )
+        values = self._preprocess(
+            self._template(declare_fb1=False), [], environment_templates=[env_template]
+        )
+        assert name in values
+
+    def test_parameter_name_513_chars_rejected_by_static_ceiling(self) -> None:
+        """512 is the hard ceiling for an identifier regardless of extension: at 513 the
+        ``Identifier`` string constraint rejects before the extension-aware validator is
+        consulted, so this pins the type ceiling rather than the FEATURE_BUNDLE_1 branch.
+        """
+        with pytest.raises(
+            DecodeValidationError, match=r"name:\n\tString should have at most 512 characters"
+        ):
+            decode_job_template(
+                template=self._template_with_param("a" * 513),
+                supported_extensions=_FB1_SUPPORTED,
+            )
+
+    def test_parameter_name_65_chars_no_extension_decode_rejected(self) -> None:
+        """Without the extension the base 64-character limit applies, and it is reached at
+        decode -- before the merge ever runs."""
+        with pytest.raises(
+            DecodeValidationError, match=r"name:\n\tname must be at most 64 characters long"
+        ):
+            decode_job_template(
+                template=self._template_with_param("a" * 65, declare_fb1=False),
+                supported_extensions=[],
+            )
+
+    def test_parameter_name_64_chars_no_extension_create_job_preserved(self) -> None:
+        """A parameter name at the base ceiling survives create_job with no extension."""
+        name = "a" * 64
+        job_template = decode_job_template(
+            template=self._template_with_param(name, declare_fb1=False),
+            supported_extensions=[],
+        )
+        job = create_job(job_template=job_template, job_parameter_values={})
+        assert name in job.parameters
+
+    def test_merge_without_extensions_enforces_base_identifier_limit(self) -> None:
+        """The merge must apply the base limit when no extension is in play, rather than
+        skipping the length check altogether.
+
+        Decode rejects an over-length name before the merge is reachable through a
+        template, so this drives the merge directly with a definition decode accepted
+        under FEATURE_BUNDLE_1 and no extensions supplied to the merge.
+        """
+        job_template = decode_job_template(
+            template=self._template_with_param("a" * 512),
+            supported_extensions=_FB1_SUPPORTED,
+        )
+        sourced = [
+            SourcedParamDefinition(
+                source="JobTemplate", definition=job_template.parameterDefinitions[0]
+            )
+        ]
+        with pytest.raises(DecodeValidationError, match="name must be at most 64 characters long"):
+            merge_job_parameter_definitions_for_one(sourced)
+
+        # And it accepts the same definition when the extension is supplied.
+        merged = merge_job_parameter_definitions_for_one(
+            sourced, supported_extensions=["FEATURE_BUNDLE_1"]
+        )
+        assert len(merged.name) == 512
+
+    def test_all_five_fields_at_ceiling_fb1_create_job_preserved(self) -> None:
+        """Group F plus the parameter name: every FEATURE_BUNDLE_1-lengthened field
+        survives create_job at once."""
+        param_name = "a" * 512
+        template = self._template(
+            job_name="a" * 512,
+            env_name="a" * 512,
+            ef_name="a" * 512,
+            ef_filename="a" * 256,
+        )
+        template["parameterDefinitions"] = [{"name": param_name, "type": "STRING", "default": "v"}]
+        job = self._create(template)
+        assert (
+            len(job.name),
+            len(job.jobEnvironments[0].name),
+            len(job.steps[0].script.embeddedFiles[0].name),
+            len(job.steps[0].script.embeddedFiles[0].filename),
+            len(next(iter(job.parameters))),
+        ) == (512, 512, 512, 256, 512)
+
+    def test_parameter_name_512_chars_expr_typed_parameter_preserved(self) -> None:
+        """The EXPR-extension parameter types take the merge's other branch, which copies
+        rather than re-validates. A 512-char name must survive there too, so that
+        unifying the two branches cannot silently reintroduce the base limit."""
+        name = "a" * 512
+        template = self._template_with_param(name, param_type="LIST[STRING]", default=["v"])
+        template["extensions"] = ["FEATURE_BUNDLE_1", "EXPR"]
+        values = self._preprocess(template, [ExtensionName.FEATURE_BUNDLE_1, ExtensionName.EXPR])
+        assert name in values

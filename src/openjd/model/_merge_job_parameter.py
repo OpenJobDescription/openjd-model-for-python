@@ -2,7 +2,7 @@
 
 from collections import defaultdict
 from decimal import Decimal
-from typing import Any, NamedTuple, Optional, Union, cast
+from typing import Any, Iterable, NamedTuple, Optional, Union, cast
 
 from ._errors import CompatibilityError
 from ._parse import parse_model
@@ -117,12 +117,21 @@ def merge_job_parameter_definitions(
                 SourcedParamDefinition(source="JobTemplate", definition=param)
             )
 
+    # The merge re-validates each merged definition, so it must run under the same
+    # extension set decode ran under or it rejects what decode accepted -- e.g. a
+    # FEATURE_BUNDLE_1 parameter name between 65 and 512 characters.
+    supported_extensions = _declared_extensions(job_template, environment_templates)
+
     errors = list[str]()
     return_value = list[JobParameterDefinition]()
 
     for name, source in collected_definitions.items():
         try:
-            return_value.append(merge_job_parameter_definitions_for_one(source))
+            return_value.append(
+                merge_job_parameter_definitions_for_one(
+                    source, supported_extensions=supported_extensions
+                )
+            )
         except CompatibilityError as e:
             compat_errors = "\n\t".join(str(e).split("\n"))
             errors.append(
@@ -134,12 +143,37 @@ def merge_job_parameter_definitions(
     return return_value
 
 
+def _declared_extensions(
+    job_template: Optional[JobTemplate],
+    environment_templates: Optional[list[EnvironmentTemplate]],
+) -> list[str]:
+    """The union of the extensions declared by all of the given templates.
+
+    A definition was decoded under its own template's extension set, and every
+    definition of one job parameter carries the same name, so the union cannot admit a
+    value that decode did not already accept for the template that declared it.
+    """
+    extensions: set[str] = set()
+    for template in (*(environment_templates or []), job_template):
+        if template is not None and template.extensions:
+            extensions.update(template.extensions)
+    return sorted(extensions)
+
+
 def merge_job_parameter_definitions_for_one(
     params: list[SourcedParamDefinition],
+    *,
+    supported_extensions: Optional[Iterable[str]] = None,
 ) -> JobParameterDefinition:
     """Given an ordered list of job parameter definitions of the *same* job parameter, this merges the definitions into a single
     job parameter definition. In the act of doing the merger, this performs checks to ensure that the job parameter definitions are
     compatible with one another.
+
+    Args:
+        params: The definitions of one job parameter, in merge order.
+        supported_extensions (optional): The extensions declared by the templates the definitions
+            came from. The merged definition is re-validated under this set, so omitting it applies
+            the base limits to a definition decode may have accepted under an extension.
 
     Returns (JobParameterDefinition):
         The result of merging all of the given definitions in to a single definition.
@@ -219,13 +253,16 @@ def merge_job_parameter_definitions_for_one(
         if errors:
             raise CompatibilityError("\n".join(errors))
 
-        return parse_model(model=params[0].definition.__class__, obj=merged_properties)
+        return parse_model(
+            model=params[0].definition.__class__,
+            obj=merged_properties,
+            supported_extensions=supported_extensions,
+        )
 
     # EXPR-extension types (BOOL, RANGE_EXPR, LIST[*]): not cross-merged. Return
     # the last-defined definition with the last-defined default applied.
-    # ``model_copy`` avoids re-validation, which would otherwise re-trigger the
-    # EXPR extension gate (the merge has no parsing context to satisfy it). But
-    # because ``model_copy`` skips validators, re-validate the merged default
+    # ``model_copy`` avoids re-validation, so this path does not re-trigger the EXPR
+    # extension gate at all. But because ``model_copy`` skips validators, re-validate the merged default
     # against the base definition's own constraints explicitly so a default
     # carried over from another source that violates them is still rejected
     # (mirrors the ``parse_model`` re-validation the legacy path performs).
