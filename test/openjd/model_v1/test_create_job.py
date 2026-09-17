@@ -10,6 +10,7 @@ from openjd.model._v1 import (
     create_job,
     decode_environment_template,
     decode_job_template,
+    merge_job_parameter_definitions,
     preprocess_job_parameters,
 )
 from openjd.model._v1.types import (
@@ -18,6 +19,7 @@ from openjd.model._v1.types import (
 )
 from openjd.model._v1.errors import (
     DecodeValidationError,
+    ModelValidationError,
 )
 
 
@@ -1716,3 +1718,263 @@ class TestDeferredSingleValuedAllOfIsRecheckedAtJobCreation:
         assert host_requirements is not None
         assert host_requirements.attributes is not None
         assert host_requirements.attributes[0].all_of == ["linux"]
+
+
+class TestCreateJobPreservesFeatureBundle1Lengths:
+    """The FEATURE_BUNDLE_1 raised length ceilings survive job creation on the v1 lane.
+
+    FEATURE_BUNDLE_1 raises four string-length ceilings: job name and environment name
+    to 512, embedded-file filename to 256, and the section 7.1 identifier -- an
+    embedded-file name or a job parameter name -- to 512. A value template validation
+    accepted under the extension must survive preprocess_job_parameters and create_job.
+
+    The v0 lane lost the extension set between decode and job creation and rejected such
+    values, first when create_job reconstructed the target models and separately in the
+    job-parameter merge. v1 validates in a single pass in Rust and never re-validates a
+    constructed model, so it is expected to pass throughout; these tests pin that so a
+    re-validation pass cannot be added to the Rust implementation unnoticed.
+
+    Groups:
+      A. Each of the four ceilings survives create_job.
+      B. The job parameter name survives the merge, preprocess_job_parameters and
+         create_job, for every scalar parameter type.
+      C. Controls: 513 and 65 are rejected, and the base ceiling is preserved.
+      D. Round trip: every lengthened field at once.
+    """
+
+    _FB1 = ["FEATURE_BUNDLE_1"]
+
+    #: Defaults per scalar parameter type, so one template shape covers all four.
+    _TYPE_DEFAULTS = {"STRING": "v", "PATH": "/tmp/v", "INT": "1", "FLOAT": "1.5"}
+
+    @classmethod
+    def _template(
+        cls,
+        *,
+        job_name: str = "J",
+        env_name: str = "Env1",
+        ef_name: str = "Run",
+        ef_filename: str = "run.sh",
+        param_name: str = "P",
+        param_type: str = "STRING",
+        declare_fb1: bool = True,
+    ) -> dict:
+        """A minimal template with one step, one embedded file, one job environment and
+        one job parameter, so all four ceilings are reachable from one shape."""
+        template: dict = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": job_name,
+            "parameterDefinitions": [
+                {
+                    "name": param_name,
+                    "type": param_type,
+                    "default": cls._TYPE_DEFAULTS[param_type],
+                }
+            ],
+            "steps": [
+                {
+                    "name": "S",
+                    "script": {
+                        "actions": {"onRun": {"command": "echo"}},
+                        "embeddedFiles": [
+                            {
+                                "name": ef_name,
+                                "type": "TEXT",
+                                "data": "echo hi",
+                                "filename": ef_filename,
+                            }
+                        ],
+                    },
+                }
+            ],
+            "jobEnvironments": [
+                {
+                    "name": env_name,
+                    "script": {"actions": {"onEnter": {"command": "echo enter"}}},
+                }
+            ],
+        }
+        if declare_fb1:
+            template["extensions"] = ["FEATURE_BUNDLE_1"]
+        return template
+
+    @classmethod
+    def _preprocess(cls, template: dict, supported: list, env_templates: Any = None) -> dict:
+        """Decode the template and run it through preprocess_job_parameters.
+
+        Paths do not matter to a name-length check, so this uses the walk-up form rather
+        than real directories.
+        """
+        job_template = decode_job_template(template=template, supported_extensions=supported)
+        return preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+            environment_templates=env_templates,
+        )
+
+    @classmethod
+    def _create(cls, template: dict) -> Any:
+        """Decode with FEATURE_BUNDLE_1 supported, apply defaults, then create the job."""
+        job_template = decode_job_template(template=template, supported_extensions=cls._FB1)
+        values = preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+        )
+        return create_job(job_template=job_template, job_parameter_values=values)
+
+    # ---- Group A: each ceiling survives create_job ----
+
+    def test_job_name_512_chars_fb1_create_job_preserved(self) -> None:
+        """A 512-char job name accepted at FEATURE_BUNDLE_1 decode survives create_job."""
+        job = self._create(self._template(job_name="a" * 512))
+        assert len(job.name) == 512
+
+    def test_environment_name_512_chars_fb1_create_job_preserved(self) -> None:
+        """A 512-char job-environment name survives create_job."""
+        job = self._create(self._template(env_name="a" * 512))
+        environments = job.jobEnvironments
+        assert environments is not None
+        assert len(environments[0].name) == 512
+
+    def test_embedded_file_name_512_chars_fb1_create_job_preserved(self) -> None:
+        """A 512-char embedded-file name survives create_job."""
+        job = self._create(self._template(ef_name="a" * 512))
+        embedded = job.steps[0].script.embeddedFiles
+        assert embedded is not None
+        assert len(embedded[0].name) == 512
+
+    def test_embedded_file_filename_256_chars_fb1_create_job_preserved(self) -> None:
+        """A 256-char embedded-file filename survives create_job."""
+        job = self._create(self._template(ef_filename="a" * 256))
+        embedded = job.steps[0].script.embeddedFiles
+        assert embedded is not None
+        assert len(embedded[0].filename) == 256
+
+    # ---- Group B: the job parameter name, through every stage ----
+
+    @pytest.mark.parametrize("param_type", sorted(_TYPE_DEFAULTS))
+    def test_parameter_name_512_chars_fb1_merge_preserved(self, param_type: str) -> None:
+        """The job-parameter merge preserves a 512-char name. This is the stage the v0
+        lane re-validated without the extension set."""
+        name = "a" * 512
+        job_template = decode_job_template(
+            template=self._template(param_name=name, param_type=param_type),
+            supported_extensions=self._FB1,
+        )
+        merged = merge_job_parameter_definitions(job_template=job_template)
+        assert [d["name"] for d in merged] == [name]
+
+    @pytest.mark.parametrize("param_type", sorted(_TYPE_DEFAULTS))
+    def test_parameter_name_512_chars_fb1_preprocess_preserved(self, param_type: str) -> None:
+        """preprocess_job_parameters preserves a 512-char parameter name."""
+        name = "a" * 512
+        values = self._preprocess(self._template(param_name=name, param_type=param_type), self._FB1)
+        assert name in values
+
+    @pytest.mark.parametrize("param_type", sorted(_TYPE_DEFAULTS))
+    def test_parameter_name_512_chars_fb1_create_job_preserved(self, param_type: str) -> None:
+        """create_job preserves a 512-char parameter name."""
+        name = "a" * 512
+        job = self._create(self._template(param_name=name, param_type=param_type))
+        assert name in job.parameters
+
+    def test_parameter_name_512_chars_from_environment_template_preserved(self) -> None:
+        """A 512-char name declared by an environment template that enables
+        FEATURE_BUNDLE_1 survives even though the job template does not enable it."""
+        name = "a" * 512
+        env_template = decode_environment_template(
+            template={
+                "specificationVersion": "environment-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "parameterDefinitions": [{"name": name, "type": "STRING", "default": "v"}],
+                "environment": minimal_environment_2023_09,
+            },
+            supported_extensions=self._FB1,
+        )
+        plain_template = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "J",
+            "steps": minimal_steps_v2023_09,
+        }
+        values = self._preprocess(plain_template, [], env_templates=[env_template])
+        assert name in values
+
+    # ---- Group C: controls ----
+
+    def test_parameter_name_513_chars_rejected_by_static_ceiling(self) -> None:
+        """512 is the hard identifier ceiling regardless of extension: at 513 the
+        identifier length check rejects before any extension-aware limit applies."""
+        with pytest.raises(DecodeValidationError) as excinfo:
+            decode_job_template(
+                template=self._template(param_name="a" * 513),
+                supported_extensions=self._FB1,
+            )
+        assert "Identifier length must be 1..=512, got 513" in str(excinfo.value)
+
+    def test_parameter_name_65_chars_no_extension_decode_rejected(self) -> None:
+        """Without the extension the base 64-character limit applies, and it is reached at
+        decode -- before the merge ever runs."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=self._template(param_name="a" * 65, declare_fb1=False),
+                supported_extensions=[],
+            )
+        assert "parameterDefinitions[0]:\n\tname exceeds 64 characters." in str(excinfo.value)
+
+    def test_job_name_129_chars_no_extension_decode_rejected(self) -> None:
+        """Without the extension the base 128-character job-name limit applies."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=self._template(job_name="a" * 129, declare_fb1=False),
+                supported_extensions=[],
+            )
+        assert "exceeds 128 characters" in str(excinfo.value)
+
+    def test_parameter_name_64_chars_no_extension_create_job_preserved(self) -> None:
+        """A parameter name at the base ceiling survives create_job with no extension."""
+        name = "a" * 64
+        job_template = decode_job_template(
+            template=self._template(param_name=name, declare_fb1=False),
+            supported_extensions=[],
+        )
+        values = preprocess_job_parameters(
+            job_template=job_template,
+            job_parameter_values={},
+            job_template_dir=Path(),
+            current_working_dir=Path(),
+            allow_job_template_dir_walk_up=True,
+        )
+        job = create_job(job_template=job_template, job_parameter_values=values)
+        assert name in job.parameters
+
+    # ---- Group D: round trip ----
+
+    def test_all_five_fields_at_ceiling_fb1_create_job_preserved(self) -> None:
+        """Every FEATURE_BUNDLE_1-lengthened field survives create_job at once."""
+        param_name = "a" * 512
+        job = self._create(
+            self._template(
+                job_name="a" * 512,
+                env_name="a" * 512,
+                ef_name="a" * 512,
+                ef_filename="a" * 256,
+                param_name=param_name,
+            )
+        )
+        environments = job.jobEnvironments
+        embedded = job.steps[0].script.embeddedFiles
+        assert environments is not None
+        assert embedded is not None
+        assert (
+            len(job.name),
+            len(environments[0].name),
+            len(embedded[0].name),
+            len(embedded[0].filename),
+            param_name in job.parameters,
+        ) == (512, 512, 512, 256, True)
