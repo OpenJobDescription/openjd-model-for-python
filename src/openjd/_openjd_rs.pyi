@@ -305,6 +305,25 @@ class CallerLimits:
     beyond the spec-defined limit." Caller limits can only tighten
     spec-defined limits, never relax them.
 
+    Two of the fields are resolved-value caps rather than document
+    caps: ``max_resolved_arg_len`` bounds each resolved action
+    ``command`` and each argv entry an ``args`` element produces
+    (Template Schemas §5.1, §5.2), and ``max_resolved_data_len``
+    bounds each resolved embedded-file ``data`` value (§6.1.2). The
+    spec sets no maximum for either; both count **characters**, while
+    the operating-system limits they stand in for are measured in
+    bytes or UTF-16 code units, so leave encoding headroom. Both are
+    checked at template validation against the guaranteed lower bound
+    of every possible resolution, again at job creation with
+    parameters bound, and — for a caller that mirrors them into a
+    session — at run time on the final values.
+
+    ``max_eval_memory_bytes`` and ``max_eval_operations`` are the
+    Expression Language spec's memory-bounded-evaluation budgets,
+    applied per format-string expression. ``None`` uses the
+    spec-recommended defaults (100 MB and 10 million operations);
+    lowering them is spec-sanctioned configuration.
+
     Mirrors `openjd_model::CallerLimits`.
     """
 
@@ -320,6 +339,14 @@ class CallerLimits:
     def max_environment_size(self) -> typing.Optional[builtins.int]: ...
     @property
     def max_template_size(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def max_resolved_arg_len(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def max_resolved_data_len(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def max_eval_memory_bytes(self) -> typing.Optional[builtins.int]: ...
+    @property
+    def max_eval_operations(self) -> typing.Optional[builtins.int]: ...
     def __new__(
         cls,
         *,
@@ -329,6 +356,10 @@ class CallerLimits:
         max_step_script_size: typing.Optional[builtins.int] = None,
         max_environment_size: typing.Optional[builtins.int] = None,
         max_template_size: typing.Optional[builtins.int] = None,
+        max_resolved_arg_len: typing.Optional[builtins.int] = None,
+        max_resolved_data_len: typing.Optional[builtins.int] = None,
+        max_eval_memory_bytes: typing.Optional[builtins.int] = None,
+        max_eval_operations: typing.Optional[builtins.int] = None,
     ) -> CallerLimits: ...
     def __repr__(self) -> builtins.str: ...
     def __reduce__(self) -> tuple[typing.Any, tuple]:
@@ -934,12 +965,13 @@ class FormatString:
         checking through the expression tree.
 
         Mirrors the Rust crate's
-        `FormatString::validate_expressions(symtab, lib, target_type)`.
+        `FormatString::validate_expressions(symtab, opts)`.
         Returns `None` on success.
 
-        `target_type` is passed as `None` because `resolve` and
-        `resolve_string` above resolve without one; validation has to
-        observe the same values resolution will produce. The crate
+        The options carry the library only — the same ones `resolve`
+        and `resolve_string` above build, since validation has to
+        observe the values resolution will produce, including its lack
+        of a target type and its default evaluation budgets. The crate
         returns a `StaticResolution` (resolved-length bound and, when
         fully concrete, the resolved value); this binding is pass/fail
         only and discards it.
@@ -2130,7 +2162,18 @@ class Session:
         session_root_directory: typing.Optional[builtins.str | os.PathLike | pathlib.Path] = None,
         user: typing.Optional[typing.Any] = None,
         profile: typing.Optional[ModelProfile] = None,
-    ) -> Session: ...
+        caller_limits: typing.Optional[CallerLimits] = None,
+    ) -> Session:
+        r"""
+        ``caller_limits`` carries the run-time half of a submitting
+        service's policy: the resolved-value caps and evaluation
+        budgets. A session is the enforcement boundary for them — a
+        worker can run a job that never passed through this process's
+        template validation or job creation — so pass the same
+        ``CallerLimits`` value used there. Fields with no run-time
+        meaning (document sizes, step and task counts) are ignored.
+        """
+
     def extend_path_mapping_rules(self, additional: typing.Sequence[PathMappingRule]) -> None:
         r"""
         Extend the session's path mapping rules with additional rules.
@@ -3504,7 +3547,10 @@ def create_job(
     validation_context: typing.Optional[ValidationContext] = None,
 ) -> Job: ...
 def decode_environment_template(
-    template: dict, *, supported_extensions: typing.Optional[typing.Sequence[builtins.str]] = None
+    template: dict,
+    *,
+    supported_extensions: typing.Optional[typing.Sequence[builtins.str]] = None,
+    caller_limits: typing.Optional[CallerLimits] = None,
 ) -> EnvironmentTemplate:
     r"""
     Decode and validate an environment template from a Python dict.
@@ -3524,10 +3570,14 @@ def decode_environment_template(
             ``Unsupported extension names: ...``. Pass ``None``
             (the default) for an empty allowlist (i.e., reject
             every extension the template requests).
+        caller_limits: Optional ``CallerLimits`` to tighten
+            spec-defined limits. The caps that only a job template has
+            (step and task counts) do not apply here, and
+            ``max_template_size`` has no document string to measure;
+            the resolved-value caps and evaluation budgets do apply.
 
     Returns:
         The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
-        Environment templates do not accept ``caller_limits``.
     """
 
 def decode_environment_template_str(
@@ -3535,6 +3585,7 @@ def decode_environment_template_str(
     format: DocumentType = DocumentType.YAML,
     *,
     supported_extensions: typing.Optional[typing.Sequence[builtins.str]] = None,
+    caller_limits: typing.Optional[CallerLimits] = None,
 ) -> EnvironmentTemplate:
     r"""
     Decode and validate an environment template from a YAML or JSON string.
@@ -3556,10 +3607,15 @@ def decode_environment_template_str(
             ``Unsupported extension names: ...``. Pass ``None``
             (the default) for an empty allowlist (i.e., reject
             every extension the template requests).
+        caller_limits: Optional ``CallerLimits`` to tighten
+            spec-defined limits. The caps that only a job template has
+            (step and task counts) do not apply here; the
+            resolved-value caps and evaluation budgets do, and
+            ``max_template_size`` is checked against ``document``'s
+            byte length before parsing.
 
     Returns:
         The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
-        Environment templates do not accept ``caller_limits``.
     """
 
 def decode_job_template(
@@ -3588,6 +3644,9 @@ def decode_job_template(
             every extension the template requests).
         caller_limits: Optional ``CallerLimits`` to tighten
             spec-defined limits (e.g. maximum step count).
+            ``max_template_size`` bounds a document's encoded byte
+            length, so it has nothing to measure on this entry point
+            and applies only to ``decode_job_template_str``.
 
     Returns:
         The parsed ``openjd.model._v1.template.JobTemplate``. Use
@@ -3624,6 +3683,8 @@ def decode_job_template_str(
             every extension the template requests).
         caller_limits: Optional ``CallerLimits`` to tighten
             spec-defined limits (e.g. maximum step count).
+            ``max_template_size`` is checked here, against
+            ``document``'s byte length before parsing.
 
     Returns:
         The parsed ``openjd.model._v1.template.JobTemplate``. Use
@@ -3670,7 +3731,21 @@ def evaluate_let_bindings(
     symtab: SymbolTable,
     *,
     profile: typing.Optional[ExprProfile] = None,
-) -> SymbolTable: ...
+    caller_limits: typing.Optional[CallerLimits] = None,
+) -> SymbolTable:
+    r"""
+    Evaluate ``let`` bindings in order, returning a symbol table with
+    each bound name added.
+
+    ``caller_limits`` supplies the evaluation budgets: a binding
+    evaluates a parsed expression directly rather than resolving a
+    format string, so a caller enforcing ``max_eval_memory_bytes`` /
+    ``max_eval_operations`` elsewhere has to pass the same limits here
+    for the budgets to bound every evaluation uniformly. The other
+    ``CallerLimits`` fields have no meaning for a let binding and are
+    ignored. Omitting it uses the spec-recommended defaults.
+    """
+
 def merge_job_parameter_definitions(
     *,
     job_template: JobTemplate,

@@ -128,12 +128,13 @@ impl PyFormatString {
     /// checking through the expression tree.
     ///
     /// Mirrors the Rust crate's
-    /// `FormatString::validate_expressions(symtab, lib, target_type)`.
+    /// `FormatString::validate_expressions(symtab, opts)`.
     /// Returns `None` on success.
     ///
-    /// `target_type` is passed as `None` because `resolve` and
-    /// `resolve_string` above resolve without one; validation has to
-    /// observe the same values resolution will produce. The crate
+    /// The options carry the library only — the same ones `resolve`
+    /// and `resolve_string` above build, since validation has to
+    /// observe the values resolution will produce, including its lack
+    /// of a target type and its default evaluation budgets. The crate
     /// returns a `StaticResolution` (resolved-length bound and, when
     /// fully concrete, the resolved value); this binding is pass/fail
     /// only and discards it.
@@ -145,8 +146,9 @@ impl PyFormatString {
     ) -> PyResult<()> {
         let st = extract_symtab(symtab)?;
         let lib = profile_for_call(profile);
+        let opts = FormatStringOptions::new().with_library(&lib);
         self.inner
-            .validate_expressions(&st, &lib, None)
+            .validate_expressions(&st, &opts)
             .map(|_| ())
             .map_err(format_string_validation_err_to_py)
     }

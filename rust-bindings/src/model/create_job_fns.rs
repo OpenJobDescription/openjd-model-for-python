@@ -316,13 +316,24 @@ fn default_to_native(
     feature = "stub-gen",
     gen_stub_pyfunction(module = "openjd._openjd_rs")
 )]
+/// Evaluate ``let`` bindings in order, returning a symbol table with
+/// each bound name added.
+///
+/// ``caller_limits`` supplies the evaluation budgets: a binding
+/// evaluates a parsed expression directly rather than resolving a
+/// format string, so a caller enforcing ``max_eval_memory_bytes`` /
+/// ``max_eval_operations`` elsewhere has to pass the same limits here
+/// for the budgets to bound every evaluation uniformly. The other
+/// ``CallerLimits`` fields have no meaning for a let binding and are
+/// ignored. Omitting it uses the spec-recommended defaults.
 #[pyfunction]
 #[pyo3(name = "evaluate_let_bindings")]
-#[pyo3(signature = (bindings, symtab, *, profile=None))]
+#[pyo3(signature = (bindings, symtab, *, profile=None, caller_limits=None))]
 pub(crate) fn py_evaluate_let_bindings(
     bindings: Vec<String>,
     symtab: &crate::expr::PySymbolTable,
     profile: Option<&crate::expr::profile::PyExprProfile>,
+    caller_limits: Option<&crate::model::profile::PyCallerLimits>,
 ) -> PyResult<crate::expr::PySymbolTable> {
     let lib = crate::expr::evaluate::profile_for_call(profile);
     let result = openjd_model::evaluate_let_bindings(
@@ -330,6 +341,8 @@ pub(crate) fn py_evaluate_let_bindings(
         &symtab.inner,
         Some(&lib),
         openjd_expr::path_mapping::PathFormat::host(),
+        caller_limits.and_then(|c| c.inner.max_eval_memory_bytes),
+        caller_limits.and_then(|c| c.inner.max_eval_operations),
     )
     .map_err(super::errors::model_err_to_py)?;
     Ok(crate::expr::PySymbolTable { inner: result })

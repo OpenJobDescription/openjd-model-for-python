@@ -131,6 +131,8 @@ def test_caller_limits_round_trip_default():
     loaded = pickle.loads(pickle.dumps(limits))
     assert loaded.max_step_count is None
     assert loaded.max_template_size is None
+    assert loaded.max_resolved_arg_len is None
+    assert loaded.max_eval_operations is None
 
 
 def test_caller_limits_round_trip_populated():
@@ -143,6 +145,10 @@ def test_caller_limits_round_trip_populated():
         max_step_script_size=2048,
         max_environment_size=1024,
         max_template_size=4096,
+        max_resolved_arg_len=32768,
+        max_resolved_data_len=65536,
+        max_eval_memory_bytes=1_048_576,
+        max_eval_operations=100_000,
     )
     loaded = pickle.loads(pickle.dumps(limits))
     assert loaded.max_step_count == 10
@@ -151,6 +157,13 @@ def test_caller_limits_round_trip_populated():
     assert loaded.max_step_script_size == 2048
     assert loaded.max_environment_size == 1024
     assert loaded.max_template_size == 4096
+    assert loaded.max_resolved_arg_len == 32768
+    assert loaded.max_resolved_data_len == 65536
+    assert loaded.max_eval_memory_bytes == 1_048_576
+    assert loaded.max_eval_operations == 100_000
+    # Equality covers all ten fields, so this also pins that none was dropped
+    # from __reduce__: a field lost there would come back None and compare unequal.
+    assert loaded == limits
 
 
 def test_validation_context_round_trip():
