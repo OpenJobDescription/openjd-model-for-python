@@ -2,7 +2,7 @@
 
 from enum import Enum
 import json
-from typing import Any, Type, Union
+from typing import Any, Optional, Type, Union
 
 import pytest
 
@@ -681,7 +681,7 @@ class TestResolvedValueCapsAtTemplateValidation(object):
     """
 
     @staticmethod
-    def _template(action: dict[str, Any], embedded: list[dict[str, Any]] | None = None) -> dict:
+    def _template(action: dict[str, Any], embedded: Optional[list[dict[str, Any]]] = None) -> dict:
         script: dict[str, Any] = {"actions": {"onRun": action}}
         if embedded is not None:
             script["embeddedFiles"] = embedded
