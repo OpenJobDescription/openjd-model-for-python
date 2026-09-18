@@ -1,3 +1,12 @@
+## 0.11.14 (2026-09-18)
+
+
+### Bug Fixes
+* Bump the openjd-rs crates for their latest fixes: openjd-expr 0.9.0, openjd-model 0.9.0, openjd-sessions 0.7.0 (#369) ([`39b338e`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/39b338ed961419383613531ec9b8b25c0233aff3))
+* apply the template extensions in the job parameter merge (#368) ([`8959e09`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/8959e093319a5b2602584b4eae8e02f5e948059d))
+* Allow underscores in a combination expression (#367) ([`f6bf876`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/f6bf876bf6501e44260d532442df9b4717f5c726))
+
+
 ## 0.11.13 (2026-09-16)
 
 
