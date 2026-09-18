@@ -13,6 +13,7 @@ use pyo3_stub_gen::derive::*;
 use openjd_model::types::{JobParameterType, JobParameterValue, JobParameterValues};
 use openjd_model::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
 use openjd_sessions::action_status::ActionStatus;
+use openjd_sessions::limits::SessionLimits;
 use openjd_sessions::session::{Session, SessionConfig, SessionState};
 
 use super::errors::session_err_to_py;
@@ -284,8 +285,15 @@ impl PySession {
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
 #[pymethods]
 impl PySession {
+    /// ``caller_limits`` carries the run-time half of a submitting
+    /// service's policy: the resolved-value caps and evaluation
+    /// budgets. A session is the enforcement boundary for them — a
+    /// worker can run a job that never passed through this process's
+    /// template validation or job creation — so pass the same
+    /// ``CallerLimits`` value used there. Fields with no run-time
+    /// meaning (document sizes, step and task counts) are ignored.
     #[new]
-    #[pyo3(signature = (*, session_id, job_parameter_values, path_mapping_rules=None, retain_working_dir=false, os_env_vars=None, session_root_directory=None, user=None, profile=None))]
+    #[pyo3(signature = (*, session_id, job_parameter_values, path_mapping_rules=None, retain_working_dir=false, os_env_vars=None, session_root_directory=None, user=None, profile=None, caller_limits=None))]
     #[allow(clippy::too_many_arguments)] // PyO3 #[new] mirrors a kwarg-rich public constructor
     fn new(
         session_id: String,
@@ -296,6 +304,7 @@ impl PySession {
         session_root_directory: Option<PathBuf>,
         user: Option<&Bound<'_, PyAny>>,
         profile: Option<crate::model::profile::PyModelProfile>,
+        caller_limits: Option<&crate::model::profile::PyCallerLimits>,
     ) -> PyResult<Self> {
         let params = extract_job_parameter_values(job_parameter_values)?;
 
@@ -356,6 +365,9 @@ impl PySession {
             sticky_bit_policy: Default::default(),
             debug_collect_stdout: false,
             echo_openjd_directives: true,
+            limits: caller_limits
+                .map(|c| SessionLimits::from(&c.inner))
+                .unwrap_or_default(),
         };
         let session = Session::with_config(config).map_err(session_err_to_py)?;
         {

@@ -2,7 +2,7 @@
 
 from enum import Enum
 import json
-from typing import Any, Type, Union
+from typing import Any, Optional, Type, Union
 
 import pytest
 
@@ -663,3 +663,283 @@ class TestResolvedValueConstraintsAtTemplateValidation(object):
         resolved count, so the constraint is deferred, not dropped."""
         template = self._os_family_all_of(["linux", "{{ Param.X }}"])
         assert decode_job_template(template=template, supported_extensions=["EXPR"])
+
+
+class TestResolvedValueCapsAtTemplateValidation(object):
+    """``max_resolved_arg_len`` and ``max_resolved_data_len`` cap the length of a
+    resolved action ``command`` / argv entry (Template Schemas §5.1, §5.2) and of a
+    resolved embedded-file ``data`` value (§6.1.2). The spec sets no maximum for
+    either and defers to the operating system, so these are caller policy, not
+    conformance rules. openjd-model 0.8.0 had no such fields — a caller could not
+    express either cap — so every case here was accepted before the bump
+    (openjd-rs#399).
+
+    Validation checks the guaranteed lower bound of every possible resolution: a
+    literal is exact, so it is rejected here, while a value that depends on a job
+    parameter is only bounded by its literal runs and is deferred to job creation
+    (see ``TestResolvedValueCapsAtJobCreation`` in ``test_create_job.py``).
+    """
+
+    @staticmethod
+    def _template(action: dict[str, Any], embedded: Optional[list[dict[str, Any]]] = None) -> dict:
+        script: dict[str, Any] = {"actions": {"onRun": action}}
+        if embedded is not None:
+            script["embeddedFiles"] = embedded
+        return {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "steps": [{"name": "S", "script": script}],
+        }
+
+    def test_literal_command_over_cap_is_rejected(self) -> None:
+        template = self._template({"command": "a" * 20})
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=template,
+                supported_extensions=[],
+                caller_limits=CallerLimits(max_resolved_arg_len=5),
+            )
+        message = str(excinfo.value)
+        assert "steps[0] -> script -> actions -> onRun -> command" in message
+        assert "is 20 characters, exceeding the maximum of 5" in message
+
+    def test_literal_arg_over_cap_is_rejected(self) -> None:
+        """The cap applies per argv entry, not to the ``args`` list as a whole."""
+        template = self._template({"command": "echo", "args": ["b" * 20]})
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=template,
+                supported_extensions=[],
+                caller_limits=CallerLimits(max_resolved_arg_len=5),
+            )
+        message = str(excinfo.value)
+        assert "steps[0] -> script -> actions -> onRun -> args[0]" in message
+        assert "is 20 characters, exceeding the maximum of 5" in message
+
+    def test_command_under_cap_is_accepted(self) -> None:
+        """Negative control: the same template passes under a cap it fits."""
+        template = self._template({"command": "a" * 20, "args": ["b" * 20]})
+        assert decode_job_template(
+            template=template,
+            supported_extensions=[],
+            caller_limits=CallerLimits(max_resolved_arg_len=100),
+        )
+
+    def test_no_cap_accepts_any_length(self) -> None:
+        """Negative control: omitting the cap imposes no limit, which is the only
+        behaviour 0.8.0 had."""
+        assert decode_job_template(
+            template=self._template({"command": "a" * 20}), supported_extensions=[]
+        )
+
+    def test_embedded_file_data_over_cap_is_rejected(self) -> None:
+        template = self._template(
+            {"command": "echo"},
+            embedded=[{"name": "F", "type": "TEXT", "data": "d" * 20}],
+        )
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=template,
+                supported_extensions=[],
+                caller_limits=CallerLimits(max_resolved_data_len=5),
+            )
+        message = str(excinfo.value)
+        assert "steps[0] -> script -> embeddedFiles[0] -> data" in message
+        assert "is 20 characters, exceeding the maximum of 5" in message
+
+    def test_embedded_file_data_under_cap_is_accepted(self) -> None:
+        """Negative control, and it also pins that the two caps are independent: a
+        20-character ``data`` passes while ``max_resolved_arg_len`` is 5."""
+        template = self._template(
+            {"command": "echo"},
+            embedded=[{"name": "F", "type": "TEXT", "data": "d" * 20}],
+        )
+        assert decode_job_template(
+            template=template,
+            supported_extensions=[],
+            caller_limits=CallerLimits(max_resolved_arg_len=5, max_resolved_data_len=100),
+        )
+
+
+class TestEvaluationBudgetsAtTemplateValidation(object):
+    """``max_eval_memory_bytes`` and ``max_eval_operations`` are the Expression
+    Language spec's memory-bounded-evaluation budgets (§1.3.9, §1.3.10), applied per
+    format-string expression. Both have spec-recommended defaults (100 MB, 10
+    million) rather than limits, so lowering them is configuration. openjd-model
+    0.8.0 exposed no way to lower either (openjd-rs#399); the expression below was
+    accepted.
+    """
+
+    @staticmethod
+    def _template(expression: str) -> dict[str, Any]:
+        return {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "extensions": ["EXPR"],
+            "steps": [
+                {
+                    "name": "S",
+                    "script": {"actions": {"onRun": {"command": "echo", "args": [expression]}}},
+                }
+            ],
+        }
+
+    def test_memory_budget_rejects_a_large_value(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=self._template("{{ 'a' * 100000 }}"),
+                supported_extensions=["EXPR"],
+                caller_limits=CallerLimits(max_eval_memory_bytes=1024),
+            )
+        assert "memory usage (100136 bytes) exceeded limit (1024 bytes)" in str(excinfo.value)
+
+    def test_operation_budget_rejects_a_long_evaluation(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=self._template("{{ 'a' * 100000 }}"),
+                supported_extensions=["EXPR"],
+                caller_limits=CallerLimits(max_eval_operations=5),
+            )
+        assert "operation count (392) exceeded limit (5)" in str(excinfo.value)
+
+    def test_default_budgets_accept_it(self) -> None:
+        """Negative control: the same expression is well within the spec-recommended
+        defaults, so omitting the budgets accepts it."""
+        assert decode_job_template(
+            template=self._template("{{ 'a' * 100000 }}"), supported_extensions=["EXPR"]
+        )
+
+
+class TestEnvironmentTemplateCallerLimits(object):
+    """``decode_environment_template`` gained a ``caller_limits`` argument with
+    openjd-model 0.9.0 (openjd-rs#399); 0.8.0 took only the extension allowlist, and
+    this package's docstrings said environment templates do not accept caller limits.
+    The document-shape caps have no environment-template counterpart, but the
+    resolved-value caps and evaluation budgets apply to its script the same way.
+    """
+
+    _TEMPLATE: dict[str, Any] = {
+        "specificationVersion": "environment-2023-09",
+        "environment": {
+            "name": "E",
+            "script": {"actions": {"onEnter": {"command": "e" * 20}}},
+        },
+    }
+
+    def test_dict_entry_point_applies_the_cap(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_environment_template(
+                template=self._TEMPLATE,
+                supported_extensions=[],
+                caller_limits=CallerLimits(max_resolved_arg_len=5),
+            )
+        message = str(excinfo.value)
+        assert "environment -> script -> actions -> onEnter -> command" in message
+        assert "is 20 characters, exceeding the maximum of 5" in message
+
+    def test_str_entry_point_applies_the_cap(self) -> None:
+        document = json.dumps(self._TEMPLATE)
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_environment_template_str(
+                document,
+                DocumentType.JSON,
+                supported_extensions=[],
+                caller_limits=CallerLimits(max_resolved_arg_len=5),
+            )
+        assert "is 20 characters, exceeding the maximum of 5" in str(excinfo.value)
+
+    def test_cap_that_fits_is_accepted(self) -> None:
+        """Negative control on both entry points."""
+        assert decode_environment_template(
+            template=self._TEMPLATE,
+            supported_extensions=[],
+            caller_limits=CallerLimits(max_resolved_arg_len=100),
+        )
+        assert decode_environment_template_str(
+            json.dumps(self._TEMPLATE), DocumentType.JSON, supported_extensions=[]
+        )
+
+
+class TestMaxTemplateSizeReachesTheParser(object):
+    """``max_template_size`` is checked in one place only: the document-string parse
+    in ``openjd_model::template::parse::document_string_to_object``, against the
+    byte length before parsing.
+
+    This binding's ``parse_string`` helper passed ``CallerLimits::default()`` there,
+    so the field was inert on both ``*_str`` entry points even though they accept it
+    — a caller asking for a 10-byte ceiling got no ceiling. Found while documenting
+    the field, and fixed by passing the caller's own limits. The dict entry points
+    are handed an already-parsed mapping and have no document string to measure, so
+    they are unaffected either way.
+    """
+
+    _JOB = (
+        "specificationVersion: jobtemplate-2023-09\n"
+        "name: T\n"
+        "steps:\n"
+        "  - name: S\n"
+        "    script:\n"
+        "      actions:\n"
+        "        onRun:\n"
+        "          command: echo\n"
+    )
+    _ENV = (
+        "specificationVersion: environment-2023-09\n"
+        "environment:\n"
+        "  name: E\n"
+        "  script:\n"
+        "    actions:\n"
+        "      onEnter:\n"
+        "        command: echo\n"
+    )
+
+    def test_job_template_str_over_the_limit_is_rejected(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template_str(
+                self._JOB,
+                supported_extensions=[],
+                caller_limits=CallerLimits(max_template_size=10),
+            )
+        assert f"Template document size ({len(self._JOB)} bytes) exceeds caller limit of 10" in str(
+            excinfo.value
+        )
+
+    def test_environment_template_str_over_the_limit_is_rejected(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_environment_template_str(
+                self._ENV,
+                supported_extensions=[],
+                caller_limits=CallerLimits(max_template_size=10),
+            )
+        assert f"Template document size ({len(self._ENV)} bytes) exceeds caller limit of 10" in str(
+            excinfo.value
+        )
+
+    def test_a_limit_the_document_fits_is_accepted(self) -> None:
+        """Negative control: the check is a ceiling, not a rejection of the field."""
+        assert decode_job_template_str(
+            self._JOB,
+            supported_extensions=[],
+            caller_limits=CallerLimits(max_template_size=len(self._JOB)),
+        )
+        assert decode_environment_template_str(
+            self._ENV,
+            supported_extensions=[],
+            caller_limits=CallerLimits(max_template_size=len(self._ENV)),
+        )
+
+    def test_the_dict_entry_points_have_nothing_to_measure(self) -> None:
+        """The same limit on a dict entry point is inert by construction — there is no
+        document string — so the template is accepted. Pins the asymmetry the
+        docstrings now state, so a future change that starts re-encoding the dict to
+        measure it has to update both."""
+        template = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+        }
+        assert decode_job_template(
+            template=template,
+            supported_extensions=[],
+            caller_limits=CallerLimits(max_template_size=10),
+        )

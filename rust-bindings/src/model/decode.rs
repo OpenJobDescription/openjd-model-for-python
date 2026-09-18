@@ -15,14 +15,19 @@ use super::template::{PyEnvironmentTemplate, PyJobTemplate};
 use super::types::PyDocumentType;
 
 /// Parse a raw string into serde_json::Value based on document type.
-fn parse_string(document: &str, format: PyDocumentType) -> PyResult<serde_json::Value> {
+///
+/// `limits` has to be the caller's own: `max_template_size` is checked here,
+/// against the document's byte length before parsing, and nowhere else. Passing
+/// a default here left that field inert on the `*_str` entry points even though
+/// they accept it.
+fn parse_string(
+    document: &str,
+    format: PyDocumentType,
+    limits: &CallerLimits,
+) -> PyResult<serde_json::Value> {
     let doc_type: DocumentType = format.into();
-    openjd_model::template::parse::document_string_to_object(
-        document,
-        doc_type,
-        &CallerLimits::default(),
-    )
-    .map_err(model_err_to_py)
+    openjd_model::template::parse::document_string_to_object(document, doc_type, limits)
+        .map_err(model_err_to_py)
 }
 
 /// Convert a Python dict to serde_json::Value via JSON round-trip.
@@ -66,6 +71,8 @@ fn limits_or_default(c: Option<&PyCallerLimits>) -> CallerLimits {
 ///         every extension the template requests).
 ///     caller_limits: Optional ``CallerLimits`` to tighten
 ///         spec-defined limits (e.g. maximum step count).
+///         ``max_template_size`` is checked here, against
+///         ``document``'s byte length before parsing.
 ///
 /// Returns:
 ///     The parsed ``openjd.model._v1.template.JobTemplate``. Use
@@ -84,9 +91,9 @@ pub(crate) fn decode_job_template_str(
     supported_extensions: Option<Vec<String>>,
     caller_limits: Option<&PyCallerLimits>,
 ) -> PyResult<PyJobTemplate> {
-    let value = parse_string(document, format)?;
-    let exts = as_str_slice(&supported_extensions);
     let limits = limits_or_default(caller_limits);
+    let value = parse_string(document, format, &limits)?;
+    let exts = as_str_slice(&supported_extensions);
     let jt = openjd_model::decode_job_template(value, exts.as_deref(), &limits)
         .map_err(model_err_to_py)?;
     Ok(PyJobTemplate { inner: jt })
@@ -111,6 +118,9 @@ pub(crate) fn decode_job_template_str(
 ///         every extension the template requests).
 ///     caller_limits: Optional ``CallerLimits`` to tighten
 ///         spec-defined limits (e.g. maximum step count).
+///         ``max_template_size`` bounds a document's encoded byte
+///         length, so it has nothing to measure on this entry point
+///         and applies only to ``decode_job_template_str``.
 ///
 /// Returns:
 ///     The parsed ``openjd.model._v1.template.JobTemplate``. Use
@@ -155,24 +165,31 @@ pub(crate) fn decode_job_template(
 ///         ``Unsupported extension names: ...``. Pass ``None``
 ///         (the default) for an empty allowlist (i.e., reject
 ///         every extension the template requests).
+///     caller_limits: Optional ``CallerLimits`` to tighten
+///         spec-defined limits. The caps that only a job template has
+///         (step and task counts) do not apply here; the
+///         resolved-value caps and evaluation budgets do, and
+///         ``max_template_size`` is checked against ``document``'s
+///         byte length before parsing.
 ///
 /// Returns:
 ///     The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
-///     Environment templates do not accept ``caller_limits``.
 #[cfg_attr(
     feature = "stub-gen",
     gen_stub_pyfunction(module = "openjd._openjd_rs")
 )]
 #[pyfunction]
-#[pyo3(signature = (document, format=PyDocumentType::YAML, *, supported_extensions=None))]
+#[pyo3(signature = (document, format=PyDocumentType::YAML, *, supported_extensions=None, caller_limits=None))]
 pub(crate) fn decode_environment_template_str(
     document: &str,
     format: PyDocumentType,
     supported_extensions: Option<Vec<String>>,
+    caller_limits: Option<&PyCallerLimits>,
 ) -> PyResult<PyEnvironmentTemplate> {
-    let value = parse_string(document, format)?;
+    let limits = limits_or_default(caller_limits);
+    let value = parse_string(document, format, &limits)?;
     let exts = as_str_slice(&supported_extensions);
-    let et = openjd_model::decode_environment_template(value, exts.as_deref())
+    let et = openjd_model::decode_environment_template(value, exts.as_deref(), &limits)
         .map_err(model_err_to_py)?;
     Ok(PyEnvironmentTemplate { inner: et })
 }
@@ -194,23 +211,29 @@ pub(crate) fn decode_environment_template_str(
 ///         ``Unsupported extension names: ...``. Pass ``None``
 ///         (the default) for an empty allowlist (i.e., reject
 ///         every extension the template requests).
+///     caller_limits: Optional ``CallerLimits`` to tighten
+///         spec-defined limits. The caps that only a job template has
+///         (step and task counts) do not apply here, and
+///         ``max_template_size`` has no document string to measure;
+///         the resolved-value caps and evaluation budgets do apply.
 ///
 /// Returns:
 ///     The parsed ``openjd.model._v1.template.EnvironmentTemplate``.
-///     Environment templates do not accept ``caller_limits``.
 #[cfg_attr(
     feature = "stub-gen",
     gen_stub_pyfunction(module = "openjd._openjd_rs")
 )]
 #[pyfunction]
-#[pyo3(signature = (template, *, supported_extensions=None))]
+#[pyo3(signature = (template, *, supported_extensions=None, caller_limits=None))]
 pub(crate) fn decode_environment_template(
     template: &Bound<'_, PyDict>,
     supported_extensions: Option<Vec<String>>,
+    caller_limits: Option<&PyCallerLimits>,
 ) -> PyResult<PyEnvironmentTemplate> {
     let value = dict_to_json_value(template)?;
     let exts = as_str_slice(&supported_extensions);
-    let et = openjd_model::decode_environment_template(value, exts.as_deref())
+    let limits = limits_or_default(caller_limits);
+    let et = openjd_model::decode_environment_template(value, exts.as_deref(), &limits)
         .map_err(model_err_to_py)?;
     Ok(PyEnvironmentTemplate { inner: et })
 }

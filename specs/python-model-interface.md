@@ -151,7 +151,9 @@ Argument semantics (matching the Rust API):
   list is rejected with `Unsupported extension names: ...`. Pass
   `None` (the default) for an empty allowlist.
 * `caller_limits` — optional `CallerLimits` to tighten spec-defined
-  limits (max steps, max envs, max task count, max template size, …).
+  limits (max steps, max envs, max task count, max template size, …),
+  to cap resolved argument and embedded-file-data lengths, and to
+  lower the per-expression evaluation budgets.
 
 The `ModelProfile` type is used as an *output* of decoding (via
 `JobTemplate.profile`) and as an *input* to other functions
@@ -211,9 +213,11 @@ env_template = decode_environment_template(template={
 })
 ```
 
-``decode_environment_template`` accepts ``supported_extensions``
-with the same semantics as :func:`decode_job_template`. Environment
-templates do not accept ``caller_limits``.
+``decode_environment_template`` accepts ``supported_extensions`` and
+``caller_limits`` with the same semantics as
+:func:`decode_job_template`. The document-shape caps that only a job
+template has (step and task counts) do not apply here; the
+resolved-value caps and evaluation budgets do.
 
 #### `decode_environment_template_str`
 
@@ -235,8 +239,9 @@ env_template = decode_environment_template_str(yaml_str)
 ```
 
 Same defaults as :func:`decode_job_template_str`: ``format``
-defaults to ``DocumentType.YAML``. Accepts ``supported_extensions``;
-environment templates do not accept ``caller_limits``.
+defaults to ``DocumentType.YAML``. Accepts ``supported_extensions``
+and ``caller_limits`` on the same terms as
+:func:`decode_environment_template`.
 
 ### Job Creation
 
@@ -397,10 +402,20 @@ result["a"].item(), result["b"].item(), result["c"].item()  # (11, 22, 33)
 ```
 
 The full signature is
-``evaluate_let_bindings(bindings, symtab, *, profile=None) -> SymbolTable``.
+``evaluate_let_bindings(bindings, symtab, *, profile=None,
+caller_limits=None) -> SymbolTable``.
 ``profile`` accepts an [``ExprProfile``][profile] when the caller
 needs a non-default revision / extension set or a configured
 ``HostContext``; omitting it uses the current profile.
+
+``caller_limits`` supplies the evaluation budgets
+(``max_eval_memory_bytes``, ``max_eval_operations``). A binding
+evaluates a parsed expression directly rather than resolving a format
+string, so a caller enforcing those budgets elsewhere has to pass the
+same ``CallerLimits`` here for them to bound every evaluation
+uniformly. The remaining fields have no meaning for a let binding and
+are ignored; omitting the argument uses the spec-recommended
+defaults.
 
 [profile]: ./python-expr-interface.md#exprrevision--exprextension--hostcontext--exprprofile
 
@@ -1381,6 +1396,37 @@ from openjd.expr import HostContext
 expr_profile = profile.to_expr_profile(HostContext.unresolved())
 ```
 
+`CallerLimits` fields, all optional and all keyword-only:
+
+| Field | Bounds | Enforced |
+|---|---|---|
+| `max_step_count` | steps in a job template | decode |
+| `max_env_count` | job + step environments | decode |
+| `max_task_count` | total tasks across all steps | `create_job`, after ranges resolve |
+| `max_step_script_size` | JSON-encoded step script, bytes | decode |
+| `max_environment_size` | JSON-encoded environment, bytes | decode |
+| `max_template_size` | whole document, bytes | the `*_str` entry points, before parsing |
+| `max_resolved_arg_len` | each resolved `command` and argv entry, characters (§5.1, §5.2) | decode, `create_job`, session |
+| `max_resolved_data_len` | each resolved embedded-file `data`, characters (§6.1.2) | decode, `create_job`, session |
+| `max_eval_memory_bytes` | memory per expression evaluation (default 100 MB) | decode, `create_job`, session |
+| `max_eval_operations` | operations per expression evaluation (default 10 million) | decode, `create_job`, session |
+
+`max_template_size` measures a document string, so it applies to
+`decode_job_template_str` and `decode_environment_template_str` and has
+nothing to measure on the dict entry points, which are handed an
+already-parsed mapping.
+
+The last four have no spec-defined maximum to tighten — the two
+resolved-value caps stand in for OS limits the spec defers to, and the
+two budgets are the Expression Language spec's memory-bounded
+evaluation levers, which have recommended defaults rather than limits.
+A resolved-value cap is checked three times: at decode against the
+guaranteed lower bound of every possible resolution, at `create_job`
+with the job parameters bound, and at run time on the final value by a
+session the caller passed the same limits to. The session is the
+enforcement boundary, since a worker can run a job that never passed
+through this process.
+
 `ModelExtension` members:
 
 | Member | String form | Notes |
@@ -1570,7 +1616,7 @@ original.
 | ``TaskParameterType`` | variant name (``INT``, ``CHUNK_INT``, …) |
 | ``ModelExtension`` | variant name (``EXPR``, ``TASK_CHUNKING``, …) |
 | ``ModelProfile`` | constructor arguments (``revision``, ``extensions``) |
-| ``CallerLimits`` | constructor arguments (six optional fields) |
+| ``CallerLimits`` | constructor arguments (ten optional fields) |
 | ``ValidationContext`` | constructor arguments (``profile``, ``caller_limits``) |
 | ``JobParameterValue`` | constructor arguments (``type``, ``value``) |
 | ``TaskParameterValue`` | constructor arguments (``type``, ``value``) |

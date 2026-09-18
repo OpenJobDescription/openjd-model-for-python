@@ -452,6 +452,25 @@ impl PyModelProfile {
 /// beyond the spec-defined limit." Caller limits can only tighten
 /// spec-defined limits, never relax them.
 ///
+/// Two of the fields are resolved-value caps rather than document
+/// caps: ``max_resolved_arg_len`` bounds each resolved action
+/// ``command`` and each argv entry an ``args`` element produces
+/// (Template Schemas §5.1, §5.2), and ``max_resolved_data_len``
+/// bounds each resolved embedded-file ``data`` value (§6.1.2). The
+/// spec sets no maximum for either; both count **characters**, while
+/// the operating-system limits they stand in for are measured in
+/// bytes or UTF-16 code units, so leave encoding headroom. Both are
+/// checked at template validation against the guaranteed lower bound
+/// of every possible resolution, again at job creation with
+/// parameters bound, and — for a caller that mirrors them into a
+/// session — at run time on the final values.
+///
+/// ``max_eval_memory_bytes`` and ``max_eval_operations`` are the
+/// Expression Language spec's memory-bounded-evaluation budgets,
+/// applied per format-string expression. ``None`` uses the
+/// spec-recommended defaults (100 MB and 10 million operations);
+/// lowering them is spec-sanctioned configuration.
+///
 /// Mirrors `openjd_model::CallerLimits`.
 #[cfg_attr(feature = "stub-gen", gen_stub_pyclass(module = "openjd._openjd_rs"))]
 #[pyclass(
@@ -477,7 +496,12 @@ impl PyCallerLimits {
         max_step_script_size=None,
         max_environment_size=None,
         max_template_size=None,
+        max_resolved_arg_len=None,
+        max_resolved_data_len=None,
+        max_eval_memory_bytes=None,
+        max_eval_operations=None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         max_step_count: Option<usize>,
         max_env_count: Option<usize>,
@@ -485,6 +509,10 @@ impl PyCallerLimits {
         max_step_script_size: Option<usize>,
         max_environment_size: Option<usize>,
         max_template_size: Option<usize>,
+        max_resolved_arg_len: Option<usize>,
+        max_resolved_data_len: Option<usize>,
+        max_eval_memory_bytes: Option<usize>,
+        max_eval_operations: Option<usize>,
     ) -> Self {
         Self {
             inner: CallerLimits {
@@ -494,6 +522,10 @@ impl PyCallerLimits {
                 max_step_script_size,
                 max_environment_size,
                 max_template_size,
+                max_resolved_arg_len,
+                max_resolved_data_len,
+                max_eval_memory_bytes,
+                max_eval_operations,
             },
         }
     }
@@ -523,20 +555,46 @@ impl PyCallerLimits {
         self.inner.max_template_size
     }
 
+    #[getter]
+    fn max_resolved_arg_len(&self) -> Option<usize> {
+        self.inner.max_resolved_arg_len
+    }
+
+    #[getter]
+    fn max_resolved_data_len(&self) -> Option<usize> {
+        self.inner.max_resolved_data_len
+    }
+
+    #[getter]
+    fn max_eval_memory_bytes(&self) -> Option<usize> {
+        self.inner.max_eval_memory_bytes
+    }
+
+    #[getter]
+    fn max_eval_operations(&self) -> Option<usize> {
+        self.inner.max_eval_operations
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "CallerLimits(max_step_count={:?}, max_env_count={:?}, max_task_count={:?}, \
-             max_step_script_size={:?}, max_environment_size={:?}, max_template_size={:?})",
+             max_step_script_size={:?}, max_environment_size={:?}, max_template_size={:?}, \
+             max_resolved_arg_len={:?}, max_resolved_data_len={:?}, \
+             max_eval_memory_bytes={:?}, max_eval_operations={:?})",
             self.inner.max_step_count,
             self.inner.max_env_count,
             self.inner.max_task_count,
             self.inner.max_step_script_size,
             self.inner.max_environment_size,
             self.inner.max_template_size,
+            self.inner.max_resolved_arg_len,
+            self.inner.max_resolved_data_len,
+            self.inner.max_eval_memory_bytes,
+            self.inner.max_eval_operations,
         )
     }
 
-    /// Pickle support — round-trips through `__init__` with all six
+    /// Pickle support — round-trips through `__init__` with all ten
     /// optional fields as keyword arguments.
     fn __reduce__<'py>(
         &self,
@@ -554,12 +612,16 @@ impl PyCallerLimits {
         kwargs.set_item("max_step_script_size", self.inner.max_step_script_size)?;
         kwargs.set_item("max_environment_size", self.inner.max_environment_size)?;
         kwargs.set_item("max_template_size", self.inner.max_template_size)?;
+        kwargs.set_item("max_resolved_arg_len", self.inner.max_resolved_arg_len)?;
+        kwargs.set_item("max_resolved_data_len", self.inner.max_resolved_data_len)?;
+        kwargs.set_item("max_eval_memory_bytes", self.inner.max_eval_memory_bytes)?;
+        kwargs.set_item("max_eval_operations", self.inner.max_eval_operations)?;
         let args = PyTuple::new(py, [cls.into_any(), kwargs.into_any()])?;
         Ok((helper, args.into()))
     }
 
     /// Structural equality — required by the pickle round-trip
-    /// contract. Compares all six fields; the underlying
+    /// contract. Compares all ten fields; the underlying
     /// `CallerLimits` upstream doesn't derive `PartialEq`, so we
     /// implement equality field-by-field at the binding boundary.
     fn __eq__(&self, other: &Self) -> bool {
@@ -569,6 +631,10 @@ impl PyCallerLimits {
             && self.inner.max_step_script_size == other.inner.max_step_script_size
             && self.inner.max_environment_size == other.inner.max_environment_size
             && self.inner.max_template_size == other.inner.max_template_size
+            && self.inner.max_resolved_arg_len == other.inner.max_resolved_arg_len
+            && self.inner.max_resolved_data_len == other.inner.max_resolved_data_len
+            && self.inner.max_eval_memory_bytes == other.inner.max_eval_memory_bytes
+            && self.inner.max_eval_operations == other.inner.max_eval_operations
     }
 }
 

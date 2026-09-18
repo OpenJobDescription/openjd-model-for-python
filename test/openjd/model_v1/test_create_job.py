@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from openjd.model._v1 import (
+    CallerLimits,
     create_job,
     decode_environment_template,
     decode_job_template,
@@ -16,6 +17,7 @@ from openjd.model._v1 import (
 from openjd.model._v1.types import (
     JobParameterType,
     JobParameterValue,
+    ValidationContext,
 )
 from openjd.model._v1.errors import (
     DecodeValidationError,
@@ -1978,3 +1980,157 @@ class TestCreateJobPreservesFeatureBundle1Lengths:
             len(embedded[0].filename),
             param_name in job.parameters,
         ) == (512, 512, 512, 256, True)
+
+
+class TestResolvedValueCapsAtJobCreation:
+    """Companion to ``test_parse.py::TestResolvedValueCapsAtTemplateValidation``.
+    ``max_resolved_arg_len`` / ``max_resolved_data_len`` (openjd-model 0.9.0,
+    openjd-rs#399) are checked twice on this path: at template validation against
+    the guaranteed lower bound of every resolution, then again at job creation with
+    the job parameters bound. A field whose value comes from a parameter has a lower
+    bound of 0 at validation, so job creation is the stage that can reject it.
+
+    Caller limits reach ``create_job`` through a ``ValidationContext``; omitting one
+    uses the template's default context, which carries no limits.
+    """
+
+    _LIMITS = CallerLimits(max_resolved_arg_len=10, max_resolved_data_len=10)
+
+    @classmethod
+    def _decoded(cls, **script_extras: Any) -> Any:
+        action: dict[str, Any] = {"command": "echo", "args": ["{{Param.P}}"]}
+        script: dict[str, Any] = {"actions": {"onRun": action}}
+        script.update(script_extras)
+        return decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "parameterDefinitions": [{"name": "P", "type": "STRING"}],
+                "steps": [{"name": "S", "script": script}],
+            },
+            supported_extensions=[],
+            caller_limits=cls._LIMITS,
+        )
+
+    @classmethod
+    def _context(cls, decoded: Any) -> Any:
+        return ValidationContext(decoded.profile, caller_limits=cls._LIMITS)
+
+    def test_template_passes_validation_because_the_bound_is_unknown(self) -> None:
+        """Control for the deferral: the cap is 10 and the only literal run in the
+        argument is empty, so validation cannot reject."""
+        assert self._decoded()
+
+    def test_a_parameter_value_over_the_cap_is_rejected(self) -> None:
+        decoded = self._decoded()
+        with pytest.raises(ModelValidationError) as excinfo:
+            create_job(
+                job_template=decoded,
+                job_parameter_values={"P": "c" * 30},
+                validation_context=self._context(decoded),
+            )
+        message = str(excinfo.value)
+        assert "steps[0] -> script -> actions -> onRun -> args[0]" in message
+        assert "resolves to at least 30 characters, exceeding the maximum of 10" in message
+
+    def test_a_parameter_value_under_the_cap_is_accepted(self) -> None:
+        """Negative control: the same template and context with a value that fits.
+
+        The argument stays a ``FormatString`` on the created job — job creation
+        checks the resolved length without substituting it, because an action's
+        arguments also depend on task parameters and resolve in the session."""
+        decoded = self._decoded()
+        job = create_job(
+            job_template=decoded,
+            job_parameter_values={"P": "short"},
+            validation_context=self._context(decoded),
+        )
+        args = job.steps[0].script.actions.onRun.args
+        assert args is not None
+        assert [str(a) for a in args] == ["{{Param.P}}"]
+        assert "P" in job.parameters
+
+    def test_without_caller_limits_any_length_is_accepted(self) -> None:
+        """Negative control: with no limits in the context the value passes, which is
+        the only behaviour openjd-model 0.8.0 had."""
+        decoded = self._decoded()
+        assert create_job(job_template=decoded, job_parameter_values={"P": "c" * 30})
+
+    def test_embedded_file_data_over_the_cap_is_rejected(self) -> None:
+        decoded = self._decoded(
+            embeddedFiles=[{"name": "F", "type": "TEXT", "data": "{{Param.P}}"}]
+        )
+        with pytest.raises(ModelValidationError) as excinfo:
+            create_job(
+                job_template=decoded,
+                job_parameter_values={"P": "d" * 30},
+                validation_context=self._context(decoded),
+            )
+        message = str(excinfo.value)
+        assert "steps[0] -> script -> embeddedFiles[0] -> data" in message
+        assert "resolves to at least 30 characters, exceeding the maximum of 10" in message
+
+
+class TestJobEnvironmentResolvedValueCapsAtJobCreation:
+    """openjd-model 0.9.0 (openjd-rs#404) re-runs the resolved-value checks on the
+    job environments that ``create_job`` carries forward into the job, against a
+    session-scope symbol table. A job environment's script is not part of a step, so
+    the step-walking re-check of openjd-rs#399 alone did not reach it: on 0.9.0
+    without #404 the same template would produce a job whose ``onEnter`` argument is
+    30 characters under a cap of 10.
+    """
+
+    _LIMITS = CallerLimits(max_resolved_arg_len=10)
+
+    @classmethod
+    def _decoded(cls) -> Any:
+        return decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "parameterDefinitions": [{"name": "P", "type": "STRING"}],
+                "jobEnvironments": [
+                    {
+                        "name": "JobEnv",
+                        "script": {
+                            "actions": {"onEnter": {"command": "echo", "args": ["{{Param.P}}"]}}
+                        },
+                    }
+                ],
+                "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+            },
+            supported_extensions=[],
+            caller_limits=cls._LIMITS,
+        )
+
+    def test_job_environment_argument_over_the_cap_is_rejected(self) -> None:
+        decoded = self._decoded()
+        with pytest.raises(ModelValidationError) as excinfo:
+            create_job(
+                job_template=decoded,
+                job_parameter_values={"P": "e" * 30},
+                validation_context=ValidationContext(decoded.profile, caller_limits=self._LIMITS),
+            )
+        message = str(excinfo.value)
+        assert "jobEnvironments[0] -> script -> actions -> onEnter -> args[0]" in message
+        assert "resolves to at least 30 characters, exceeding the maximum of 10" in message
+
+    def test_job_environment_argument_under_the_cap_is_accepted(self) -> None:
+        """Negative control, and it pins that the environment is still carried
+        forward onto the job with its argument unsubstituted — the check reads the
+        resolved length, it does not rewrite the field."""
+        decoded = self._decoded()
+        job = create_job(
+            job_template=decoded,
+            job_parameter_values={"P": "short"},
+            validation_context=ValidationContext(decoded.profile, caller_limits=self._LIMITS),
+        )
+        environments = job.jobEnvironments
+        assert environments is not None
+        script = environments[0].script
+        assert script is not None
+        on_enter = script.actions.onEnter
+        assert on_enter is not None
+        args = on_enter.args
+        assert args is not None
+        assert [str(a) for a in args] == ["{{Param.P}}"]

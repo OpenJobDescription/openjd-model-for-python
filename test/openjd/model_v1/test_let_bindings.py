@@ -23,7 +23,7 @@ Coverage anchored to the report's recommendation #6:
 import pytest
 
 from openjd.expr import ExpressionError, ExprProfile, SymbolTable
-from openjd.model._v1 import evaluate_let_bindings
+from openjd.model._v1 import CallerLimits, evaluate_let_bindings
 
 
 class TestEvaluateLetBindings:
@@ -147,3 +147,51 @@ class TestEvaluateLetBindings:
         st = SymbolTable({"Param.X": 10})
         result = evaluate_let_bindings(["y = Param.X + 5"], st, profile=ExprProfile.current())
         assert result["y"].item() == 15
+
+
+class TestEvaluateLetBindingsCallerLimits:
+    """``caller_limits`` is the fourth axis, added with openjd-model 0.9.0
+    (openjd-rs#399); 0.8.0's ``evaluate_let_bindings`` took no budgets at all.
+
+    A binding evaluates a parsed expression directly rather than resolving a format
+    string, so without this argument a caller that lowered
+    ``max_eval_memory_bytes`` / ``max_eval_operations`` for template validation and
+    job creation would leave let bindings evaluating on the spec-recommended
+    defaults. The remaining ``CallerLimits`` fields have no meaning here.
+    """
+
+    def test_operation_budget_is_applied(self) -> None:
+        st = SymbolTable({"Param.X": 10})
+        with pytest.raises(ExpressionError) as excinfo:
+            evaluate_let_bindings(
+                ["a = Param.X + 1"], st, caller_limits=CallerLimits(max_eval_operations=1)
+            )
+        message = str(excinfo.value)
+        assert message.startswith("Error evaluating let binding 'a':")
+        assert "operation count (2) exceeded limit (1)" in message
+
+    def test_memory_budget_is_applied(self) -> None:
+        st = SymbolTable({"Param.X": 10})
+        with pytest.raises(ExpressionError) as excinfo:
+            evaluate_let_bindings(
+                ["a = 'z' * 10000"], st, caller_limits=CallerLimits(max_eval_memory_bytes=16)
+            )
+        assert "memory usage (72 bytes) exceeded limit (16 bytes)" in str(excinfo.value)
+
+    def test_unrelated_limits_do_not_restrict_a_binding(self) -> None:
+        """Negative control: a ``CallerLimits`` carrying only document-shape caps
+        leaves the binding on the spec-recommended defaults, and a binding that
+        exceeds neither default is evaluated."""
+        st = SymbolTable({"Param.X": 10})
+        result = evaluate_let_bindings(
+            ["a = 'z' * 10000"],
+            st,
+            caller_limits=CallerLimits(max_step_count=1, max_template_size=1),
+        )
+        assert len(result["a"].item()) == 10000
+
+    def test_omitting_the_argument_uses_the_defaults(self) -> None:
+        """Negative control for the same expression with no limits at all — the only
+        behaviour available before the bump."""
+        result = evaluate_let_bindings(["a = 'z' * 10000"], SymbolTable({}))
+        assert len(result["a"].item()) == 10000

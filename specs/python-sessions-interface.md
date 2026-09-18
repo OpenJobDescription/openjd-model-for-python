@@ -107,6 +107,7 @@ class Session:
         user: Optional[SessionUser] = None,
         job_template: Optional[JobTemplate] = None,
         environment_templates: Optional[list[EnvironmentTemplate]] = None,
+        caller_limits: Optional[CallerLimits] = None,
     ): ...
 
     # Properties
@@ -163,6 +164,16 @@ class Session:
 
     def cleanup(self) -> None: ...
 ```
+
+`caller_limits` takes the same
+[`CallerLimits`](./python-model-interface.md#modelprofile--modelextension--specificationrevision--callerlimits--validationcontext)
+a submitting service passes to `decode_job_template` and `create_job`.
+The session applies its run-time half — the resolved-value caps and the
+per-expression evaluation budgets — to the values it resolves, and
+ignores the fields with no run-time meaning. This is the enforcement
+boundary for those caps: a worker can run a job that never passed
+through the validating process, so a session that is given no limits
+enforces nothing beyond the spec.
 
 ### SessionUser (stays in Python, passed to Rust)
 
