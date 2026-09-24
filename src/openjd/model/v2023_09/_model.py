@@ -3066,6 +3066,18 @@ STANDARD_AMOUNT_CAPABILITIES: dict[str, Any] = {
 _STANDARD_AMOUNT_CAPABILITIES_NAMES = list(STANDARD_AMOUNT_CAPABILITIES.keys())
 
 
+_CAPABILITY_NAME_MAX_LENGTH = 100
+
+
+def _validate_resolved_capability_name_length(name: str) -> None:
+    """Apply the 100-character limit of §3.3.1.1 / §3.3.2.1 to a resolved
+    capability name. The limit applies after the name's format string has
+    been resolved, so a name that is a format string is checked at job
+    creation."""
+    if len(name) > _CAPABILITY_NAME_MAX_LENGTH:
+        raise ValueError(f"String must be at most {_CAPABILITY_NAME_MAX_LENGTH} characters long")
+
+
 class AmountCapabilityName(FormatString):
     """The name of an amount capability."""
 
@@ -3121,6 +3133,10 @@ class AmountRequirement(OpenJDModel_v2023_09):
     @field_validator("name")
     @classmethod
     def _validate_name(cls, v: str, info: ValidationInfo) -> str:
+        # The name is the resolved <AmountCapabilityName>, so its §3.3.1.1
+        # length limit applies here even when the template's name was a
+        # format string.
+        _validate_resolved_capability_name_length(v)
         validate_amount_capability_name(
             capability_name=v, standard_capabilities=_STANDARD_AMOUNT_CAPABILITIES_NAMES
         )
@@ -3274,6 +3290,10 @@ class AttributeRequirement(OpenJDModel_v2023_09):
     @field_validator("name")
     @classmethod
     def _validate_name(cls, v: str) -> str:
+        # The name is the resolved <AttributeCapabilityName>, so its §3.3.2.1
+        # length limit applies here even when the template's name was a
+        # format string.
+        _validate_resolved_capability_name_length(v)
         validate_attribute_capability_name(
             capability_name=v, standard_capabilities=_STANDARD_ATTRIBUTE_CAPABILITIES_NAMES
         )
@@ -3409,6 +3429,28 @@ class AttributeRequirementTemplate(OpenJDModel_v2023_09):
 class HostRequirements(OpenJDModel_v2023_09):
     amounts: Optional[list[AmountRequirement]] = None
     attributes: Optional[list[AttributeRequirement]] = None
+
+    # §3.3: no two amounts, and no two attributes, may have the same name
+    # after the name format strings have been resolved. The template only
+    # compares the raw names, so two different format strings that resolve
+    # to the same capability are caught here.
+    @field_validator("amounts")
+    @classmethod
+    def _validate_amounts(
+        cls, v: Optional[list[AmountRequirement]]
+    ) -> Optional[list[AmountRequirement]]:
+        if v is None:
+            return v
+        return validate_unique_elements(v, item_value=lambda v: v.name.lower(), property="name")
+
+    @field_validator("attributes")
+    @classmethod
+    def _validate_attributes(
+        cls, v: Optional[list[AttributeRequirement]]
+    ) -> Optional[list[AttributeRequirement]]:
+        if v is None:
+            return v
+        return validate_unique_elements(v, item_value=lambda v: v.name.lower(), property="name")
 
 
 class HostRequirementsTemplate(OpenJDModel_v2023_09):

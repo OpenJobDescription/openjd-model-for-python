@@ -1068,3 +1068,127 @@ class TestCreateJobWithSymbolTables:
             "string",
             "fromQueueEnv",
         )
+
+
+class TestCreateJobResolvedCapabilityNames:
+    """The §3.3.1.1 / §3.3.2.1 capability name constraints and the §3.3
+    uniqueness constraints apply to the names after their format strings have
+    been resolved, so job creation checks the resolved names."""
+
+    @staticmethod
+    def _create_job(host_requirements: dict[str, Any], a: str, b: str) -> None:
+        job_template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "Job",
+                "parameterDefinitions": [
+                    {"name": "A", "type": "STRING"},
+                    {"name": "B", "type": "STRING"},
+                ],
+                "steps": [
+                    {
+                        "name": "Step",
+                        "hostRequirements": host_requirements,
+                        "script": {"actions": {"onRun": {"command": "do something"}}},
+                    }
+                ],
+            },
+        )
+        parameter_values = {
+            "A": ParameterValue(type=ParameterValueType.STRING, value=a),
+            "B": ParameterValue(type=ParameterValueType.STRING, value=b),
+        }
+        create_job(job_template=job_template, job_parameter_values=parameter_values)
+
+    @pytest.mark.parametrize(
+        "host_requirements,a,b,expected_message",
+        [
+            pytest.param(
+                {
+                    "attributes": [
+                        {"name": "{{Param.A}}", "anyOf": ["v"]},
+                        {"name": "{{Param.B}}", "anyOf": ["v"]},
+                    ]
+                },
+                "attr.custom.x",
+                "ATTR.CUSTOM.X",
+                "1 validation errors for JobTemplate\n"
+                "steps[0] -> hostRequirements -> attributes:\n"
+                "\tDuplicate values for name are not allowed. Duplicate values: attr.custom.x",
+                id="attribute names resolve to the same name, case-insensitively",
+            ),
+            pytest.param(
+                {
+                    "amounts": [
+                        {"name": "{{Param.A}}", "min": 1},
+                        {"name": "{{Param.B}}", "min": 1},
+                    ]
+                },
+                "amount.custom.x",
+                "amount.custom.x",
+                "1 validation errors for JobTemplate\n"
+                "steps[0] -> hostRequirements -> amounts:\n"
+                "\tDuplicate values for name are not allowed. Duplicate values: amount.custom.x",
+                id="amount names resolve to the same name",
+            ),
+            pytest.param(
+                {"attributes": [{"name": "{{Param.A}}", "anyOf": ["v"]}]},
+                "attr.custom." + "a" * 89,
+                "unused",
+                "1 validation errors for JobTemplate\n"
+                "steps[0] -> hostRequirements -> attributes[0] -> name:\n"
+                "\tString must be at most 100 characters long",
+                id="attribute name resolves to 101 characters",
+            ),
+            pytest.param(
+                {"amounts": [{"name": "{{Param.A}}", "min": 1}]},
+                "amount.custom." + "a" * 87,
+                "unused",
+                "1 validation errors for JobTemplate\n"
+                "steps[0] -> hostRequirements -> amounts[0] -> name:\n"
+                "\tString must be at most 100 characters long",
+                id="amount name resolves to 101 characters",
+            ),
+        ],
+    )
+    def test_resolved_names_checked(
+        self, host_requirements: dict[str, Any], a: str, b: str, expected_message: str
+    ) -> None:
+        # WHEN
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._create_job(host_requirements, a, b)
+
+        # THEN
+        assert str(excinfo.value) == expected_message
+
+    @pytest.mark.parametrize(
+        "host_requirements,a,b",
+        [
+            pytest.param(
+                {
+                    "attributes": [
+                        {"name": "{{Param.A}}", "anyOf": ["v"]},
+                        {"name": "{{Param.B}}", "anyOf": ["v"]},
+                    ]
+                },
+                "attr.custom.x",
+                "attr.custom.y",
+                id="attribute names resolve to different names",
+            ),
+            pytest.param(
+                {"attributes": [{"name": "{{Param.A}}", "anyOf": ["v"]}]},
+                "attr.custom." + "a" * 88,
+                "unused",
+                id="attribute name resolves to exactly 100 characters",
+            ),
+            pytest.param(
+                {"amounts": [{"name": "{{Param.A}}", "min": 1}]},
+                "amount.custom." + "a" * 86,
+                "unused",
+                id="amount name resolves to exactly 100 characters",
+            ),
+        ],
+    )
+    def test_valid_resolved_names(self, host_requirements: dict[str, Any], a: str, b: str) -> None:
+        # WHEN / THEN (no error)
+        self._create_job(host_requirements, a, b)
