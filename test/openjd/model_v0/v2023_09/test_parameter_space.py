@@ -900,6 +900,22 @@ class TestTaskParameterTypeNameCase:
             self._tmpl(miscased, range_value, chunks, self._extensions_for(canonical, expr=True))
         )
 
+    @pytest.mark.parametrize("canonical, miscased, range_value, chunks", TYPES)
+    def test_with_expr_miscased_param_referenceable(
+        self, canonical: str, miscased: str, range_value: Any, chunks: Any
+    ) -> None:
+        # A non-canonically-cased type name is just as valid under EXPR, so it
+        # must still define Task.Param.F for the
+        # variable-reference prevalidation, which resolves the raw `type`
+        # discriminator before the case fold runs. Regression: the definition
+        # was accepted but every {{ Task.Param.F }} reference was rejected
+        # with "does not exist at this location".
+        template = self._tmpl(
+            miscased, range_value, chunks, self._extensions_for(canonical, expr=True)
+        )
+        template["steps"][0]["script"]["actions"]["onRun"]["args"] = ["{{ Task.Param.F }}"]
+        self._decode(template)
+
     # ── The gate is on EXPR, not on the extension that supplies the type ──
 
     def test_chunk_int_miscased_needs_expr_not_only_task_chunking(self) -> None:

@@ -319,6 +319,21 @@ class TestEnvironmentTemplateParameterTypeNameCase:
         # which is the state an audit found untested.
         self._decode(self._tmpl(miscased))
 
+    @pytest.mark.parametrize("canonical, miscased", TYPES)
+    def test_with_expr_miscased_param_referenceable(self, canonical: str, miscased: str) -> None:
+        # A non-canonically-cased type name is just as valid under EXPR, so it
+        # must still define Param.P for the variable-reference
+        # prevalidation, which resolves the raw `type` discriminator before the
+        # case fold runs. Regression: the definition was accepted but every
+        # {{ Param.P }} reference was rejected with "does not exist at this
+        # location".
+        template = self._tmpl(miscased)
+        template["environment"] = {
+            "name": "E",
+            "script": {"actions": {"onEnter": {"command": "echo", "args": ["{{ Param.P }}"]}}},
+        }
+        self._decode(template)
+
     @pytest.mark.parametrize("type_name", ("\u0131NT", "\u017fTRING", "\ufb02OAT"))
     def test_non_ascii_lookalike_rejected_with_expr(self, type_name: str) -> None:
         # str.upper() folds U+0131 to 'I', U+017F to 'S' and U+FB02 (ﬂ) to 'FL',

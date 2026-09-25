@@ -169,6 +169,49 @@ class TestJobParameterTypeNameCase:
         # Case 4 of 4.
         _decode(_tmpl(self._param(miscased, default)))
 
+    # ── Mis-cased parameters are referenceable ──
+
+    @staticmethod
+    def _referencing_step():
+        return {
+            "name": "S",
+            "script": {
+                "actions": {
+                    "onRun": {"command": "echo", "args": ["{{ Param.P }}", "{{ RawParam.P }}"]}
+                }
+            },
+        }
+
+    @pytest.mark.parametrize("canonical, miscased, default", TYPES)
+    def test_with_expr_miscased_param_referenceable(self, canonical, miscased, default):
+        # A non-canonically-cased type name is just as valid under EXPR, so it
+        # must still define Param.P/RawParam.P for the
+        # variable-reference prevalidation, which resolves the raw `type`
+        # discriminator before the case fold runs. Regression: the parameter
+        # declaration was accepted but every {{ Param.P }} reference was
+        # rejected with "does not exist at this location".
+        template = _tmpl(self._param(miscased, default))
+        template["steps"] = [self._referencing_step()]
+        _decode(template)
+
+    def test_with_expr_miscased_param_type_checked(self):
+        # The reference prevalidation also collects the parameter's EXPR type
+        # through the lowercase spelling: string + int is a type error.
+        template = _tmpl(self._param("string", "hi"))
+        template["steps"] = [
+            {
+                "name": "S",
+                "script": {
+                    "actions": {"onRun": {"command": "echo", "args": ["{{ Param.P + 1 }}"]}}
+                },
+            }
+        ]
+        with pytest.raises(DecodeValidationError) as excinfo:
+            _decode(template)
+        assert "steps[0] -> script -> actions -> onRun -> args[0]" in str(excinfo.value), str(
+            excinfo.value
+        )
+
     # ── The fold is ASCII ──
 
     # str.upper() folds each of these wholly into the type-name alphabet: U+0131
