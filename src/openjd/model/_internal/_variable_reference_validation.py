@@ -260,6 +260,10 @@ def _validate_model_template_variable_references(
     # The errors that we're collecting for this node in the traversal, and will return from the function call.
     errors: list[InitErrorDetails] = []
 
+    expr_enabled = bool(
+        context is not None and getattr(context, "_prevalidation_expr_enabled", False)
+    )
+
     model_origin = typing.get_origin(model)
 
     # Unwrap the Optional types
@@ -345,7 +349,9 @@ def _validate_model_template_variable_references(
 
     # Unwrap a discriminated union to the selected type
     if model_origin is Union and discriminator is not None:
-        unioned_model = _get_model_for_singleton_value(model, value, discriminator)
+        unioned_model = _get_model_for_singleton_value(
+            model, value, discriminator, expr_enabled=expr_enabled
+        )
         if unioned_model is not None:
             return _validate_model_template_variable_references(
                 unioned_model,
@@ -397,10 +403,6 @@ def _validate_model_template_variable_references(
     else:
         # If the node doesn't modify the variable prefix, then symbol_prefix will be the empty string
         symbol_prefix += variable_defs.symbol_prefix
-
-    expr_enabled = bool(
-        context is not None and getattr(context, "_prevalidation_expr_enabled", False)
-    )
 
     # Recursively collect all of the variable definitions at this node and its
     # child nodes. Symbol EXPR types are collected only when the EXPR
@@ -709,8 +711,17 @@ def _validate_let_bindings(
     return errors
 
 
+# Parameter type names are ASCII (RFC 0007 §2). str.upper() is Unicode-aware
+# and folds U+0131 to 'I', which would make 'ıNT' a spelling of 'INT'.
+_ASCII_UPPERCASE = str.maketrans("abcdefghijklmnopqrstuvwxyz", "ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+
 def _get_model_for_singleton_value(
-    model: Any, value: Any, discriminator: Union[str, Discriminator, None] = None
+    model: Any,
+    value: Any,
+    discriminator: Union[str, Discriminator, None] = None,
+    *,
+    expr_enabled: bool = False,
 ) -> Optional[Type]:
     """Given a FieldInfo and the value that we're given for that field, determine
     the actual Model for the value in the event that the FieldInfo may be for
@@ -756,7 +767,20 @@ def _get_model_for_singleton_value(
             raise NotImplementedError(
                 "You have hit an unimplemented code path. Please report this as a bug."
             )
-        if typing.get_args(sub_model_discr_value)[0] == discr_value:
+        literal_value = typing.get_args(sub_model_discr_value)[0]
+        if literal_value == discr_value:
+            return sub_model
+        # RFC 0007 §2: parameter type names are case-insensitive when the EXPR
+        # extension is active. The `_normalize_parameter_type_case` field
+        # validator uppercases the `type` discriminator before pydantic's
+        # union resolution, but this prevalidation traversal runs earlier and
+        # sees the raw values — so match the discriminator case-insensitively
+        # here, or a lowercase-typed parameter defines no Param.* symbols.
+        if (
+            expr_enabled
+            and isinstance(literal_value, str)
+            and literal_value.translate(_ASCII_UPPERCASE) == discr_value.translate(_ASCII_UPPERCASE)
+        ):
             return sub_model
 
     return None
@@ -881,9 +905,13 @@ def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
             )
         return {"__export__": symtab}
 
-    # Unwrap a discriminated union to the selected type
+    # Unwrap a discriminated union to the selected type. `collect_types` is
+    # set exactly when the EXPR extension is active, which also governs the
+    # case-insensitive `type` discriminator matching (RFC 0007 §2).
     if model_origin is Union and discriminator is not None:
-        unioned_model = _get_model_for_singleton_value(model, value, discriminator)
+        unioned_model = _get_model_for_singleton_value(
+            model, value, discriminator, expr_enabled=collect_types
+        )
         if unioned_model is not None:
             return _collect_variable_definitions(
                 unioned_model,
