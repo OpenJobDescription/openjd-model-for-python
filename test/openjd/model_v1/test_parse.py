@@ -1000,9 +1000,9 @@ class TestFormatStringCapabilityNames:
     def test_a_parameter_dependent_name_decodes(
         self, host_requirements: dict[str, Any], expected: str
     ) -> None:
-        """The name reaches the decoded template as its raw text. ``name`` stays a
-        ``str`` on the Python side even though the Rust field is a ``FormatString``,
-        matching v0 where ``AmountCapabilityName`` subclasses a ``str``."""
+        """The name reaches the decoded template as a ``FormatString`` carrying the raw
+        text, matching its ``min`` / ``max`` / ``anyOf`` / ``allOf`` siblings. On 0.9.0
+        it was a ``str``."""
         decoded = decode_job_template(
             template=self._template(host_requirements, parameter_definitions=self._PARAMS)
         )
@@ -1012,7 +1012,7 @@ class TestFormatStringCapabilityNames:
             requirements.amounts if "amounts" in host_requirements else requirements.attributes
         )
         assert entries is not None
-        assert entries[0].name == expected
+        assert entries[0].name.raw() == expected
 
     @pytest.mark.parametrize(
         "name,expected_message",
@@ -1131,7 +1131,7 @@ class TestFormatStringCapabilityNameChecksAtValidation:
         assert requirements is not None
         amounts = requirements.amounts
         assert amounts is not None
-        assert amounts[0].name == "{{ n }}"
+        assert amounts[0].name.raw() == "{{ n }}"
 
     def test_a_partly_static_name_gets_a_length_lower_bound(self) -> None:
         """The literal runs of a name give a guaranteed minimum resolved length, so a

@@ -210,7 +210,8 @@ class TestStepTemplate:
         amts = hr.amounts
         assert amts is not None and len(amts) == 1
         assert isinstance(amts[0], AmountRequirement)
-        assert amts[0].name == "amount.worker.vcpu"
+        assert isinstance(amts[0].name, FormatString)
+        assert amts[0].name.raw() == "amount.worker.vcpu"
         assert isinstance(amts[0].min, FormatString)
         assert amts[0].min.raw() == "4"
         assert amts[0].max.raw() == "8"
@@ -218,7 +219,8 @@ class TestStepTemplate:
         attrs = hr.attributes
         assert attrs is not None and len(attrs) == 2
         assert isinstance(attrs[0], AttributeRequirement)
-        assert attrs[0].name == "attr.worker.os.family"
+        assert isinstance(attrs[0].name, FormatString)
+        assert attrs[0].name.raw() == "attr.worker.os.family"
         assert attrs[0].any_of[0].raw() == "linux"
         assert attrs[0].anyOf[0].raw() == "linux"  # camelCase alias
         assert attrs[1].all_of[0].raw() == "x86_64"
@@ -417,7 +419,7 @@ class TestPickle:
 
     def test_amount_requirement(self):
         ar = AmountRequirement(
-            name="amount.worker.vcpu",
+            name=FormatString("amount.worker.vcpu"),
             min=FormatString("4"),
             max=FormatString("8"),
         )
@@ -428,7 +430,7 @@ class TestPickle:
 
     def test_attribute_requirement(self):
         ar = AttributeRequirement(
-            name="attr.worker.os.family",
+            name=FormatString("attr.worker.os.family"),
             any_of=[FormatString("linux")],
         )
         loaded = pickle.loads(pickle.dumps(ar))
@@ -484,16 +486,16 @@ class TestPickle:
         assert b"TemplateStepDependency" in data
 
 
-class TestCapabilityNameIsAFormatStringUnderneath:
+class TestCapabilityNameIsAFormatString:
     """``template::AmountRequirement::name`` and
     ``template::AttributeRequirement::name`` became ``FormatString`` in openjd-model
-    0.10.0 (openjd-rs#409). The Python-facing ``name`` stays a ``str`` holding the raw
-    template text, mirroring v0; see ``parse_capability_name`` in
-    ``rust-bindings/src/model/template_types.rs`` for why.
+    0.10.0 (openjd-rs#409), and the Python-facing ``name`` follows, matching its
+    ``min`` / ``max`` / ``anyOf`` / ``allOf`` siblings and every other
+    FormatString-typed field on the template types.
 
-    One behaviour change falls out of that adaptation rather than out of upstream: the
-    constructor parses the name, so a malformed format string now raises where 0.9.0
-    stored the text unexamined.
+    On 0.9.0 ``name`` was a ``str`` in both directions. The job-side
+    ``AmountRequirement.name`` / ``AttributeRequirement.name`` are still ``str``: they
+    hold the resolved name.
     """
 
     @pytest.mark.parametrize("cls", [AmountRequirement, AttributeRequirement])
@@ -506,17 +508,27 @@ class TestCapabilityNameIsAFormatStringUnderneath:
             pytest.param("prefix.{{Param.Attr}}.suffix", id="interpolated"),
         ],
     )
-    def test_the_name_round_trips_as_its_raw_text(self, cls: type, name: str) -> None:
-        assert cls(name=name).name == name
-        assert isinstance(cls(name=name).name, str)
+    def test_the_name_is_a_format_string_carrying_the_raw_text(self, cls: type, name: str) -> None:
+        got = cls(name=FormatString(name)).name
+        assert isinstance(got, FormatString)
+        assert got.raw() == name
 
     @pytest.mark.parametrize("cls", [AmountRequirement, AttributeRequirement])
-    def test_a_malformed_format_string_is_rejected(self, cls: type) -> None:
-        """``ExpressionError`` specifically, not merely a ``ValueError`` — the binding
-        routes the parse failure through ``expr_err_to_py`` so it matches every other
-        format-string parse error in the package."""
+    def test_a_plain_str_name_is_refused(self, cls: type) -> None:
+        """The reason this is worth pinning: ``name`` used to accept a ``str`` on 0.9.0,
+        so a caller has to wrap it. Refusing it is what makes the field consistent with
+        its siblings, which have always refused one."""
+        with pytest.raises(TypeError) as exc_info:
+            cls(name="amount.worker.vcpu")
+        assert "not an instance of 'FormatString'" in str(exc_info.value)
+
+    @pytest.mark.parametrize("cls", [AmountRequirement, AttributeRequirement])
+    def test_a_malformed_name_cannot_be_constructed_at_all(self, cls: type) -> None:
+        """Validation now sits in ``FormatString`` rather than in the requirement, so a
+        malformed name is rejected one step earlier than it would have been by a
+        ``str``-typed field that parsed on the way in."""
         with pytest.raises(ExpressionError) as exc_info:
-            cls(name="{{")
+            cls(name=FormatString("{{"))
         assert "Braces mismatch" in str(exc_info.value)
 
     @pytest.mark.parametrize(
@@ -534,16 +546,15 @@ class TestCapabilityNameIsAFormatStringUnderneath:
             ),
         ],
     )
-    def test_repr_still_shows_the_raw_text(self, cls: type, expected: str) -> None:
-        """The repr went through ``{:?}`` on a ``String`` before and goes through
-        ``{:?}`` on ``.raw()`` now, so it must be unchanged. A mutation that formatted
-        the ``FormatString`` itself would print its Debug shape instead."""
-        assert repr(cls(name="{{Param.Attr}}")) == expected
+    def test_repr_shows_the_raw_text(self, cls: type, expected: str) -> None:
+        """``__repr__`` goes through ``.raw()``, matching ``Action``'s treatment of its
+        ``command``. A mutation that formatted the ``FormatString`` itself would print
+        its Debug shape instead."""
+        assert repr(cls(name=FormatString("{{Param.Attr}}"))) == expected
 
     @pytest.mark.parametrize("cls", [AmountRequirement, AttributeRequirement])
     def test_pickle_round_trips_a_format_string_name(self, cls: type) -> None:
-        """``__reduce__`` passes ``name`` back through the constructor, which now
-        parses. Pins that a format-string name survives the round trip rather than
-        raising on reconstruction."""
-        loaded = pickle.loads(pickle.dumps(cls(name="{{Param.Attr}}")))
-        assert loaded.name == "{{Param.Attr}}"
+        """``__reduce__`` passes ``name`` back through the constructor, so it has to hand
+        back a ``FormatString`` rather than the raw text."""
+        loaded = pickle.loads(pickle.dumps(cls(name=FormatString("{{Param.Attr}}"))))
+        assert loaded.name.raw() == "{{Param.Attr}}"

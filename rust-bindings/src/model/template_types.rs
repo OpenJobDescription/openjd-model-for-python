@@ -30,8 +30,6 @@ use openjd_model::template::{
 };
 use openjd_model::types::{EndOfLine, FileType};
 
-use openjd_expr::format_string::FormatString;
-
 use crate::expr::PyFormatString;
 
 // ── Action ──
@@ -965,25 +963,6 @@ impl PyEnvironment {
 
 // ── HostRequirements / AmountRequirement / AttributeRequirement ──
 
-/// Parse a capability `name` into the `FormatString` the template type
-/// now holds (openjd-rs#409).
-///
-/// The Python-facing `name` stays a `str` holding the raw template text,
-/// rather than becoming an `openjd.expr.FormatString` like its `min` / `max`
-/// / `anyOf` / `allOf` siblings. v0 models these as `AmountCapabilityName` /
-/// `AttributeCapabilityName`, both subclasses of v0's `FormatString`, which
-/// subclasses `str` — so exposing a `FormatString` pyclass here would make v0
-/// and v1 diverge where they agree, and `.raw()` is what openjd-rs#409
-/// prescribes for reading these fields. Nothing is lost: the crate's
-/// `Deserialize` parses through `FormatString::new` too.
-///
-/// The capability-name constraints are not applied here. Upstream checks a
-/// name whose value it already knows at template validation, and a resolved
-/// one at job creation.
-fn parse_capability_name(name: &str) -> PyResult<FormatString> {
-    FormatString::new(name).map_err(crate::expr::errors::expr_err_to_py)
-}
-
 #[cfg_attr(feature = "stub-gen", gen_stub_pyclass(module = "openjd._openjd_rs"))]
 #[pyclass(
     module = "openjd.model._v1.template",
@@ -1000,19 +979,25 @@ pub(crate) struct PyAmountRequirement {
 impl PyAmountRequirement {
     #[new]
     #[pyo3(signature = (*, name, min=None, max=None))]
-    fn new(name: &str, min: Option<PyFormatString>, max: Option<PyFormatString>) -> PyResult<Self> {
-        Ok(PyAmountRequirement {
+    fn new(name: PyFormatString, min: Option<PyFormatString>, max: Option<PyFormatString>) -> Self {
+        PyAmountRequirement {
             inner: AmountRequirement {
-                name: parse_capability_name(name)?,
+                name: name.inner,
                 min: min.map(|fs| fs.inner),
                 max: max.map(|fs| fs.inner),
             },
-        })
+        }
     }
 
+    /// `@fmtstring` as of openjd-rs#409: a name may carry expressions, and its
+    /// §3.3.1.1 constraints are checked on the resolved value. Use `.raw()` for
+    /// the template text. The job-side `AmountRequirement.name` is the resolved
+    /// `str`.
     #[getter]
-    fn name(&self) -> &str {
-        self.inner.name.raw()
+    fn name(&self) -> PyFormatString {
+        PyFormatString {
+            inner: self.inner.name.clone(),
+        }
     }
 
     #[getter]
@@ -1075,22 +1060,28 @@ impl PyAttributeRequirement {
     #[new]
     #[pyo3(signature = (*, name, any_of=None, all_of=None))]
     fn new(
-        name: &str,
+        name: PyFormatString,
         any_of: Option<Vec<PyFormatString>>,
         all_of: Option<Vec<PyFormatString>>,
-    ) -> PyResult<Self> {
-        Ok(PyAttributeRequirement {
+    ) -> Self {
+        PyAttributeRequirement {
             inner: AttributeRequirement {
-                name: parse_capability_name(name)?,
+                name: name.inner,
                 any_of: any_of.map(|v| v.into_iter().map(|fs| fs.inner).collect()),
                 all_of: all_of.map(|v| v.into_iter().map(|fs| fs.inner).collect()),
             },
-        })
+        }
     }
 
+    /// `@fmtstring` as of openjd-rs#409: a name may carry expressions, and its
+    /// §3.3.2.1 constraints are checked on the resolved value. Use `.raw()` for
+    /// the template text. The job-side `AttributeRequirement.name` is the
+    /// resolved `str`.
     #[getter]
-    fn name(&self) -> &str {
-        self.inner.name.raw()
+    fn name(&self) -> PyFormatString {
+        PyFormatString {
+            inner: self.inner.name.clone(),
+        }
     }
 
     #[getter]

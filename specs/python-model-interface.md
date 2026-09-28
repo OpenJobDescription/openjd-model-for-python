@@ -795,10 +795,10 @@ cancel.notify_period_in_seconds  # Optional[int]
 Job-time host requirements. Distinct from the template-time
 ``HostRequirements`` / ``AmountRequirement`` / ``AttributeRequirement``
 (see `openjd.model._v1.template`): the template-time variants carry
-unresolved ``FormatString`` values for ``min`` / ``max`` / ``anyOf`` /
-``allOf`` and a raw, possibly-expression-bearing ``name``, while these
-job-time variants carry the post-``create_job`` resolved ``str`` name and the
-resolved ``f64`` (amounts) and ``str`` (attributes) values.
+unresolved ``FormatString`` values for ``name``, ``min`` / ``max`` / ``anyOf``
+/ ``allOf``, while these job-time variants carry the post-``create_job``
+resolved ``str`` name and the resolved ``f64`` (amounts) and ``str``
+(attributes) values.
 
 ```python
 hr = step.host_requirements        # alias: step.hostRequirements
@@ -956,12 +956,12 @@ hr.amounts                      # Optional[list[AmountRequirement]]
 hr.attributes                   # Optional[list[AttributeRequirement]]
 
 amt = hr.amounts[0]
-amt.name                        # str — raw template text, may hold expressions
+amt.name                        # FormatString — raw, may hold expressions
 amt.min                         # Optional[FormatString]
 amt.max                         # Optional[FormatString]
 
 attr = hr.attributes[0]
-attr.name                       # str — raw template text, may hold expressions
+attr.name                       # FormatString — raw, may hold expressions
 attr.any_of                     # Optional[list[FormatString]] (alias: anyOf)
 attr.all_of                     # Optional[list[FormatString]] (alias: allOf)
 ```
@@ -980,15 +980,13 @@ when the name's value becomes known:
 
 A name is resolved at job creation, so only symbols available there are in
 scope for it: `Task.Param.*` in a name is rejected at decode as an undefined
-variable even where the same symbol is valid elsewhere in the step. The
-job-time `AmountRequirement.name` / `AttributeRequirement.name` are the
-resolved `str`.
+variable even where the same symbol is valid elsewhere in the step.
 
-The Python-facing `name` is a `str` holding the raw template text, not an
-`openjd.expr.FormatString`, so it mirrors v0 where `AmountCapabilityName` and
-`AttributeCapabilityName` subclass v0's `FormatString`, itself a `str`
-subclass. Constructing one parses the name, so a malformed format string
-raises `ExpressionError`.
+`name` is an `openjd.expr.FormatString`, like every other FormatString-typed
+field on the template types, so reading the template text needs `.raw()` and
+constructing one needs `FormatString(...)` rather than a bare `str`. On 0.9.0
+it was a `str` in both directions. The job-side `AmountRequirement.name` /
+`AttributeRequirement.name` are still `str`: they hold the resolved name.
 
 ### `StepDependency`
 
@@ -1396,7 +1394,7 @@ from openjd.model._v1.types import ModelExtension, ValidationContext
 template = decode_job_template(template={...}, supported_extensions=["EXPR"])
 
 # 2. Read the template's declared profile back out.
-profile = template.profile        # ModelProfile(revision=v2023_09, extensions=[EXPR])
+profile = template.profile        # ModelProfile(revision=V2023_09, extensions=[EXPR])
 profile.revision                  # SpecificationRevision.v2023_09
 profile.extensions                # [ModelExtension.EXPR]
 profile.has_extension(ModelExtension.EXPR)  # True
