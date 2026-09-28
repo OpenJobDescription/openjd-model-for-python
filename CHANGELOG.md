@@ -1,3 +1,19 @@
+## 0.12.0 (2026-09-28)
+
+
+### BREAKING CHANGES
+* `TemplateAmountRequirement.name` and `TemplateAttributeRequirement.name` in `openjd.model._v1.template` are an `openjd.expr.FormatString` instead of a `str`; read the template text with `.raw()` and construct with `FormatString(...)` (#373) ([`a2b63c1`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/a2b63c1bd65fba4e3a1724addfba726c0bf0f4eb))
+
+### Features
+* Bump the openjd-rs crates for their latest fixes: openjd-expr 0.10.0, openjd-model 0.10.0, openjd-sessions 0.7.1 (#373) ([`a2b63c1`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/a2b63c1bd65fba4e3a1724addfba726c0bf0f4eb))
+* Allow format strings in host requirement capability names, with the capability-name constraints checked on the resolved name at job creation (openjd-rs#409)
+
+### Bug Fixes
+* Report every evaluation error at job creation instead of silently skipping it, so a value-dependent failure such as `{{ 10 // Param.N }}` with `N = 0` fails `create_job` rather than every session that runs the task (openjd-rs#407)
+* resolve parameter type names case-insensitively in reference validation (#372) ([`ff0c08c`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/ff0c08cbb3be578085b0ab7015bfecd92ff8157b))
+* check resolved host requirement capability names at job creation ([`4d7f9b4`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/4d7f9b4710865e5dc0e844180f6a8ea41024a22c))
+
+
 ## 0.11.14 (2026-09-18)
 
 
