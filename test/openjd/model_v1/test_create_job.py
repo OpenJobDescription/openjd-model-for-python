@@ -4,10 +4,11 @@ import os
 import tempfile
 import pytest
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from openjd.model._v1 import (
     CallerLimits,
+    ModelProfile,
     create_job,
     decode_environment_template,
     decode_job_template,
@@ -17,6 +18,7 @@ from openjd.model._v1 import (
 from openjd.model._v1.types import (
     JobParameterType,
     JobParameterValue,
+    ModelExtension,
     ValidationContext,
 )
 from openjd.model._v1.errors import (
@@ -2134,3 +2136,419 @@ class TestJobEnvironmentResolvedValueCapsAtJobCreation:
         args = on_enter.args
         assert args is not None
         assert [str(a) for a in args] == ["{{Param.P}}"]
+
+
+class TestFormatStringCapabilityNamesAtJobCreation:
+    """Companion to ``test_parse.py::TestFormatStringCapabilityNames``. A capability
+    ``name`` that depends on a job parameter is only fully known at job creation, so
+    that is where openjd-model 0.10.0 (openjd-rs#409) applies the §3.3.1.1 /
+    §3.3.2.1 constraints and the case-insensitive uniqueness rule.
+
+    Every rejection here was unreachable on 0.9.0: the template did not decode. Each
+    rule is exercised on both ``amounts`` and ``attributes``, which upstream checks
+    through separate call sites with separate messages.
+    """
+
+    _KINDS = [pytest.param("amounts", id="amounts"), pytest.param("attributes", id="attributes")]
+
+    @staticmethod
+    def _entry(kind: str, name: str) -> dict[str, Any]:
+        if kind == "amounts":
+            return {"name": name, "min": "1"}
+        return {"name": name, "anyOf": ["linux"]}
+
+    @classmethod
+    def _template(cls, kind: str, *names: str) -> dict[str, Any]:
+        return {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "parameterDefinitions": [{"name": "Attr", "type": "STRING"}],
+            "steps": [
+                {
+                    "name": "S",
+                    "hostRequirements": {kind: [cls._entry(kind, n) for n in names]},
+                    "script": {"actions": {"onRun": {"command": "echo"}}},
+                }
+            ],
+        }
+
+    @classmethod
+    def _created_names(cls, kind: str, value: str, *names: str) -> list[str]:
+        decoded = decode_job_template(template=cls._template(kind, *names))
+        job = create_job(job_template=decoded, job_parameter_values={"Attr": value})
+        requirements = job.steps[0].host_requirements
+        assert requirements is not None
+        entries = requirements.amounts if kind == "amounts" else requirements.attributes
+        assert entries is not None
+        return [e.name for e in entries]
+
+    @classmethod
+    def _created_name(cls, kind: str, value: str) -> str:
+        return cls._created_names(kind, value, "{{Param.Attr}}")[0]
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param("custom.x", id="customer-defined"),
+            pytest.param("vendor:custom.x", id="vendor-prefixed"),
+        ],
+    )
+    def test_the_resolved_name_is_written_onto_the_job(self, kind: str, value: str) -> None:
+        prefix = "amount" if kind == "amounts" else "attr"
+        name = value.replace("custom.x", f"{prefix}.custom.x")
+        assert self._created_name(kind, name) == name
+
+    @pytest.mark.parametrize(
+        "kind,name",
+        [
+            pytest.param("amounts", "amount.worker.vcpu", id="amounts"),
+            pytest.param("attributes", "attr.worker.os.family", id="attributes"),
+        ],
+    )
+    def test_a_resolved_standard_capability_name_is_accepted(self, kind: str, name: str) -> None:
+        assert self._created_name(kind, name) == name
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    @pytest.mark.parametrize(
+        "value,expected_message",
+        [
+            pytest.param(
+                "not a name",
+                "name 'not a name' does not match capability name pattern.",
+                id="pattern",
+            ),
+            pytest.param("PREFIX.worker.made_up", "reserved scope 'worker'", id="reserved scope"),
+        ],
+    )
+    def test_a_resolved_name_violating_its_constraints_is_rejected(
+        self, kind: str, value: str, expected_message: str
+    ) -> None:
+        prefix = "amount" if kind == "amounts" else "attr"
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._created_name(kind, value.replace("PREFIX", prefix))
+        assert expected_message in str(excinfo.value)
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_a_resolved_name_over_100_characters_is_rejected(self, kind: str) -> None:
+        prefix = "amount.custom." if kind == "amounts" else "attr.custom."
+        name = prefix + "a" * (101 - len(prefix))
+        assert len(name) == 101
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._created_name(kind, name)
+        assert "exceeds 100 characters." in str(excinfo.value)
+
+    @pytest.mark.parametrize("kind", _KINDS)
+    def test_the_100_character_boundary_is_accepted(self, kind: str) -> None:
+        """Negative control for the length case above: exactly 100 characters passes,
+        so the check is a boundary and not an unconditional rejection."""
+        prefix = "amount.custom." if kind == "amounts" else "attr.custom."
+        name = prefix + "a" * (100 - len(prefix))
+        assert len(name) == 100
+        assert self._created_name(kind, name) == name
+
+    @pytest.mark.parametrize(
+        "kind,literal,value",
+        [
+            pytest.param("amounts", "amount.custom.x", "AMOUNT.CUSTOM.X", id="amounts"),
+            pytest.param("attributes", "attr.custom.x", "ATTR.CUSTOM.X", id="attributes"),
+        ],
+    )
+    def test_a_resolved_name_colliding_with_a_literal_is_rejected(
+        self, kind: str, literal: str, value: str
+    ) -> None:
+        """Uniqueness is case-insensitive and spans both spellings, so a format string
+        cannot smuggle in a duplicate of a literal sibling."""
+        singular = "amount" if kind == "amounts" else "attribute"
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._created_names(kind, value, literal, "{{Param.Attr}}")
+        assert f"duplicate {singular} name '{value}'." in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "kind,literal,value",
+        [
+            pytest.param("amounts", "amount.custom.x", "amount.custom.y", id="amounts"),
+            pytest.param("attributes", "attr.custom.x", "attr.custom.y", id="attributes"),
+        ],
+    )
+    def test_two_distinct_resolved_names_are_accepted(
+        self, kind: str, literal: str, value: str
+    ) -> None:
+        """Negative control for the collision case: the uniqueness check compares the
+        resolved names, so a distinct resolution is fine."""
+        assert self._created_names(kind, value, literal, "{{Param.Attr}}") == [literal, value]
+
+    @pytest.mark.parametrize(
+        "any_of,expected_message",
+        [
+            pytest.param(
+                ["plan9"], "value 'plan9' is not valid for attr.worker.os.family.", id="rejected"
+            ),
+            pytest.param(["linux"], None, id="accepted"),
+        ],
+    )
+    def test_the_resolved_name_identifies_a_standard_attribute_for_its_value_checks(
+        self, any_of: list[str], expected_message: Optional[str]
+    ) -> None:
+        """Whether a capability is standard — and therefore which values are legal —
+        is decided by the *resolved* name. At decode the name was unknown, so no value
+        check could attach; this is the stage that supplies one."""
+        template = self._template("attributes", "{{Param.Attr}}")
+        template["steps"][0]["hostRequirements"]["attributes"][0]["anyOf"] = any_of
+        decoded = decode_job_template(template=template)
+        if expected_message is None:
+            job = create_job(
+                job_template=decoded, job_parameter_values={"Attr": "attr.worker.os.family"}
+            )
+            assert job.name == "T"
+            return
+        with pytest.raises(ModelValidationError) as excinfo:
+            create_job(job_template=decoded, job_parameter_values={"Attr": "attr.worker.os.family"})
+        assert expected_message in str(excinfo.value)
+
+
+class TestCreateJobContextExtensionContract:
+    """openjd-model 0.10.0 (openjd-rs#407) requires ``create_job``'s context to cover
+    every extension the template declares. On 0.9.0 passing a context that stripped
+    ``EXPR`` created the job, and the resolved-value checks silently skipped every
+    evaluation error as possibly-a-context-artifact.
+
+    ``create_job`` without ``validation_context`` derives the context from the
+    template, so the default path cannot violate the contract.
+    """
+
+    _TEMPLATE: dict[str, Any] = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "T",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+    }
+
+    @classmethod
+    def _decoded(cls) -> Any:
+        return decode_job_template(template=cls._TEMPLATE, supported_extensions=["EXPR"])
+
+    def test_the_default_context_satisfies_the_contract(self) -> None:
+        assert create_job(job_template=self._decoded(), job_parameter_values={}).name == "T"
+
+    def test_a_context_derived_from_the_template_satisfies_the_contract(self) -> None:
+        decoded = self._decoded()
+        job = create_job(
+            job_template=decoded,
+            job_parameter_values={},
+            validation_context=ValidationContext(decoded.profile),
+        )
+        assert job.name == "T"
+
+    def test_a_context_that_strips_a_declared_extension_is_rejected(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            create_job(
+                job_template=self._decoded(),
+                job_parameter_values={},
+                validation_context=ValidationContext(ModelProfile(extensions=[])),
+            )
+        message = str(excinfo.value)
+        assert "every extension the template declares" in message
+        assert "missing EXPR" in message
+
+    def test_a_context_enabling_more_than_the_template_declares_is_accepted(self) -> None:
+        """Cover, not equality: the contract is that the context is a superset."""
+        job = create_job(
+            job_template=self._decoded(),
+            job_parameter_values={},
+            validation_context=ValidationContext(
+                ModelProfile(extensions=[ModelExtension.EXPR, ModelExtension.TASK_CHUNKING])
+            ),
+        )
+        assert job.name == "T"
+
+
+class TestValueDependentEvaluationErrorAtJobCreation:
+    """With the context contract enforced (openjd-rs#407), every evaluation error at
+    job creation is a real defect, so the lenient policy that skipped them is gone.
+    On 0.9.0 the failing case below created a job and the failure surfaced on every
+    worker that ran the task instead.
+    """
+
+    _TEMPLATE: dict[str, Any] = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "T",
+        "parameterDefinitions": [{"name": "N", "type": "INT"}],
+        "steps": [
+            {
+                "name": "S",
+                "script": {
+                    "actions": {"onRun": {"command": "echo", "args": ["{{ 10 // Param.N }}"]}}
+                },
+            }
+        ],
+    }
+
+    @classmethod
+    def _create(cls, divisor: int) -> Any:
+        return create_job(
+            job_template=decode_job_template(template=cls._TEMPLATE, supported_extensions=["EXPR"]),
+            job_parameter_values={"N": divisor},
+        )
+
+    def test_a_healthy_value_creates_the_job(self) -> None:
+        """Negative control, and it pins that the check reads the resolved value
+        without rewriting the field: the argument stays a format string on the job,
+        because task parameters resolve in the session."""
+        job = self._create(2)
+        args = job.steps[0].script.actions.onRun.args
+        assert args is not None
+        assert [str(a) for a in args] == ["{{ 10 // Param.N }}"]
+
+    def test_a_value_dependent_error_fails_job_creation(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._create(0)
+        message = str(excinfo.value)
+        assert "Division by zero" in message
+        assert "steps[0] -> script -> actions -> onRun -> args[0]" in message
+
+
+class TestEvaluationBudgetsInsideUnresolvedConditionals:
+    """openjd-rs#407 stopped the evaluator absorbing *budget* errors raised inside a
+    branch of a conditional whose test is unresolved. The budget is spent in this
+    evaluation whichever branch run time takes, so a caller who lowered
+    ``max_eval_operations`` had it silently stop applying — this is the idiomatic
+    construction for a worker-resolved test, so the bypass was reachable.
+
+    The expression-level pins live in
+    ``test/openjd/expr/test_unresolved_eval.py``; this class covers the path through
+    ``create_job``, where the budget arrives on a ``CallerLimits``.
+    """
+
+    _TEMPLATE: dict[str, Any] = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "T",
+        "parameterDefinitions": [{"name": "N", "type": "INT"}],
+        "steps": [
+            {
+                "name": "S",
+                "script": {
+                    "actions": {
+                        "onRun": {
+                            "command": "echo",
+                            "args": ["{{ 'A' * Param.N if Session.HasPathMappingRules else 'B' }}"],
+                        }
+                    }
+                },
+            }
+        ],
+    }
+
+    @classmethod
+    def _create(cls, max_eval_operations: int) -> Any:
+        decoded = decode_job_template(template=cls._TEMPLATE, supported_extensions=["EXPR"])
+        return create_job(
+            job_template=decoded,
+            job_parameter_values={"N": 100_000},
+            validation_context=ValidationContext(
+                decoded.profile,
+                caller_limits=CallerLimits(max_eval_operations=max_eval_operations),
+            ),
+        )
+
+    def test_a_lowered_operation_budget_is_enforced_inside_the_conditional(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._create(5)
+        message = str(excinfo.value)
+        assert "operation count" in message
+        assert "exceeded limit (5)" in message
+
+    def test_a_budget_the_expression_fits_within_creates_the_job(self) -> None:
+        """Negative control: the same template and the same parameter value, so the
+        rejection above is the budget and not the construction."""
+        assert self._create(1_000_000).name == "T"
+
+
+class TestUnresolvedFilterComprehensionAtJobCreation:
+    """The reviewer's repro from openjd-rs#407. Job creation evaluates under a symbol
+    state no other stage sees — ``Param.*`` concrete, ``Task.*`` / ``Session.*``
+    unresolved — so it is the only stage where this comprehension has a concrete
+    iterable and an unresolved filter.
+
+    This test does **not** discriminate 0.9.0 from 0.10.0: it creates a job on both,
+    for different reasons. On 0.9.0 the comprehension raised and the lenient error
+    policy silently skipped it; on 0.10.0 it raises nothing. It is here because the two
+    halves of that release have to hold *together* — the strict policy of openjd-rs#407
+    without its companion listcomp fix rejects this template, which is what upstream
+    found in review. The discriminating pins are in
+    ``test/openjd/expr/test_unresolved_eval.py::TestConcreteIterableUnresolvedFilter``.
+    """
+
+    _TEMPLATE: dict[str, Any] = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "T",
+        "parameterDefinitions": [{"name": "Files", "type": "STRING"}],
+        "steps": [
+            {
+                "name": "S",
+                "parameterSpace": {
+                    "taskParameterDefinitions": [{"name": "Skip", "type": "STRING", "range": ["b"]}]
+                },
+                "script": {
+                    "actions": {
+                        "onRun": {
+                            "command": "echo",
+                            "args": [
+                                "{{ [f for f in Param.Files.split(',') if f != Task.Param.Skip] }}"
+                            ],
+                        }
+                    }
+                },
+            }
+        ],
+    }
+
+    def test_the_template_creates_a_job(self) -> None:
+        decoded = decode_job_template(template=self._TEMPLATE, supported_extensions=["EXPR"])
+        job = create_job(job_template=decoded, job_parameter_values={"Files": "a,b,c"})
+        args = job.steps[0].script.actions.onRun.args
+        assert args is not None
+        assert [str(a) for a in args] == [
+            "{{ [f for f in Param.Files.split(',') if f != Task.Param.Skip] }}"
+        ]
+
+
+class TestValidationIsIndependentOfTheHostPathFormat:
+    """openjd-rs#407 also made every stage that evaluates outside host context do so
+    under ``PathFormat::Posix``. ``create_job`` already built its symbol tables that
+    way, but its resolved-value re-checks and template validation's pass 8 evaluated
+    under the *host* format — so a PATH value flowing from a ``let`` binding into an
+    argument drew ``Path format mismatch`` on Windows, masked until the strict error
+    policy exposed it as 11 conformance failures.
+
+    On a POSIX host the host format *is* POSIX, so this assertion is a no-op here and
+    carries its weight only on the Windows CI lane. It is the only change in this bump
+    whose effect is platform-dependent.
+    """
+
+    def test_a_path_from_a_let_binding_reaches_an_argument(self) -> None:
+        decoded = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["EXPR"],
+                "name": "T",
+                "parameterDefinitions": [{"name": "P", "type": "PATH"}],
+                "steps": [
+                    {
+                        "name": "S",
+                        "let": ["p = RawParam.P"],
+                        "script": {
+                            "actions": {"onRun": {"command": "echo", "args": ["{{ string(p) }}"]}}
+                        },
+                    }
+                ],
+            },
+            supported_extensions=["EXPR"],
+        )
+        job = create_job(job_template=decoded, job_parameter_values={"P": "/tmp/x"})
+        args = job.steps[0].script.actions.onRun.args
+        assert args is not None
+        assert [str(a) for a in args] == ["{{ string(p) }}"]

@@ -17,7 +17,7 @@ import pickle
 
 import pytest
 
-from openjd.expr import FormatString
+from openjd.expr import ExpressionError, FormatString
 from openjd.model._v1 import decode_environment_template, decode_job_template
 from openjd.model._v1.template import (
     Action,
@@ -482,3 +482,68 @@ class TestPickle:
         # `TemplateStepDependency` (with `module = ...template`).
         assert b"openjd.model._v1.template" in data
         assert b"TemplateStepDependency" in data
+
+
+class TestCapabilityNameIsAFormatStringUnderneath:
+    """``template::AmountRequirement::name`` and
+    ``template::AttributeRequirement::name`` became ``FormatString`` in openjd-model
+    0.10.0 (openjd-rs#409). The Python-facing ``name`` stays a ``str`` holding the raw
+    template text, mirroring v0; see ``parse_capability_name`` in
+    ``rust-bindings/src/model/template_types.rs`` for why.
+
+    One behaviour change falls out of that adaptation rather than out of upstream: the
+    constructor parses the name, so a malformed format string now raises where 0.9.0
+    stored the text unexamined.
+    """
+
+    @pytest.mark.parametrize("cls", [AmountRequirement, AttributeRequirement])
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("amount.worker.vcpu", id="literal"),
+            pytest.param("{{Param.Attr}}", id="parameter reference"),
+            pytest.param("{{ 'amount.custom.x' }}", id="static expression"),
+            pytest.param("prefix.{{Param.Attr}}.suffix", id="interpolated"),
+        ],
+    )
+    def test_the_name_round_trips_as_its_raw_text(self, cls: type, name: str) -> None:
+        assert cls(name=name).name == name
+        assert isinstance(cls(name=name).name, str)
+
+    @pytest.mark.parametrize("cls", [AmountRequirement, AttributeRequirement])
+    def test_a_malformed_format_string_is_rejected(self, cls: type) -> None:
+        """``ExpressionError`` specifically, not merely a ``ValueError`` — the binding
+        routes the parse failure through ``expr_err_to_py`` so it matches every other
+        format-string parse error in the package."""
+        with pytest.raises(ExpressionError) as exc_info:
+            cls(name="{{")
+        assert "Braces mismatch" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "cls,expected",
+        [
+            pytest.param(
+                AmountRequirement,
+                'AmountRequirement(name="{{Param.Attr}}")',
+                id="TemplateAmountRequirement",
+            ),
+            pytest.param(
+                AttributeRequirement,
+                'AttributeRequirement(name="{{Param.Attr}}")',
+                id="TemplateAttributeRequirement",
+            ),
+        ],
+    )
+    def test_repr_still_shows_the_raw_text(self, cls: type, expected: str) -> None:
+        """The repr went through ``{:?}`` on a ``String`` before and goes through
+        ``{:?}`` on ``.raw()`` now, so it must be unchanged. A mutation that formatted
+        the ``FormatString`` itself would print its Debug shape instead."""
+        assert repr(cls(name="{{Param.Attr}}")) == expected
+
+    @pytest.mark.parametrize("cls", [AmountRequirement, AttributeRequirement])
+    def test_pickle_round_trips_a_format_string_name(self, cls: type) -> None:
+        """``__reduce__`` passes ``name`` back through the constructor, which now
+        parses. Pins that a format-string name survives the round trip rather than
+        raising on reconstruction."""
+        loaded = pickle.loads(pickle.dumps(cls(name="{{Param.Attr}}")))
+        assert loaded.name == "{{Param.Attr}}"
