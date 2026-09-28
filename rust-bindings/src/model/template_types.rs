@@ -979,19 +979,25 @@ pub(crate) struct PyAmountRequirement {
 impl PyAmountRequirement {
     #[new]
     #[pyo3(signature = (*, name, min=None, max=None))]
-    fn new(name: String, min: Option<PyFormatString>, max: Option<PyFormatString>) -> Self {
+    fn new(name: PyFormatString, min: Option<PyFormatString>, max: Option<PyFormatString>) -> Self {
         PyAmountRequirement {
             inner: AmountRequirement {
-                name,
+                name: name.inner,
                 min: min.map(|fs| fs.inner),
                 max: max.map(|fs| fs.inner),
             },
         }
     }
 
+    /// `@fmtstring` as of openjd-rs#409: a name may carry expressions, and its
+    /// §3.3.1.1 constraints are checked on the resolved value. Use `.raw()` for
+    /// the template text. The job-side `AmountRequirement.name` is the resolved
+    /// `str`.
     #[getter]
-    fn name(&self) -> &str {
-        &self.inner.name
+    fn name(&self) -> PyFormatString {
+        PyFormatString {
+            inner: self.inner.name.clone(),
+        }
     }
 
     #[getter]
@@ -1011,7 +1017,7 @@ impl PyAmountRequirement {
     }
 
     fn __repr__(&self) -> String {
-        format!("AmountRequirement(name={:?})", self.inner.name)
+        format!("AmountRequirement(name={:?})", self.inner.name.raw())
     }
 
     #[allow(clippy::type_complexity)]
@@ -1054,22 +1060,28 @@ impl PyAttributeRequirement {
     #[new]
     #[pyo3(signature = (*, name, any_of=None, all_of=None))]
     fn new(
-        name: String,
+        name: PyFormatString,
         any_of: Option<Vec<PyFormatString>>,
         all_of: Option<Vec<PyFormatString>>,
     ) -> Self {
         PyAttributeRequirement {
             inner: AttributeRequirement {
-                name,
+                name: name.inner,
                 any_of: any_of.map(|v| v.into_iter().map(|fs| fs.inner).collect()),
                 all_of: all_of.map(|v| v.into_iter().map(|fs| fs.inner).collect()),
             },
         }
     }
 
+    /// `@fmtstring` as of openjd-rs#409: a name may carry expressions, and its
+    /// §3.3.2.1 constraints are checked on the resolved value. Use `.raw()` for
+    /// the template text. The job-side `AttributeRequirement.name` is the
+    /// resolved `str`.
     #[getter]
-    fn name(&self) -> &str {
-        &self.inner.name
+    fn name(&self) -> PyFormatString {
+        PyFormatString {
+            inner: self.inner.name.clone(),
+        }
     }
 
     #[getter]
@@ -1103,7 +1115,7 @@ impl PyAttributeRequirement {
     }
 
     fn __repr__(&self) -> String {
-        format!("AttributeRequirement(name={:?})", self.inner.name)
+        format!("AttributeRequirement(name={:?})", self.inner.name.raw())
     }
 
     #[allow(clippy::type_complexity)]

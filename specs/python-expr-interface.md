@@ -255,6 +255,27 @@ never raises (Python convention). This makes unresolved values
 safe to inspect in debuggers and tracebacks while still failing
 loudly anywhere a real value is expected.
 
+**How an unresolved operand propagates.** Three rules are worth stating,
+because each decides whether an expression errors or concludes unresolved,
+and all three changed in openjd-expr 0.10.0 (openjd-rs#407):
+
+* A conditional whose test is unresolved evaluates both branches. A *value*
+  error in one branch is absorbed — run time may select the healthy one — but
+  a memory or operation *budget* exceedance propagates, because the budget was
+  spent in this evaluation whichever branch run time takes.
+* `and` / `or` behave the same way for operands after the first unresolved
+  one: value errors are suppressed for the same short-circuit reason, budget
+  exceedances are not.
+* A list comprehension whose filter evaluates unresolved concludes
+  `unresolved[list[T]]` rather than erroring, whether the iterable is
+  unresolved or concrete. Per-element inclusion is undecidable, so the
+  elements accumulated so far are abandoned. `T` is the body's type derived
+  under an *unresolved* loop variable, so evaluating the body on an element the
+  run-time filter may exclude cannot raise a spurious value error:
+  `[10 // x for x in [0, 2] if x > N]` with `N` unresolved is
+  `unresolved[list[int]]`, not a division-by-zero. A filter whose type can
+  never be a boolean is still an error.
+
 ### `SymbolTable`
 
 Hierarchical key-value store providing variable bindings for expression

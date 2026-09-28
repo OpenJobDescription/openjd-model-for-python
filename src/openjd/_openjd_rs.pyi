@@ -2772,7 +2772,14 @@ class TemplateAction:
 @typing.final
 class TemplateAmountRequirement:
     @property
-    def name(self) -> builtins.str: ...
+    def name(self) -> FormatString:
+        r"""
+        `@fmtstring` as of openjd-rs#409: a name may carry expressions, and its
+        §3.3.1.1 constraints are checked on the resolved value. Use `.raw()` for
+        the template text. The job-side `AmountRequirement.name` is the resolved
+        `str`.
+        """
+
     @property
     def min(self) -> typing.Optional[FormatString]: ...
     @property
@@ -2780,7 +2787,7 @@ class TemplateAmountRequirement:
     def __new__(
         cls,
         *,
-        name: builtins.str,
+        name: FormatString,
         min: typing.Optional[FormatString] = None,
         max: typing.Optional[FormatString] = None,
     ) -> TemplateAmountRequirement: ...
@@ -2790,7 +2797,14 @@ class TemplateAmountRequirement:
 @typing.final
 class TemplateAttributeRequirement:
     @property
-    def name(self) -> builtins.str: ...
+    def name(self) -> FormatString:
+        r"""
+        `@fmtstring` as of openjd-rs#409: a name may carry expressions, and its
+        §3.3.2.1 constraints are checked on the resolved value. Use `.raw()` for
+        the template text. The job-side `AttributeRequirement.name` is the
+        resolved `str`.
+        """
+
     @property
     def any_of(self) -> typing.Optional[builtins.list[FormatString]]: ...
     @property
@@ -2802,7 +2816,7 @@ class TemplateAttributeRequirement:
     def __new__(
         cls,
         *,
-        name: builtins.str,
+        name: FormatString,
         any_of: typing.Optional[typing.Sequence[FormatString]] = None,
         all_of: typing.Optional[typing.Sequence[FormatString]] = None,
     ) -> TemplateAttributeRequirement: ...

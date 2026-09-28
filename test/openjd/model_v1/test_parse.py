@@ -943,3 +943,282 @@ class TestMaxTemplateSizeReachesTheParser(object):
             supported_extensions=[],
             caller_limits=CallerLimits(max_template_size=10),
         )
+
+
+class TestFormatStringCapabilityNames:
+    """A host requirement capability ``name`` is ``@fmtstring`` as of openjd-model
+    0.10.0 (openjd-rs#409, tracking openjd-specifications#189). On 0.9.0 every case
+    below that decodes now was rejected with
+    ``name '{{Param.Attr}}' does not match capability name pattern.`` — the pattern
+    was applied to the raw template text.
+
+    Template validation checks a name whose value it already knows: a literal, or a
+    format string that is fully static. A name that depends on a job parameter is
+    validated as a format string (symbol availability, the 100-character lower
+    bound) and has its capability-name constraints checked at job creation instead;
+    see ``test_create_job.py::TestFormatStringCapabilityNamesAtJobCreation``.
+    """
+
+    _PARAMS = [{"name": "Attr", "type": "STRING"}]
+
+    @staticmethod
+    def _template(
+        host_requirements: dict[str, Any],
+        *,
+        parameter_definitions: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        template: dict[str, Any] = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "steps": [
+                {
+                    "name": "S",
+                    "hostRequirements": host_requirements,
+                    "script": {"actions": {"onRun": {"command": "echo"}}},
+                }
+            ],
+        }
+        if parameter_definitions is not None:
+            template["parameterDefinitions"] = parameter_definitions
+        return template
+
+    @pytest.mark.parametrize(
+        "host_requirements,expected",
+        [
+            pytest.param(
+                {"amounts": [{"name": "{{Param.Attr}}", "min": "1"}]},
+                "{{Param.Attr}}",
+                id="amount name",
+            ),
+            pytest.param(
+                {"attributes": [{"name": "{{Param.Attr}}", "anyOf": ["linux"]}]},
+                "{{Param.Attr}}",
+                id="attribute name",
+            ),
+        ],
+    )
+    def test_a_parameter_dependent_name_decodes(
+        self, host_requirements: dict[str, Any], expected: str
+    ) -> None:
+        """The name reaches the decoded template as a ``FormatString`` carrying the raw
+        text, matching its ``min`` / ``max`` / ``anyOf`` / ``allOf`` siblings. On 0.9.0
+        it was a ``str``."""
+        decoded = decode_job_template(
+            template=self._template(host_requirements, parameter_definitions=self._PARAMS)
+        )
+        requirements = decoded.steps[0].host_requirements
+        assert requirements is not None
+        entries = (
+            requirements.amounts if "amounts" in host_requirements else requirements.attributes
+        )
+        assert entries is not None
+        assert entries[0].name.raw() == expected
+
+    @pytest.mark.parametrize(
+        "name,expected_message",
+        [
+            pytest.param(
+                "bogus.name",
+                "name 'bogus.name' does not match capability name pattern.",
+                id="literal, unchanged from 0.9.0",
+            ),
+            pytest.param(
+                "{{ 'bogus.static' }}",
+                "name 'bogus.static' does not match capability name pattern.",
+                id="fully static, checked on the resolved text",
+            ),
+            pytest.param(
+                "{{ 'amount.worker.made_up' }}",
+                "reserved",
+                id="fully static, reserved scope",
+            ),
+        ],
+    )
+    def test_a_name_whose_value_is_known_is_checked_at_validation(
+        self, name: str, expected_message: str
+    ) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=self._template({"amounts": [{"name": name, "min": "1"}]}))
+        assert expected_message in str(excinfo.value)
+
+    def test_an_undefined_parameter_in_a_name_is_reported_as_an_expression_error(self) -> None:
+        """0.9.0 reported this as a capability-name pattern violation, because it never
+        parsed the name. It is now an expression error naming the symbol."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=self._template({"amounts": [{"name": "{{Param.Nope}}", "min": "1"}]})
+            )
+        message = str(excinfo.value)
+        assert "Undefined variable: 'Param.Nope'" in message
+        assert "amounts[0] -> name" in message
+
+
+class TestFormatStringCapabilityNameChecksAtValidation:
+    """The checks openjd-rs#409 added at template validation for a capability name
+    whose value is fully known. None existed on 0.9.0: the pattern was applied to the
+    raw text and nothing else about a format-string name was examined.
+
+    Companion to ``TestFormatStringCapabilityNames`` above, which covers the decode
+    acceptance and the pattern check, and to
+    ``test_create_job.py::TestFormatStringCapabilityNamesAtJobCreation``, which covers
+    the same rules on a resolved name.
+    """
+
+    @staticmethod
+    def _step(host_requirements: dict[str, Any], **extras: Any) -> dict[str, Any]:
+        step: dict[str, Any] = {
+            "name": "S",
+            "hostRequirements": host_requirements,
+            "script": {"actions": {"onRun": {"command": "echo"}}},
+        }
+        step.update(extras)
+        return step
+
+    @classmethod
+    def _decode(
+        cls,
+        host_requirements: dict[str, Any],
+        *,
+        parameter_definitions: Optional[list[dict[str, Any]]] = None,
+        extensions: Optional[list[str]] = None,
+        **step_extras: Any,
+    ) -> Any:
+        template: dict[str, Any] = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "steps": [cls._step(host_requirements, **step_extras)],
+        }
+        if parameter_definitions is not None:
+            template["parameterDefinitions"] = parameter_definitions
+        if extensions is not None:
+            template["extensions"] = extensions
+        return decode_job_template(
+            template=template, supported_extensions=extensions if extensions else []
+        )
+
+    @pytest.mark.parametrize(
+        "name,expected_message",
+        [
+            pytest.param(
+                "{{ '' }}",
+                "name '' does not match capability name pattern.",
+                id="empty",
+            ),
+            pytest.param(
+                "{{ 'amount.custom.' + 'a' * 87 }}",
+                "exceeds 100 characters.",
+                id="101 characters",
+            ),
+        ],
+    )
+    def test_a_fully_static_name_is_length_and_pattern_checked(
+        self, name: str, expected_message: str
+    ) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._decode({"amounts": [{"name": name, "min": "1"}]})
+        assert expected_message in str(excinfo.value)
+
+    def test_a_name_built_only_from_let_bindings_with_literal_values_is_static(self) -> None:
+        """A ``let`` binding with a literal value makes the name fully known, so it is
+        checked at validation rather than deferred. This one is valid, so it decodes and
+        keeps its raw text."""
+        decoded = self._decode(
+            {"amounts": [{"name": "{{ n }}", "min": "1"}]},
+            extensions=["EXPR"],
+            let=["n = 'amount.custom.x'"],
+        )
+        requirements = decoded.steps[0].host_requirements
+        assert requirements is not None
+        amounts = requirements.amounts
+        assert amounts is not None
+        assert amounts[0].name.raw() == "{{ n }}"
+
+    def test_a_partly_static_name_gets_a_length_lower_bound(self) -> None:
+        """The literal runs of a name give a guaranteed minimum resolved length, so a
+        name that cannot possibly fit in 100 characters is rejected before its
+        parameter is bound. A distinct message from the exact-length one above."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._decode(
+                {"amounts": [{"name": "amount.custom." + "a" * 95 + "{{Param.Attr}}", "min": "1"}]},
+                parameter_definitions=[{"name": "Attr", "type": "STRING"}],
+            )
+        assert "resolves to at least 109 characters, exceeding the maximum of 100." in str(
+            excinfo.value
+        )
+
+    def test_a_static_name_duplicating_a_literal_sibling_is_rejected(self) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._decode(
+                {
+                    "amounts": [
+                        {"name": "amount.custom.x", "min": "1"},
+                        {"name": "{{ 'amount.custom.x' }}", "min": "1"},
+                    ]
+                }
+            )
+        assert "duplicate amount name 'amount.custom.x'." in str(excinfo.value)
+
+    def test_a_duplicate_is_reported_once(self) -> None:
+        """Uniqueness is now checked in a pass that also sees literal names, so a
+        literal duplicate must not be reported by both the old and the new check."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._decode(
+                {
+                    "amounts": [
+                        {"name": "amount.custom.x", "min": "1"},
+                        {"name": "amount.custom.x", "min": "1"},
+                    ]
+                }
+            )
+        assert "1 validation error for JobTemplate" in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "entry,expected_message",
+        [
+            pytest.param(
+                {"name": "{{ 'attr.worker.os.family' }}", "anyOf": ["plan9"]},
+                "value 'plan9' is not valid for attr.worker.os.family.",
+                id="standard-capability value",
+            ),
+            pytest.param(
+                {"name": "{{ 'attr.worker.os.family' }}", "allOf": ["linux", "macos"]},
+                "single-valued attribute cannot have more than 1 element.",
+                id="single-valued allOf",
+            ),
+        ],
+    )
+    def test_a_static_standard_attribute_name_drives_its_value_checks(
+        self, entry: dict[str, Any], expected_message: str
+    ) -> None:
+        """Resolving the name is what identifies the capability as standard, so the
+        value rules attach to the resolved name, not the raw text."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._decode({"attributes": [entry]})
+        assert expected_message in str(excinfo.value)
+
+    def test_a_name_using_a_symbol_unavailable_at_job_creation_is_rejected(self) -> None:
+        """A name is resolved at job creation, where task parameters are not yet bound,
+        so ``Task.Param.*`` is not in scope for it however valid it is elsewhere in the
+        step."""
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._decode(
+                {"amounts": [{"name": "{{Task.Param.F}}", "min": "1"}]},
+                parameterSpace={
+                    "taskParameterDefinitions": [{"name": "F", "type": "STRING", "range": ["a"]}]
+                },
+            )
+        assert "Undefined variable: 'Task.Param.F'" in str(excinfo.value)
+
+    def test_a_parameter_dependent_duplicate_is_deferred_not_rejected(self) -> None:
+        """Negative control for the uniqueness check, and the deferral it rests on: two
+        names that *may* collide once resolved must still decode, because validation
+        cannot know. ``test_create_job.py`` pins that the collision is caught there."""
+        assert self._decode(
+            {
+                "amounts": [
+                    {"name": "amount.custom.x", "min": "1"},
+                    {"name": "{{Param.Attr}}", "min": "1"},
+                ]
+            },
+            parameter_definitions=[{"name": "Attr", "type": "STRING"}],
+        )

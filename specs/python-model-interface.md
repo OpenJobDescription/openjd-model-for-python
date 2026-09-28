@@ -795,9 +795,10 @@ cancel.notify_period_in_seconds  # Optional[int]
 Job-time host requirements. Distinct from the template-time
 ``HostRequirements`` / ``AmountRequirement`` / ``AttributeRequirement``
 (see `openjd.model._v1.template`): the template-time variants carry
-unresolved ``FormatString`` values for ``min`` / ``max`` / ``anyOf`` /
-``allOf``, while these job-time variants carry the post-``create_job``
-resolved ``f64`` (amounts) and ``str`` (attributes) values.
+unresolved ``FormatString`` values for ``name``, ``min`` / ``max`` / ``anyOf``
+/ ``allOf``, while these job-time variants carry the post-``create_job``
+resolved ``str`` name and the resolved ``f64`` (amounts) and ``str``
+(attributes) values.
 
 ```python
 hr = step.host_requirements        # alias: step.hostRequirements
@@ -955,15 +956,37 @@ hr.amounts                      # Optional[list[AmountRequirement]]
 hr.attributes                   # Optional[list[AttributeRequirement]]
 
 amt = hr.amounts[0]
-amt.name                        # str
+amt.name                        # FormatString — raw, may hold expressions
 amt.min                         # Optional[FormatString]
 amt.max                         # Optional[FormatString]
 
 attr = hr.attributes[0]
-attr.name                       # str
+attr.name                       # FormatString — raw, may hold expressions
 attr.any_of                     # Optional[list[FormatString]] (alias: anyOf)
 attr.all_of                     # Optional[list[FormatString]] (alias: allOf)
 ```
+
+`name` is `@fmtstring` (§3.3.1, §3.3.2): `"{{Param.FleetAttribute}}"` is a
+valid template-time name, and the §3.3.1.1 / §3.3.2.1 capability-name
+constraints apply to the *resolved* name. Which stage applies them depends on
+when the name's value becomes known:
+
+| Name | Checked at | Applied |
+|---|---|---|
+| literal | decode | pattern, length, reserved scopes, uniqueness, standard-capability values |
+| fully static — `{{ 'attr.custom.x' }}`, or built only from `let` bindings with literal values | decode | the same set, against the resolved text |
+| partly static — `"amount.custom.<95 chars>{{Param.X}}"` | decode | the length *lower bound*: `resolves to at least 109 characters, exceeding the maximum of 100.` |
+| parameter-dependent | `create_job` | pattern, length, reserved scopes, case-insensitive uniqueness within `amounts` and within `attributes`, and the standard-capability value rules the resolved name selects |
+
+A name is resolved at job creation, so only symbols available there are in
+scope for it: `Task.Param.*` in a name is rejected at decode as an undefined
+variable even where the same symbol is valid elsewhere in the step.
+
+`name` is an `openjd.expr.FormatString`, like every other FormatString-typed
+field on the template types, so reading the template text needs `.raw()` and
+constructing one needs `FormatString(...)` rather than a bare `str`. On 0.9.0
+it was a `str` in both directions. The job-side `AmountRequirement.name` /
+`AttributeRequirement.name` are still `str`: they hold the resolved name.
 
 ### `StepDependency`
 
@@ -1372,25 +1395,49 @@ template = decode_job_template(template={...}, supported_extensions=["EXPR"])
 
 # 2. Read the template's declared profile back out.
 profile = template.profile        # ModelProfile(revision=V2023_09, extensions=[EXPR])
-profile.revision                  # SpecificationRevision.V2023_09
+profile.revision                  # SpecificationRevision.v2023_09
 profile.extensions                # [ModelExtension.EXPR]
 profile.has_extension(ModelExtension.EXPR)  # True
 
-# 3. Build it manually if needed (e.g. when validating against a different
-#    policy than the template declared).
+# 3. Build it manually if needed (e.g. to enable an extension the template
+#    does not declare, or to carry caller limits).
 manual = ModelProfile(extensions=[ModelExtension.EXPR, ModelExtension.TASK_CHUNKING])
-ModelProfile.from_strings(SpecificationRevision.V2023_09, ["EXPR"])
+ModelProfile.from_strings(SpecificationRevision.v2023_09, ["EXPR"])
 
-# 4. Pass to create_job through a ValidationContext if you want to
-#    override the template's default validation context.
+# 4. Pass to create_job through a ValidationContext, usually to attach
+#    caller limits. The context must COVER the template: same revision, and
+#    every extension the template declares (enabling more is fine).
 limits = CallerLimits(max_step_count=100, max_task_count=10_000)
-ctx = ValidationContext(profile, caller_limits=limits)
+ctx = ValidationContext(template.profile, caller_limits=limits)
 job = create_job(
     job_template=template,
     job_parameter_values={...},
     validation_context=ctx,   # optional; defaults to template.default_validation_context()
 )
+```
 
+A context that strips an extension the template declares raises
+`ModelValidationError`:
+`create_job requires a context enabling every extension the template declares:
+missing EXPR.` An application that does not support an extension rejects the
+template at decode, via `supported_extensions`, rather than at job creation.
+Deriving the context from `template.profile` — or omitting it — satisfies the
+contract by construction.
+
+Because the context contract makes every evaluation error at job creation a
+real defect, `create_job` reports them all. A value-dependent failure —
+`args: ["{{ 10 // Param.N }}"]` with `N = 0` — fails `create_job` rather than
+every session that runs the task. Lowered `max_eval_memory_bytes` /
+`max_eval_operations` are enforced inside a conditional whose test only a
+worker can resolve, which is the idiomatic construction for one.
+
+Validation outcomes do not depend on the host operating system. Every stage
+that evaluates outside host context — template validation and every resolution
+`create_job` performs, including its resolved-value re-checks — evaluates
+under the POSIX path format, so a PATH value flowing through a `let` binding
+into an argument validates identically on Windows and POSIX.
+
+```python
 # 5. Bridge to the expression engine.
 from openjd.expr import HostContext
 expr_profile = profile.to_expr_profile(HostContext.unresolved())

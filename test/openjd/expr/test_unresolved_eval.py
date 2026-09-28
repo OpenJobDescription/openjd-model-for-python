@@ -723,3 +723,188 @@ class TestUnknownBoolOpErrorSuppression:
             ]
         )
         assert str(exc_info.value) == expected
+
+
+class TestConcreteIterableUnresolvedFilter:
+    """openjd-expr 0.10.0 (landed with openjd-rs#407) made ``eval_listcomp``'s two
+    paths agree: when a filter condition evaluates unresolved on a *concrete*
+    element, per-element inclusion is undecidable, so the comprehension as a whole
+    concludes ``unresolved[list[T]]``.
+
+    On 0.9.0 every concrete-iterable case below raised
+    ``List comprehension filter must be a boolean, got unresolved[bool]``; the
+    unresolved-iterable control already behaved this way. That made a template like
+    ``args: ["{{ [f for f in Param.Files.split(',') if f != Task.Param.Skip] }}"]``
+    pass ``openjd check`` (where the iterable is unresolved, the tolerant path), run
+    cleanly on a worker (where everything is bound), and fail only at job creation —
+    the one stage where the iterable is concrete and the filter is not.
+
+    Extends ``TestUnknownListComprehensions`` above, which covers the
+    unresolved-iterable path.
+    """
+
+    def test_concrete_list_iterable(self) -> None:
+        values = SymbolTable({"Skip": ExprValue.unresolved(ExprType("string"))})
+        result = evaluate_expression("[f for f in 'a,b,c'.split(',') if f != Skip]", values=values)
+        assert result.type == ExprType("unresolved[list[string]]")
+
+    def test_concrete_range_iterable(self) -> None:
+        values = SymbolTable({"N": ExprValue.unresolved(ExprType("int"))})
+        result = evaluate_expression("[x * 2 for x in range(3) if x > N]", values=values)
+        assert result.type == ExprType("unresolved[list[int]]")
+
+    def test_the_body_type_is_derived_under_an_unresolved_loop_variable(self) -> None:
+        """``10 // 0`` would raise if the body were evaluated on the concrete element
+        ``0``, which the run-time filter may exclude. Deriving the body type with the
+        loop variable unresolved avoids that spurious error, so this case is the one
+        that distinguishes "type the body once, abstractly" from "evaluate the body on
+        each element"."""
+        values = SymbolTable({"N": ExprValue.unresolved(ExprType("int"))})
+        result = evaluate_expression("[10 // x for x in [0, 2] if x > N]", values=values)
+        assert result.type == ExprType("unresolved[list[int]]")
+
+    def test_a_filter_short_circuiting_before_the_unresolved_term(self) -> None:
+        """For ``x = 0`` the filter is decided concretely (``0 > 0`` is false); for
+        ``x = 1`` it is unresolved. The elements already accumulated are abandoned
+        rather than returned as a partial list."""
+        values = SymbolTable({"B": ExprValue.unresolved(ExprType("bool"))})
+        result = evaluate_expression("[x for x in [0, 1, 2] if x > 0 and B]", values=values)
+        assert result.type == ExprType("unresolved[list[int]]")
+
+    def test_a_filter_that_can_never_be_a_boolean_is_still_rejected(self) -> None:
+        """Negative control. The change is not "stop checking the filter type" — a
+        filter whose type can never be a boolean errors on both paths. A mutation that
+        widened the fix to swallow this would pass every case above."""
+        values = SymbolTable({"Skip": ExprValue.unresolved(ExprType("string"))})
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression("[x for x in [1, 2] if Skip]", values=values)
+        assert "List comprehension filter must be a boolean, got string" in str(exc_info.value)
+
+    def test_the_unresolved_iterable_path_still_concludes_unresolved(self) -> None:
+        """Negative control for the shared helper: the path that already behaved this
+        way on 0.9.0 still does, so the two paths agree rather than having swapped."""
+        values = SymbolTable(
+            {"X": ExprValue.unresolved("list[int]"), "N": ExprValue.unresolved("int")}
+        )
+        result = evaluate_expression("[x for x in X if x > N]", values=values)
+        assert result.type == ExprType("unresolved[list[int]]")
+
+
+class TestBoolOpBudgetErrorsPropagate:
+    """``eval_boolop`` suppressed *every* error in an operand after an unresolved one,
+    including budget exceedances — the same bypass ``eval_ifexp`` had. openjd-expr
+    0.10.0 (with openjd-rs#407) propagates budget errors and keeps suppressing value
+    errors, since a run-time short-circuit may skip them.
+
+    On 0.9.0 both budget cases returned ``unresolved[bool]``, so a caller who lowered
+    a budget had it silently stop applying. Not named in the openjd-rs 0.10.0
+    changelog.
+    """
+
+    _OPERATORS = [pytest.param("and", id="and"), pytest.param("or", id="or")]
+
+    @staticmethod
+    def _values() -> SymbolTable:
+        return SymbolTable({"Flag": ExprValue.unresolved(ExprType("bool"))})
+
+    @staticmethod
+    def _expr(operator: str) -> str:
+        return f"Flag {operator} len('A' * 100000) > 0"
+
+    @pytest.mark.parametrize("operator", _OPERATORS)
+    def test_an_operation_budget_exceedance_propagates(self, operator: str) -> None:
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression(self._expr(operator), values=self._values(), operation_limit=5)
+        assert "operation count" in str(exc_info.value)
+        assert "exceeded limit (5)" in str(exc_info.value)
+
+    @pytest.mark.parametrize("operator", _OPERATORS)
+    def test_a_memory_budget_exceedance_propagates(self, operator: str) -> None:
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression(self._expr(operator), values=self._values(), memory_limit=1024)
+        assert "memory usage" in str(exc_info.value)
+        assert "exceeded limit (1024 bytes)" in str(exc_info.value)
+
+    @pytest.mark.parametrize("operator", _OPERATORS)
+    def test_a_budget_error_inside_a_nested_conditional_still_propagates(
+        self, operator: str
+    ) -> None:
+        """Both exemptions have to compose. The budget error is raised inside an
+        ``ifexp`` whose test is unresolved, which is itself an operand after an
+        unresolved ``and`` / ``or`` operand, so it passes through two absorption
+        points."""
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression(
+                f"Flag {operator} ('A' * 100000 if Flag else 'B') != ''",
+                values=self._values(),
+                operation_limit=5,
+            )
+        assert "exceeded limit (5)" in str(exc_info.value)
+
+    @pytest.mark.parametrize("operator", _OPERATORS)
+    def test_a_value_error_after_the_unresolved_operand_is_still_suppressed(
+        self, operator: str
+    ) -> None:
+        """Negative control: the change is budget-specific. A value error stays
+        absorbed because a run-time short-circuit may never reach it — the behaviour
+        ``TestUnknownBoolOpErrorSuppression`` above covers in general."""
+        result = evaluate_expression(f"Flag {operator} (10 // 0) > 0", values=self._values())
+        assert result.type == ExprType("unresolved[bool]")
+
+    @pytest.mark.parametrize("operator", _OPERATORS)
+    def test_the_expression_fits_within_a_generous_budget(self, operator: str) -> None:
+        """Negative control for the budget cases: the same expression under the default
+        budgets does not raise, so the rejections above are the budget and not the
+        construction."""
+        assert evaluate_expression(self._expr(operator), values=self._values()) is not None
+
+
+class TestIfExpBudgetErrorsPropagate:
+    """The ``eval_ifexp`` half of the same openjd-rs#407 change, and the half its
+    description does name. ``{{ 'A' * Param.N if Session.HasPathMappingRules else 'B' }}``
+    with a large ``N`` was accepted on 0.9.0 under any budget.
+
+    Extends ``TestUnknownIfElse`` above, which covers the value-error absorption this
+    leaves in place.
+    """
+
+    _BRANCHES = [
+        pytest.param("'A' * 100000 if Flag else 'B'", id="if branch"),
+        pytest.param("'B' if Flag else 'A' * 100000", id="else branch"),
+    ]
+
+    @staticmethod
+    def _values() -> SymbolTable:
+        return SymbolTable({"Flag": ExprValue.unresolved(ExprType("bool"))})
+
+    @pytest.mark.parametrize("expression", _BRANCHES)
+    def test_an_operation_budget_exceedance_propagates(self, expression: str) -> None:
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression(expression, values=self._values(), operation_limit=5)
+        assert "operation count" in str(exc_info.value)
+        assert "exceeded limit (5)" in str(exc_info.value)
+
+    @pytest.mark.parametrize("expression", _BRANCHES)
+    def test_a_memory_budget_exceedance_propagates(self, expression: str) -> None:
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression(expression, values=self._values(), memory_limit=1024)
+        assert "memory usage" in str(exc_info.value)
+        assert "exceeded limit (1024 bytes)" in str(exc_info.value)
+
+    @pytest.mark.parametrize(
+        "expression",
+        [
+            pytest.param("10 // 0 if Flag else 1", id="if branch"),
+            pytest.param("1 if Flag else 10 // 0", id="else branch"),
+        ],
+    )
+    def test_a_value_error_in_a_branch_is_still_absorbed(self, expression: str) -> None:
+        """Negative control: run time may select the healthy branch, so a value error
+        in one branch does not fail the evaluation."""
+        result = evaluate_expression(expression, values=self._values())
+        assert result.type == ExprType("unresolved[int]")
+
+    @pytest.mark.parametrize("expression", _BRANCHES)
+    def test_the_expression_fits_within_a_generous_budget(self, expression: str) -> None:
+        result = evaluate_expression(expression, values=self._values())
+        assert result.type == ExprType("unresolved[string]")
