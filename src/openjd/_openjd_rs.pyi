@@ -2253,7 +2253,7 @@ class Session:
 @typing.final
 class SimpleAction:
     @property
-    def script(self) -> builtins.str: ...
+    def script(self) -> FormatString: ...
     @property
     def let_bindings(self) -> typing.Optional[builtins.list[builtins.str]]: ...
     @property
@@ -2267,7 +2267,7 @@ class SimpleAction:
     def __new__(
         cls,
         *,
-        script: builtins.str,
+        script: FormatString,
         let_bindings: typing.Optional[typing.Sequence[builtins.str]] = None,
         args: typing.Optional[typing.Sequence[FormatString]] = None,
         timeout: typing.Optional[FormatString] = None,

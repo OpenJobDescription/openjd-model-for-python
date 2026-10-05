@@ -133,3 +133,22 @@ class TestSlicingWithExpressions:
     def test_slice_on_split_result(self):
         result = evaluate_expression('"a;b;c;d;e".split(";")[:3]')
         assert str(result) == '["a", "b", "c"]'
+
+
+class TestExtremeSliceSteps:
+    """openjd-expr 0.10.1 (openjd-rs#418) computes slice indices lazily and saturates
+    on an extreme step. 0.10.0 overflowed computing the indices: a debug build of the
+    extension raised ``PanicException: attempt to add with overflow``. A build without
+    overflow checks returned the right answer on 0.10.0 (measured in a ``hatch env
+    create`` install), so this catches a regression only in a debug build, and CI's
+    build may not be one."""
+
+    @pytest.mark.parametrize(
+        "expr,expected",
+        [
+            pytest.param("'hello'[1::9223372036854775807]", "e", id="string"),
+            pytest.param("[1, 2, 3][1::9223372036854775807]", [2], id="list"),
+        ],
+    )
+    def test_the_maximum_step_takes_one_element(self, expr: str, expected: object) -> None:
+        assert evaluate_expression(expr).item() == expected

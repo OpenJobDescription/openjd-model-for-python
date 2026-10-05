@@ -272,7 +272,8 @@ class TestStepTemplate:
         s = t.steps[0]
         assert s.script is None
         assert isinstance(s.bash, SimpleAction)
-        assert s.bash.script == "echo hi"
+        assert isinstance(s.bash.script, FormatString)
+        assert s.bash.script.raw() == "echo hi"
         assert s.python is None
 
 
@@ -558,3 +559,42 @@ class TestCapabilityNameIsAFormatString:
         back a ``FormatString`` rather than the raw text."""
         loaded = pickle.loads(pickle.dumps(cls(name=FormatString("{{Param.Attr}}"))))
         assert loaded.name.raw() == "{{Param.Attr}}"
+
+
+class TestSimpleActionScriptIsAFormatString:
+    """``template::SimpleAction::script`` became a ``FormatString`` in openjd-model
+    0.11.0 (openjd-rs#419), and the Python-facing ``script`` follows, matching its
+    ``args`` / ``timeout`` siblings and the ``EmbeddedFile.data`` it desugars to.
+    On 0.10.0 ``script`` was a ``str`` in both directions.
+    """
+
+    @pytest.mark.parametrize(
+        "script",
+        [
+            pytest.param("echo hi", id="literal"),
+            pytest.param("echo {{Param.X}}", id="parameter reference"),
+        ],
+    )
+    def test_the_script_is_a_format_string_carrying_the_raw_text(self, script: str) -> None:
+        got = SimpleAction(script=FormatString(script)).script
+        assert isinstance(got, FormatString)
+        assert got.raw() == script
+
+    def test_a_plain_str_script_is_refused(self) -> None:
+        """``script`` accepted a ``str`` on 0.10.0, so a caller now has to wrap it."""
+        with pytest.raises(TypeError) as exc_info:
+            SimpleAction(script="echo hi")  # type: ignore[arg-type]
+        assert "not an instance of 'FormatString'" in str(exc_info.value)
+
+    def test_pickle_round_trips_a_format_string_script(self) -> None:
+        """``__reduce__`` passes ``script`` back through the constructor, so it has to
+        hand back a ``FormatString`` rather than the raw text."""
+        sa = SimpleAction(
+            script=FormatString("echo {{Param.X}}"),
+            args=[FormatString("--flag")],
+            timeout=FormatString("60"),
+        )
+        loaded = pickle.loads(pickle.dumps(sa))
+        assert loaded.script.raw() == "echo {{Param.X}}"
+        assert [a.raw() for a in loaded.args] == ["--flag"]
+        assert loaded.timeout.raw() == "60"

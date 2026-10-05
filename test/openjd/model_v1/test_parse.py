@@ -1222,3 +1222,434 @@ class TestFormatStringCapabilityNameChecksAtValidation:
             },
             parameter_definitions=[{"name": "Attr", "type": "STRING"}],
         )
+
+
+_FB1 = ["FEATURE_BUNDLE_1"]
+_FB1_EXPR = ["EXPR", "FEATURE_BUNDLE_1"]
+_PARAM_N = [{"name": "N", "type": "INT", "default": 1}]
+
+
+def _undefined(path: str, span: str, name: str) -> str:
+    """One undefined-variable diagnostic, with the caret line the binding renders."""
+    dot = name.rindex(".")
+    caret = "~" * (dot + 1) + "^" + "~" * (len(name) - dot - 2)
+    return (
+        f"{path}:\n\tFailed to parse interpolation expression at {span}. "
+        f"Undefined variable: '{name}'.\n  {name}\n  {caret}"
+    )
+
+
+class TestSimpleActionValidation:
+    """openjd-model 0.11.0 (openjd-rs#419) validates a ``bash`` / ``python`` / ``cmd`` /
+    ``powershell`` / ``node`` step at decode, through the same checks as the
+    ``StepScript`` it desugars to, and reports errors at the authored path
+    (``steps[0] -> bash -> args[1]``) rather than the desugared one.
+
+    On 0.10.0 most rejections here decoded successfully and surfaced only at
+    ``create_job``, at the desugared path ``steps[0] -> script -> ...`` with argument
+    indices shifted by the synthesized script-file argument. Empty ``script``,
+    ``args: []``, ``timeout: 0``, ``let`` or a complex expression without EXPR, control
+    characters, and undefined variables in ``timeout`` / ``cancelation`` were never
+    rejected. ``let`` duplicates and comprehension shadowing were rejected at
+    ``steps[0][2]`` / ``steps[0]``, two simple actions with one error rather than three,
+    and a non-ASCII step name raised ``PanicException`` at decode. Sugar beside
+    ``script`` is the one case 0.10.0 already reported identically.
+
+    Expectations are copied from upstream ``tests/test_simple_action_validation.rs``.
+    v0 (``openjd.model.decode_job_template``) rejects every rejected case here too, and
+    at the same field path in all but six; it words every message differently.
+    """
+
+    @staticmethod
+    def _template(
+        steps: list[dict[str, Any]],
+        extensions: list[str],
+        params: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        template: dict[str, Any] = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": extensions,
+            "name": "Test",
+            "steps": steps,
+        }
+        if params:
+            template["parameterDefinitions"] = params
+        return template
+
+    @pytest.mark.parametrize(
+        "step,extensions,params,expected",
+        [
+            pytest.param(
+                {"bash": {"script": "echo {{Param.Nope}}"}},
+                _FB1,
+                None,
+                _undefined("steps[0] -> bash -> script", "[5, 19]", "Param.Nope"),
+                id="script undefined variable",
+            ),
+            pytest.param(
+                {"bash": {"script": "echo", "args": ["ok", "{{Param.Nope}}"]}},
+                _FB1,
+                None,
+                _undefined("steps[0] -> bash -> args[1]", "[0, 14]", "Param.Nope"),
+                id="bash args[1] not shifted by the synthesized file argument",
+            ),
+            pytest.param(
+                {"cmd": {"script": "echo", "args": ["{{Param.Nope}}"]}},
+                _FB1,
+                None,
+                _undefined("steps[0] -> cmd -> args[0]", "[0, 14]", "Param.Nope"),
+                id="cmd args[0]",
+            ),
+            pytest.param(
+                {"powershell": {"script": "echo", "args": ["{{Param.Nope}}"]}},
+                _FB1,
+                None,
+                _undefined("steps[0] -> powershell -> args[0]", "[0, 14]", "Param.Nope"),
+                id="powershell args[0] not shifted by its two synthesized arguments",
+            ),
+            pytest.param(
+                {"node": {"script": "x", "args": ["a", "b", "{{Param.Nope}}"]}},
+                _FB1,
+                None,
+                _undefined("steps[0] -> node -> args[2]", "[0, 14]", "Param.Nope"),
+                id="node args[2]",
+            ),
+            pytest.param(
+                {
+                    "python": {
+                        "script": "print(1)",
+                        "timeout": "{{Param.T}}",
+                        "cancelation": {
+                            "mode": "NOTIFY_THEN_TERMINATE",
+                            "notifyPeriodInSeconds": "{{Param.N}}",
+                        },
+                    }
+                },
+                _FB1,
+                None,
+                "2 validation errors for JobTemplate\n"
+                + _undefined("steps[0] -> python -> timeout", "[0, 11]", "Param.T")
+                + "\n"
+                + _undefined("steps[0] -> python -> cancelation", "[0, 11]", "Param.N"),
+                id="timeout and notifyPeriodInSeconds",
+            ),
+            pytest.param(
+                {"node": {"script": "x", "timeout": "{{Session.WorkingDirectory}}"}},
+                _FB1,
+                None,
+                _undefined("steps[0] -> node -> timeout", "[0, 28]", "Session.WorkingDirectory"),
+                id="timeout cannot see session scope",
+            ),
+            pytest.param(
+                {"bash": {"let": ["x = 1"], "script": "echo"}},
+                _FB1,
+                None,
+                "steps[0] -> bash -> let:\n\t'let' requires the EXPR extension.",
+                id="let without EXPR",
+            ),
+            pytest.param(
+                {"bash": {"let": ["x = 1", "y = 2", "x = 3"], "script": "echo"}},
+                _FB1_EXPR,
+                None,
+                "steps[0] -> bash -> let[2]:\n\tduplicate name 'x'.",
+                id="duplicate let name",
+            ),
+            pytest.param(
+                {
+                    "bash": {
+                        "let": ["x = 1"],
+                        "script": "echo {{ [x for x in [1, 2]] }}",
+                        "args": ["{{ [x for x in [1, 2]] }}"],
+                    }
+                },
+                _FB1_EXPR,
+                None,
+                "2 validation errors for JobTemplate\n"
+                "steps[0] -> bash -> args[0]:\n\tList comprehension variable 'x' shadows a let binding\n"
+                "steps[0] -> bash -> script:\n\tList comprehension variable 'x' shadows a let binding",
+                id="comprehension shadows let",
+            ),
+            pytest.param(
+                {"bash": {"script": "echo", "args": ["{{Param.N + 1}}"]}},
+                _FB1,
+                _PARAM_N,
+                "steps[0] -> bash -> args[0]:\n\tcomplex expressions require the EXPR extension.",
+                id="complex expression without EXPR",
+            ),
+            pytest.param(
+                {"python": {"script": "x", "args": ["{{Task.File.Other}}"]}},
+                _FB1,
+                None,
+                "2 validation errors for JobTemplate\n"
+                "steps[0] -> python:\n\treferences undefined embedded file 'Other'.\n"
+                + _undefined("steps[0] -> python -> args[0]", "[0, 19]", "Task.File.Other"),
+                id="undefined embedded file",
+            ),
+            pytest.param(
+                {"script": {"actions": {"onRun": {"command": "echo"}}}, "node": {"script": "x"}},
+                _FB1,
+                None,
+                "steps[0] -> node:\n\tcannot have both 'node' and 'script'.",
+                id="sugar and script together",
+            ),
+            pytest.param(
+                {"bash": {"script": "{{Param.A}}"}, "python": {"script": "{{Param.B}}"}},
+                _FB1,
+                None,
+                "3 validation errors for JobTemplate\n"
+                "steps[0]:\n\tcannot have more than one simple action field.\n"
+                + _undefined("steps[0] -> python -> script", "[0, 11]", "Param.B")
+                + "\n"
+                + _undefined("steps[0] -> bash -> script", "[0, 11]", "Param.A"),
+                id="two simple actions are each still validated",
+            ),
+            pytest.param(
+                {"bash": {"script": ""}},
+                _FB1,
+                None,
+                "steps[0] -> bash -> script:\n\tmust not be empty.",
+                id="empty script",
+            ),
+            pytest.param(
+                {"bash": {"script": "echo", "args": []}},
+                _FB1,
+                None,
+                "steps[0] -> bash -> args:\n\tif provided, must not be empty.",
+                id="empty args",
+            ),
+            pytest.param(
+                {
+                    "bash": {
+                        "script": "echo",
+                        "timeout": 0,
+                        "cancelation": {
+                            "mode": "NOTIFY_THEN_TERMINATE",
+                            "notifyPeriodInSeconds": 700,
+                        },
+                    }
+                },
+                _FB1,
+                None,
+                "2 validation errors for JobTemplate\n"
+                "steps[0] -> bash:\n\tnotifyPeriodInSeconds must not exceed 600.\n"
+                "steps[0] -> bash:\n\ttimeout must be > 0.",
+                id="timeout 0 and notify period 700",
+            ),
+            pytest.param(
+                {"powershell": {"script": "echo", "args": ["fine", "bad\u0007"]}},
+                _FB1,
+                None,
+                "steps[0] -> powershell -> args[1]:\n\tcontains control characters.",
+                id="control character in an argument",
+            ),
+        ],
+    )
+    def test_rejected_at_the_authored_path(
+        self,
+        step: dict[str, Any],
+        extensions: list[str],
+        params: Optional[list[dict[str, Any]]],
+        expected: str,
+    ) -> None:
+        template = self._template([{"name": "S", **step}], extensions, params)
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(template=template, supported_extensions=_FB1_EXPR)
+        if not expected.startswith(("2 ", "3 ")):
+            expected = "1 validation error for JobTemplate\n" + expected
+        assert str(excinfo.value) == expected
+
+    @pytest.mark.parametrize(
+        "step,extensions,limits,expected",
+        [
+            pytest.param(
+                {"bash": {"script": "A" * 500}},
+                _FB1,
+                CallerLimits(max_resolved_data_len=100),
+                "steps[0] -> bash -> script:\n\tis 500 characters, exceeding the maximum of 100.",
+                id="literal script over the data cap",
+            ),
+            pytest.param(
+                {"bash": {"script": "{{Session.WorkingDirectory}}/{{ 'A' * 200 }}"}},
+                _FB1_EXPR,
+                CallerLimits(max_resolved_data_len=100),
+                "steps[0] -> bash -> script:\n\t"
+                "resolves to at least 201 characters, exceeding the maximum of 100.",
+                id="script lower bound over the data cap",
+            ),
+            pytest.param(
+                {"cmd": {"script": "echo", "args": ["short", "B" * 300]}},
+                _FB1,
+                CallerLimits(max_resolved_arg_len=100),
+                "steps[0] -> cmd -> args[1]:\n\tis 300 characters, exceeding the maximum of 100.",
+                id="literal argument over the arg cap",
+            ),
+        ],
+    )
+    def test_caller_limits_apply_at_the_authored_path(
+        self,
+        step: dict[str, Any],
+        extensions: list[str],
+        limits: CallerLimits,
+        expected: str,
+    ) -> None:
+        """On 0.10.0 these decoded, and ``create_job`` reported them at
+        ``steps[0] -> script -> embeddedFiles[0] -> data`` / ``... -> onRun -> args[3]``."""
+        template = self._template([{"name": "S", **step}], extensions)
+        with pytest.raises(ModelValidationError) as excinfo:
+            decode_job_template(
+                template=template, supported_extensions=_FB1_EXPR, caller_limits=limits
+            )
+        assert str(excinfo.value) == "1 validation error for JobTemplate\n" + expected
+
+    def test_a_malformed_script_fails_to_parse(self) -> None:
+        """The script is now a ``FormatString``, so unbalanced braces fail while parsing
+        the document. On 0.10.0 the template decoded and ``create_job`` raised."""
+        template = self._template([{"name": "S", "bash": {"script": "echo {{ "}}], _FB1)
+        with pytest.raises(DecodeValidationError) as excinfo:
+            decode_job_template(template=template, supported_extensions=_FB1_EXPR)
+        assert str(excinfo.value) == (
+            "'jobtemplate-2023-09' failed checks: Failed to parse interpolation expression "
+            "at [5, 8]. Reason: Braces mismatch.\n  echo {{ \n       ^~"
+        )
+
+    def test_well_formed_simple_actions_pass(self) -> None:
+        """Control: every kind, with ``let``, args, timeout and cancelation in use."""
+        steps = [
+            {
+                "name": "A",
+                "bash": {
+                    "let": ["x = Param.N * 2"],
+                    "script": "echo {{x}} {{Session.WorkingDirectory}}",
+                    "args": ["{{Param.N}}"],
+                    "timeout": "{{Param.N}}",
+                },
+            },
+            {"name": "B", "cmd": {"script": "echo %1", "args": ["{{Param.N}}"]}},
+            {
+                "name": "C",
+                "powershell": {"script": "Write-Host $args", "args": ["-x", "{{Param.N}}"]},
+            },
+            {
+                "name": "D",
+                "python": {
+                    "script": "print({{Param.N}})",
+                    "cancelation": {
+                        "mode": "NOTIFY_THEN_TERMINATE",
+                        "notifyPeriodInSeconds": "{{Param.N}}",
+                    },
+                },
+            },
+            {"name": "E", "node": {"script": "console.log({{Param.N}})"}},
+        ]
+        decoded = decode_job_template(
+            template=self._template(steps, _FB1_EXPR, _PARAM_N), supported_extensions=_FB1_EXPR
+        )
+        assert [s.name for s in decoded.steps] == ["A", "B", "C", "D", "E"]
+
+    def test_sugar_may_reference_its_own_generated_file(self) -> None:
+        """Control: ``Task.File.<sanitized step name>_script`` is defined for the sugar's
+        own fields. v0 rejects all three references (pre-existing divergence)."""
+        step = {
+            "name": "My Step",
+            "bash": {
+                "let": ["here = Task.File.My_Step_script"],
+                "script": "echo {{here}} {{Task.File.My_Step_script.name}}",
+                "args": ["{{Task.File.My_Step_script}}"],
+            },
+        }
+        decoded = decode_job_template(
+            template=self._template([step], _FB1_EXPR), supported_extensions=_FB1_EXPR
+        )
+        assert decoded.steps[0].bash is not None
+
+    def test_non_ascii_step_names_desugar(self) -> None:
+        """The generated file name keeps ASCII alphanumerics only, so ``²x`` becomes
+        ``_x_script`` and ``١`` becomes ``__script``. On 0.10.0 this raised
+        ``PanicException`` at decode."""
+        steps = [
+            {"name": "²x", "bash": {"script": "echo"}},
+            {"name": "a½", "python": {"script": "x"}},
+            {"name": "١", "node": {"script": "x", "args": ["{{Task.File.__script}}"]}},
+        ]
+        decoded = decode_job_template(
+            template=self._template(steps, _FB1), supported_extensions=_FB1_EXPR
+        )
+        assert [s.name for s in decoded.steps] == ["²x", "a½", "١"]
+
+    def test_synthesized_file_argument_is_not_measured_against_the_arg_cap(self) -> None:
+        """Control: ``powershell`` synthesizes ``-File {{Task.File.S_script}}``, longer
+        than a 10-character arg cap. Only authored arguments are measured."""
+        template = self._template([{"name": "S", "powershell": {"script": "echo"}}], _FB1)
+        assert decode_job_template(
+            template=template,
+            supported_extensions=_FB1_EXPR,
+            caller_limits=CallerLimits(max_resolved_arg_len=10),
+        )
+
+
+class TestComprehensionShadowingInStepScripts:
+    """A list comprehension variable must not shadow a step script's ``let`` binding.
+    openjd-model 0.11.0 (openjd-rs#419) extends the check from the action's ``command``
+    and ``args`` to the script's authored ``embeddedFiles[].data``.
+
+    On 0.10.0 the ``data`` case decoded; ``command`` and ``args`` were already rejected
+    with the same text and are controls.
+
+    v0 (``openjd.model.decode_job_template``) rejects all three at the same field path,
+    with different wording, and accepts the control.
+    """
+
+    _SHADOW = "{{ [x for x in [1, 2]] }}"
+
+    @staticmethod
+    def _decode(script: dict[str, Any]) -> JobTemplate:
+        template = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "T",
+            "steps": [{"name": "S", "script": {"let": ["x = 1"], **script}}],
+        }
+        return decode_job_template(template=template, supported_extensions=["EXPR"])
+
+    @pytest.mark.parametrize(
+        "script,path",
+        [
+            pytest.param(
+                {
+                    "embeddedFiles": [{"name": "F", "type": "TEXT", "data": _SHADOW}],
+                    "actions": {"onRun": {"command": "echo"}},
+                },
+                "steps[0] -> script -> embeddedFiles[0] -> data",
+                id="embedded file data",
+            ),
+            pytest.param(
+                {"actions": {"onRun": {"command": _SHADOW}}},
+                "steps[0] -> script -> actions -> onRun -> command",
+                id="command",
+            ),
+            pytest.param(
+                {"actions": {"onRun": {"command": "echo", "args": [_SHADOW]}}},
+                "steps[0] -> script -> actions -> onRun -> args[0]",
+                id="args",
+            ),
+        ],
+    )
+    def test_shadowing_a_let_binding_is_rejected(self, script: dict[str, Any], path: str) -> None:
+        with pytest.raises(ModelValidationError) as excinfo:
+            self._decode(script)
+        assert str(excinfo.value) == (
+            f"1 validation error for JobTemplate\n{path}:\n"
+            "\tList comprehension variable 'x' shadows a let binding"
+        )
+
+    def test_a_comprehension_over_a_fresh_name_in_data_decodes(self) -> None:
+        """Control: the check rejects only names a ``let`` binds."""
+        decoded = self._decode(
+            {
+                "embeddedFiles": [
+                    {"name": "F", "type": "TEXT", "data": "{{ [y for y in [1, 2]] }}"}
+                ],
+                "actions": {"onRun": {"command": "echo"}},
+            }
+        )
+        assert decoded.steps[0].name == "S"
