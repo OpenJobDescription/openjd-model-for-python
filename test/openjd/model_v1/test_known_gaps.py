@@ -33,6 +33,8 @@ from __future__ import annotations
 # none of them have been re-introduced.
 
 
+import sys
+
 import pytest
 
 
@@ -41,3 +43,53 @@ def test_no_internal_imports_leak_at_top_level(name: str) -> None:
     import openjd.model._v1 as v1
 
     assert not hasattr(v1, name), f"{name} leaks as a public attribute on openjd.model._v1"
+
+
+# ── v0 PATH preprocessing lags the spec (openjd-specifications#191) ──
+#
+# These run v0, not the binding: openjd-model 0.11.0 (openjd-rs#421) made v1 join
+# LIST[PATH] defaults and normalize relative submitted PATH values, which Template
+# Schemas §2.2 and §2.12 now require. ``TestListPathDefaultRules`` and
+# ``TestSubmittedPathNormalization`` in ``test_create_job.py`` pin the v1 side.
+
+_V0_PATH_GAP = "v0 preprocess_job_parameters does not apply openjd-specifications#191 (§2.2, §2.12)"
+
+
+def _v0_preprocess(definition: dict, values: dict) -> dict:
+    from pathlib import Path
+
+    import openjd.model as v0
+
+    template = v0.decode_job_template(
+        template={
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "T",
+            "parameterDefinitions": [definition],
+            "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+        },
+        supported_extensions=["EXPR"],
+    )
+    out = v0.preprocess_job_parameters(
+        job_template=template,
+        job_parameter_values=values,
+        job_template_dir=Path("/a/job1"),
+        current_working_dir=Path("/tmp/cwd"),
+    )
+    return {name: value.value for name, value in out.items()}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fixture paths")
+@pytest.mark.xfail(strict=True, reason=_V0_PATH_GAP)
+def test_v0_joins_list_path_defaults_to_the_template_directory() -> None:
+    out = _v0_preprocess(
+        {"name": "Paths", "type": "LIST[PATH]", "default": ["./output", "sub/../other"]}, {}
+    )
+    assert out["Paths"] == ["/a/job1/output", "/a/job1/other"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fixture paths")
+@pytest.mark.xfail(strict=True, reason=_V0_PATH_GAP)
+def test_v0_normalizes_a_relative_submitted_path() -> None:
+    out = _v0_preprocess({"name": "P", "type": "PATH"}, {"P": "sub/../other"})
+    assert out["P"] == "/tmp/cwd/other"

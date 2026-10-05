@@ -278,6 +278,15 @@ str(job.steps[0].script.actions.onRun.command)  # "render"
 Validate and coerce job parameter values. Accepts `str` or `pathlib.Path`
 for directory arguments.
 
+PATH and `LIST[PATH]` follow Template Schemas §2.2 and §2.12, element-wise for
+lists: a default must be relative and stay inside `job_template_dir`, and is
+joined to it. `allow_job_template_dir_walk_up=True` lifts both conditions: an
+absolute default is returned as written, and a relative one may escape
+`job_template_dir` with `..`. A relative submitted
+value is joined to `current_working_dir`. Joined values are lexically
+normalized; an absolute submitted value is returned as written. A default's
+constraints are checked against the joined value. URI values are refused. Violations raise `DecodeValidationError` (openjd-rs#421).
+
 ```python
 from openjd.model._v1 import decode_job_template, preprocess_job_parameters
 from pathlib import Path
@@ -999,12 +1008,16 @@ dep.depends_on                  # str (alias: dependsOn)
 
 ```python
 sa = step.bash  # or .python, .cmd, .powershell, .node
-sa.script                       # str
+sa.script                       # FormatString
 sa.let_bindings                 # Optional[list[str]] (alias: let)
 sa.args                         # Optional[list[FormatString]]
 sa.timeout                      # Optional[FormatString]
 sa.cancelation                  # Optional[CancelationMode]
 ```
+
+A `SimpleAction` is validated at decode with the checks of the `StepScript` it
+desugars to, and errors name the authored path (`steps[0] -> bash -> args[1]`).
+A malformed `script` format string raises `DecodeValidationError` (openjd-rs#419).
 
 ### `StepParameterSpaceDefinition` (5 typed task-parameter variants)
 

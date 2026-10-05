@@ -3,7 +3,16 @@
 """Tests for memory-bounded evaluation."""
 
 import pytest
-from openjd.expr import evaluate_expression, parse_expression, ExpressionError, TypeCode
+from openjd.expr import (
+    ExprType,
+    ExprValue,
+    ExpressionError,
+    PathFormat,
+    SymbolTable,
+    TypeCode,
+    evaluate_expression,
+    parse_expression,
+)
 
 
 class TestMemoryLimit:
@@ -157,3 +166,177 @@ class TestMemoryReleasedInComprehensions:
         single = parse_expression("len(sorted(range(50)))").evaluate_with_metrics()
 
         assert multi.peak_memory < single.peak_memory * 20
+
+
+def _flag_symtab() -> SymbolTable:
+    return SymbolTable(
+        {
+            "Session.Flag": ExprValue.unresolved(ExprType("bool")),
+        }
+    )
+
+
+def _big_path_symtab() -> SymbolTable:
+    """``Big`` is a POSIX path of 1,000,001 characters: tracking it exceeds any limit
+    below 1 MB."""
+    return SymbolTable(
+        {
+            "Session.Flag": ExprValue.unresolved(ExprType("bool")),
+            "Big": ExprValue("/" + "a" * 1_000_000, type="path", path_format=PathFormat.POSIX),
+        }
+    )
+
+
+def _memory_error(used: int, limit: int, expr: str, caret: str) -> str:
+    return f"Expression memory usage ({used} bytes) exceeded limit ({limit} bytes)\n  {expr}\n  {caret}"
+
+
+class TestMemoryAccountingInOpenjdExpr0_10_1:  # noqa: N801
+    """openjd-expr 0.10.1 (openjd-rs#410, #417, #418) charges each live value once and
+    releases it once. Expectations are copied from upstream
+    ``tests/integration/test_memory.rs``. Every case except the named controls differs on
+    0.10.0; ids and docstrings give the 0.10.0 result measured through this binding.
+    """
+
+    @pytest.mark.parametrize(
+        "expr,limit,used,caret",
+        [
+            pytest.param(
+                "[1, 2, 3] * 10000000",
+                10000,
+                1920000384,
+                "~~~~~~~~~~^~~~~~~~~~",
+                id="list literal charged once (0.10.0: 1920000576)",
+            ),
+            pytest.param(
+                "range_expr('1-2000000')[::-1]",
+                10000,
+                128000288,
+                "~~~~~~~~~~~~~~~~~~~~~~~^~~~~~",
+                id="omitted slice bounds are tracked (0.10.0: 128000160)",
+            ),
+            pytest.param(
+                "['A' * 600000 for x in [1, 2, 3]]",
+                1500000,
+                1800576,
+                "^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~",
+                id="comprehension iterable charged once (0.10.0: 1800768)",
+            ),
+            pytest.param(
+                "['C' * 600000] + ['B' * 600000]",
+                1000000,
+                1200224,
+                "                  ~~~~^~~~~~~~",
+                id="exceeded while producing the second element (0.10.0: caret on the first list)",
+            ),
+            pytest.param(
+                "['A' * 1000000, string('C' * 200000 == 'D' * 200000), 'B' * 700000]",
+                1500000,
+                1700272,
+                "                                                      ~~~~^~~~~~~~",
+                id="comparison releases operands once (0.10.0: 3000272)",
+            ),
+            pytest.param(
+                "('A' * 1000000)[:]",
+                1500000,
+                2000256,
+                "~~~~~~~~~~~~~~^~~~",
+                id="string slice budgeted before allocating (0.10.0: fit, peak 1048640)",
+            ),
+        ],
+    )
+    def test_reported_usage(self, expr: str, limit: int, used: int, caret: str) -> None:
+        with pytest.raises(ExpressionError) as excinfo:
+            parse_expression(expr).evaluate(memory_limit=limit)
+        assert str(excinfo.value) == _memory_error(used, limit, expr, caret)
+
+    def test_coercion_to_the_target_type_is_charged_at_the_coerced_size(self) -> None:
+        """A ``range_expr`` coerced to ``list[int]`` is 100,000 ints. 0.10.0 charged only
+        the ``range_expr`` and returned the list."""
+        expr = "range_expr('1-100000')"
+        with pytest.raises(ExpressionError) as excinfo:
+            parse_expression(expr).evaluate(memory_limit=100000, target_type=ExprType("list[int]"))
+        assert str(excinfo.value) == _memory_error(800064, 100000, expr, "^~~~~~~~~~~~~~~~~~~~~~")
+
+    def test_a_budget_error_in_the_if_branch_propagates_before_the_else_branch_runs(self) -> None:
+        """0.10.0 evaluated both branches and reported ``Both branches fail in the
+        if/else``, including the else-branch's ``Cannot convert 'nope' to int``."""
+        expr = "Session.Flag or ('A' * 10000000 if Session.Flag else int('nope')) == 'x'"
+        with pytest.raises(ExpressionError) as excinfo:
+            parse_expression(expr).evaluate(values=_flag_symtab(), memory_limit=1048576)
+        assert str(excinfo.value) == _memory_error(
+            10000136, 1048576, expr, "                 ~~~~^~~~~~~~~~"
+        )
+
+    def test_a_compound_value_error_is_still_absorbed(self) -> None:
+        """Control for the test above: with no budget error inside, ``or`` still
+        absorbs the both-branches-fail error."""
+        result = parse_expression(
+            "Session.Flag or (int('a') if Session.Flag else int('b')) == 7"
+        ).evaluate(values=_flag_symtab(), memory_limit=1048576)
+        assert result.type == ExprType("unresolved[bool]")
+
+    def test_an_absorbed_comprehension_failure_still_counts_toward_peak_memory(self) -> None:
+        """0.10.0 dropped the failed iteration's spend and reported a peak of 512."""
+        result = parse_expression(
+            "[int('A' * 1000000) for x in [1]] if Session.Flag else []"
+        ).evaluate_with_metrics(values=_flag_symtab())
+        assert result.value.type.type_code == TypeCode.UNRESOLVED
+        assert result.peak_memory >= 1_000_000
+
+    @pytest.mark.parametrize(
+        "expr,limit",
+        [
+            pytest.param(
+                "len(['A' * 1000000 - 1 for x in [1]] if Session.Flag else []) + len('B' * 600000)",
+                1500000,
+                id="absorbed comprehension failure leaves no footprint",
+            ),
+            pytest.param(
+                "len(int('x') if Session.Flag else 'A' * 1000000) + len('B' * 600000)",
+                1500000,
+                id="absorbing conditional releases the other branch (0.10.0: 1600264 bytes)",
+            ),
+            pytest.param(
+                "len(['C' * 600000]) + len('B' * 300000)",
+                1000000,
+                id="list literal elements charged once (0.10.0: 1200128 bytes)",
+            ),
+            pytest.param(
+                "['A' * 100000 for x in range(5)]", 560000, id="pushed element charged once"
+            ),
+            pytest.param("['A' * 600000 for x in [1, 2]]", 1500000, id="two large elements fit"),
+        ],
+    )
+    def test_fits_under_the_limit(self, expr: str, limit: int) -> None:
+        """The middle two cases fail on 0.10.0. The other three also fit on 0.10.0;
+        upstream added them against over-charges introduced and fixed within #410 and
+        #417, so here they are controls that the new accounting does not over-charge."""
+        result = parse_expression(expr).evaluate_with_metrics(
+            values=_flag_symtab(), memory_limit=limit
+        )
+        assert result.peak_memory <= limit
+
+    def test_an_attribute_base_lookup_reports_the_memory_error(self) -> None:
+        """0.10.0 rewrote the budget error as ``Undefined variable: 'Big.name'.``"""
+        with pytest.raises(ExpressionError) as excinfo:
+            parse_expression("Big.name").evaluate(
+                values=_big_path_symtab(), memory_limit=500000, path_format=PathFormat.POSIX
+            )
+        assert str(excinfo.value) == _memory_error(1000065, 500000, "Big.name", "^~~")
+
+    def test_an_attribute_memory_error_is_not_absorbed(self) -> None:
+        expr = "Session.Flag or Big.name == 'x'"
+        with pytest.raises(ExpressionError) as excinfo:
+            parse_expression(expr).evaluate(
+                values=_big_path_symtab(), memory_limit=500000, path_format=PathFormat.POSIX
+            )
+        assert str(excinfo.value) == _memory_error(1000065, 500000, expr, "                ^~~")
+
+    def test_an_attribute_value_error_is_still_rewritten(self) -> None:
+        """Control: a real property error keeps the friendlier message."""
+        with pytest.raises(ExpressionError) as excinfo:
+            parse_expression("'abc'.name").evaluate(memory_limit=1000000)
+        assert str(excinfo.value) == (
+            "'name' property is not available for string. Available for: path\n  'abc'.name\n  ~~~~~~^~~~"
+        )

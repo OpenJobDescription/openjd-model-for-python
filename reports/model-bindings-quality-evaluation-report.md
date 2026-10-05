@@ -345,6 +345,14 @@ divergence flagged in §8.
 * **`TokenError`, `parse_model`** — exposed on v0, absent on v1. The
   former is a downstream-visible surface change; the latter was
   internal.
+* **PATH / `LIST[PATH]` preprocessing** — since openjd-model 0.11.0
+  (openjd-rs#421) v1 joins `LIST[PATH]` defaults to the template
+  directory, applies the PATH default rules per element, and normalizes
+  relative submitted values (`sub/../other` → `<cwd>/other`). v0 returns
+  `LIST[PATH]` defaults unjoined and joins submitted values without
+  normalizing. openjd-specifications#191 (§2.2, §2.12) makes the v1
+  behaviour normative, so v0 is the side to fix. Pinned as strict xfails in
+  `test/openjd/model_v1/test_known_gaps.py`.
 
 ## 6. Build and Test Results
 

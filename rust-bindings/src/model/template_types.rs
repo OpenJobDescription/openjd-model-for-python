@@ -1288,7 +1288,7 @@ impl PySimpleAction {
     #[new]
     #[pyo3(signature = (*, script, let_bindings=None, args=None, timeout=None, cancelation=None))]
     fn new(
-        script: String,
+        script: PyFormatString,
         let_bindings: Option<Vec<String>>,
         args: Option<Vec<PyFormatString>>,
         timeout: Option<PyFormatString>,
@@ -1297,7 +1297,7 @@ impl PySimpleAction {
         PySimpleAction {
             inner: SimpleAction {
                 let_bindings,
-                script,
+                script: script.inner,
                 args: args.map(|a| a.into_iter().map(|fs| fs.inner).collect()),
                 timeout: timeout.map(|t| t.inner),
                 cancelation: cancelation.map(|c| c.inner),
@@ -1306,8 +1306,10 @@ impl PySimpleAction {
     }
 
     #[getter]
-    fn script(&self) -> &str {
-        &self.inner.script
+    fn script(&self) -> PyFormatString {
+        PyFormatString {
+            inner: self.inner.script.clone(),
+        }
     }
 
     #[getter]

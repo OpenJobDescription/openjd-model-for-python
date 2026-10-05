@@ -1,11 +1,14 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+import json
 import os
+import sys
 import tempfile
 import pytest
 from pathlib import Path
 from typing import Any, Optional
 
+from openjd.expr import ExpressionError
 from openjd.model._v1 import (
     CallerLimits,
     ModelProfile,
@@ -2552,3 +2555,416 @@ class TestValidationIsIndependentOfTheHostPathFormat:
         args = job.steps[0].script.actions.onRun.args
         assert args is not None
         assert [str(a) for a in args] == ["{{ string(p) }}"]
+
+
+class TestSimpleActionCapsAtJobCreation:
+    """openjd-model 0.11.0 (openjd-rs#419) reports a ``SimpleAction`` step's
+    job-creation cap failures at the authored path. On 0.10.0 the same failures
+    named the desugared step: ``steps[0] -> script -> embeddedFiles[0] -> data`` for
+    the script and ``... -> onRun -> args[3]`` for ``cmd``'s ``args[1]``.
+    """
+
+    @staticmethod
+    def _decoded(kind: str) -> Any:
+        return decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1"],
+                "name": "T",
+                "parameterDefinitions": [{"name": "X", "type": "STRING"}],
+                "steps": [
+                    {
+                        "name": "S",
+                        kind: {"script": "{{Param.X}}", "args": ["--flag", "{{Param.X}}"]},
+                    }
+                ],
+            },
+            supported_extensions=["FEATURE_BUNDLE_1"],
+        )
+
+    @pytest.mark.parametrize(
+        "kind,limits,expected",
+        [
+            pytest.param(
+                "bash",
+                CallerLimits(max_resolved_data_len=100),
+                "steps[0] -> bash -> script:\n\t"
+                "resolves to at least 200 characters, exceeding the maximum of 100.",
+                id="script over the data cap",
+            ),
+            pytest.param(
+                "cmd",
+                CallerLimits(max_resolved_arg_len=100),
+                "steps[0] -> cmd -> args[1]:\n\t"
+                "resolves to at least 200 characters, exceeding the maximum of 100.",
+                id="argument over the arg cap",
+            ),
+        ],
+    )
+    def test_a_parameter_value_over_the_cap_is_reported_at_the_authored_path(
+        self, kind: str, limits: CallerLimits, expected: str
+    ) -> None:
+        decoded = self._decoded(kind)
+        with pytest.raises(ModelValidationError) as excinfo:
+            create_job(
+                job_template=decoded,
+                job_parameter_values={"X": "A" * 200},
+                validation_context=ValidationContext(decoded.profile, caller_limits=limits),
+            )
+        assert str(excinfo.value) == "1 validation error for JobTemplate\n" + expected
+
+    def test_a_value_under_both_caps_desugars(self) -> None:
+        """Control: the created step carries the desugared action, with the generated
+        script file as the first argument."""
+        decoded = self._decoded("python")
+        limits = CallerLimits(max_resolved_data_len=100, max_resolved_arg_len=100)
+        job = create_job(
+            job_template=decoded,
+            job_parameter_values={"X": "short"},
+            validation_context=ValidationContext(decoded.profile, caller_limits=limits),
+        )
+        on_run = job.steps[0].script.actions.onRun
+        assert on_run.command.raw() == "python"
+        assert on_run.args is not None
+        assert [a.raw() for a in on_run.args] == ["{{Task.File.S_script}}", "--flag", "{{Param.X}}"]
+
+
+def _preprocess_posix(
+    definitions: list[dict[str, Any]],
+    values: Optional[dict[str, Any]] = None,
+    *,
+    walk_up: bool = False,
+    environment_definitions: Optional[list[dict[str, Any]]] = None,
+) -> dict[str, Any]:
+    """``preprocess_job_parameters`` with upstream's fixture directories. The binding
+    resolves paths under the host format, so callers skip on Windows."""
+    job_template: dict[str, Any] = {
+        "specificationVersion": "jobtemplate-2023-09",
+        "extensions": ["EXPR"],
+        "name": "T",
+        "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+    }
+    if definitions:
+        job_template["parameterDefinitions"] = definitions
+    template = decode_job_template(template=job_template, supported_extensions=["EXPR"])
+    environments = None
+    if environment_definitions:
+        environments = [
+            decode_environment_template(
+                template={
+                    "specificationVersion": "environment-2023-09",
+                    "extensions": ["EXPR"],
+                    "parameterDefinitions": environment_definitions,
+                    "environment": {"name": "E", "variables": {"A": "b"}},
+                },
+                supported_extensions=["EXPR"],
+            )
+        ]
+    return preprocess_job_parameters(
+        job_template=template,
+        job_parameter_values=values or {},
+        environment_templates=environments,
+        job_template_dir=Path("/a/job1"),
+        current_working_dir=Path("/tmp/cwd"),
+        allow_job_template_dir_walk_up=walk_up,
+    )
+
+
+_POSIX_ONLY = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="The binding resolves paths with PathFormat::host(); the Windows rows are separate.",
+)
+_OUTSIDE = (
+    "references a path outside of the template directory. "
+    "Walking up from the template directory is not permitted."
+)
+_ABSOLUTE = "is an absolute path. Default paths must be relative, and are joined to the job template's directory."
+
+
+def _list_path(default: list[str]) -> list[dict[str, Any]]:
+    return [{"name": "Paths", "type": "LIST[PATH]", "default": default}]
+
+
+@_POSIX_ONLY
+class TestListPathDefaultRules:
+    """openjd-model 0.11.0 (openjd-rs#421, openjd-specifications#191, Template Schemas
+    §2.2 and §2.12) applies the PATH default rules to each ``LIST[PATH]`` default
+    element: it must be relative, must not walk out of the template directory unless
+    the caller allows it, and is joined to the template directory and normalized. On
+    0.10.0 every default here came back unchanged.
+
+    v0 (``openjd.model.preprocess_job_parameters``) still returns every one of these
+    defaults unjoined; see ``test_known_gaps.py``.
+    """
+
+    def test_relative_elements_are_joined_and_normalized(self) -> None:
+        out = _preprocess_posix(_list_path(["./output", "sub/dir", "sub/../other", "."]))
+        assert json.loads(out["Paths"].value) == [
+            "/a/job1/output",
+            "/a/job1/sub/dir",
+            "/a/job1/other",
+            "/a/job1",
+        ]
+
+    @pytest.mark.parametrize(
+        "default,expected",
+        [
+            pytest.param(
+                ["a.exr", "/abs/b.exr"],
+                f"The default value of LIST[PATH] parameter Paths at item[1] {_ABSOLUTE}",
+                id="absolute element",
+            ),
+            pytest.param(
+                ["inside/a.exr", "../outside/b.exr"],
+                f"The default value of LIST[PATH] parameter Paths at item[1] {_OUTSIDE}",
+                id="escaping element",
+            ),
+            pytest.param(
+                ["/x", "ok", "a/../../y"],
+                f"The default value of LIST[PATH] parameter Paths at item[0] {_ABSOLUTE}\n"
+                f"The default value of LIST[PATH] parameter Paths at item[2] {_OUTSIDE}",
+                id="every bad element is reported",
+            ),
+            pytest.param(
+                ["a/..", "..name", "a/../../b"],
+                f"The default value of LIST[PATH] parameter Paths at item[2] {_OUTSIDE}",
+                id="interior walk-up after valid elements",
+            ),
+            pytest.param(
+                ["a.exr", "s3://bucket/key"],
+                "Parameter 'Paths': URI path values are not permitted in defaults. "
+                "Got 's3://bucket/key' at item[1]",
+                id="URI element",
+            ),
+        ],
+    )
+    def test_a_bad_element_is_rejected(self, default: list[str], expected: str) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            _preprocess_posix(_list_path(default))
+        assert str(excinfo.value) == expected
+
+    def test_walk_up_allows_absolute_and_escaping_elements(self) -> None:
+        out = _preprocess_posix(_list_path(["/abs/a.exr", "../up/b.exr"]), walk_up=True)
+        assert json.loads(out["Paths"].value) == ["/abs/a.exr", "/a/up/b.exr"]
+
+
+@_POSIX_ONLY
+class TestSubmittedPathNormalization:
+    """openjd-model 0.11.0 (openjd-rs#421, Template Schemas §2.2) lexically normalizes
+    a relative submitted PATH or ``LIST[PATH]`` value after joining it to the current
+    working directory. On 0.10.0 ``sub/../other`` came back as
+    ``/tmp/cwd/sub/../other`` and ``LIST[PATH]`` elements were not joined at all.
+    Absolute submitted values are returned as written, before and after.
+    """
+
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            pytest.param(".", "/tmp/cwd", id="dot"),
+            pytest.param("./b.exr", "/tmp/cwd/b.exr", id="dot slash"),
+            pytest.param("sub/../other", "/tmp/cwd/other", id="dot dot"),
+            pytest.param(
+                "C:\\foo\\..\\bar",
+                "/tmp/cwd/C:\\foo\\..\\bar",
+                id="backslash is a filename character under POSIX",
+            ),
+        ],
+    )
+    def test_relative_path_value_is_joined_and_normalized(self, value: str, expected: str) -> None:
+        out = _preprocess_posix([{"name": "P", "type": "PATH"}], {"P": value})
+        assert out["P"].value == expected
+
+    def test_list_path_elements_are_joined_and_normalized(self) -> None:
+        out = _preprocess_posix(
+            [{"name": "Paths", "type": "LIST[PATH]"}],
+            {"Paths": ["rel/a.exr", "./b.exr", "/abs/c.exr", "../up"]},
+        )
+        assert json.loads(out["Paths"].value) == [
+            "/tmp/cwd/rel/a.exr",
+            "/tmp/cwd/b.exr",
+            "/abs/c.exr",
+            "/tmp/up",
+        ]
+
+    def test_a_submitted_uri_element_is_rejected(self) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            _preprocess_posix(
+                [{"name": "Paths", "type": "LIST[PATH]"}], {"Paths": ["a.exr", "s3://bucket/key"]}
+            )
+        assert str(excinfo.value) == (
+            "Parameter 'Paths': URI path values are not permitted. Got 's3://bucket/key' at item[1]"
+        )
+
+
+@_POSIX_ONLY
+class TestPathDefaultConstraintsAfterTheJoin:
+    """openjd-model 0.11.0 (openjd-rs#421, Template Schemas §2.2) checks a PATH or
+    ``LIST[PATH]`` default's constraints against the joined value, in the job and
+    environment templates alike. On 0.10.0 all three cases passed: the scalar
+    ``maxLength`` and ``allowedValues`` defaults were never re-checked after the join,
+    and ``LIST[PATH]`` defaults were not joined.
+    """
+
+    def test_list_path_item_allowed_values_see_the_joined_element(self) -> None:
+        definitions = [
+            {
+                "name": "Scenes",
+                "type": "LIST[PATH]",
+                "default": ["assets/a.blend"],
+                "item": {"allowedValues": ["assets/a.blend", "assets/b.blend"]},
+            }
+        ]
+        with pytest.raises(DecodeValidationError) as excinfo:
+            _preprocess_posix(definitions)
+        assert str(excinfo.value) == (
+            "Parameter 'Scenes': item[0] value '/a/job1/assets/a.blend' is not in allowed values"
+        )
+
+    def test_path_max_length_sees_the_joined_value(self) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            _preprocess_posix([{"name": "Short", "type": "PATH", "default": "a", "maxLength": 3}])
+        assert str(excinfo.value) == "Parameter 'Short': value length 9 exceeds maximum 3"
+
+    def test_environment_template_defaults_are_checked_too(self) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            _preprocess_posix(
+                [],
+                environment_definitions=[
+                    {
+                        "name": "EnvScalar",
+                        "type": "PATH",
+                        "default": "cfg/a",
+                        "allowedValues": ["cfg/a"],
+                    },
+                    {
+                        "name": "EnvPaths",
+                        "type": "LIST[PATH]",
+                        "default": ["env/a"],
+                        "item": {"allowedValues": ["env/a"]},
+                    },
+                ],
+            )
+        assert str(excinfo.value) == (
+            "Parameter 'EnvScalar': value '/a/job1/cfg/a' is not in allowed values\n"
+            "Parameter 'EnvPaths': item[0] value '/a/job1/env/a' is not in allowed values"
+        )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32", reason="Windows path rules; the binding uses the host format."
+)
+class TestPathDefaultRulesWindows:
+    """The Windows rows of openjd-rs#421: a drive-letter element is absolute, and a
+    walk-up is detected across mixed separators."""
+
+    @staticmethod
+    def _preprocess(definitions: list[dict[str, Any]]) -> dict[str, Any]:
+        template = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["EXPR"],
+                "name": "T",
+                "parameterDefinitions": definitions,
+                "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+            },
+            supported_extensions=["EXPR"],
+        )
+        return preprocess_job_parameters(
+            job_template=template,
+            job_parameter_values={},
+            job_template_dir=Path("C:\\templates\\job1"),
+            current_working_dir=Path("C:\\cwd"),
+        )
+
+    def test_a_drive_letter_element_is_absolute(self) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._preprocess(_list_path(["renders\\a.exr", "D:\\renders\\b.exr"]))
+        assert str(excinfo.value) == (
+            f"The default value of LIST[PATH] parameter Paths at item[1] {_ABSOLUTE}"
+        )
+
+    def test_walk_up_across_mixed_separators_is_rejected(self) -> None:
+        with pytest.raises(DecodeValidationError) as excinfo:
+            self._preprocess(
+                [
+                    {"name": "A", "type": "PATH", "default": "a\\..\\..\\b"},
+                    {"name": "B", "type": "PATH", "default": "a/..\\../b"},
+                    {"name": "C", "type": "PATH", "default": "a\\../b"},
+                ]
+            )
+        assert str(excinfo.value) == (
+            f"The default value of PATH parameter A {_OUTSIDE}\n"
+            f"The default value of PATH parameter B {_OUTSIDE}"
+        )
+
+
+class TestCreateJobLetFailureMessages:
+    """openjd-model 0.10.1 (openjd-rs#410) evaluates a job environment's ``let`` under
+    the caller's profile with the same diagnostic as a step script's ``let``. On
+    0.10.0 the environment form read ``Error evaluating let binding 'q': ...`` and
+    quoted the whole binding, ``q = 1 / int(Param.X)``.
+    """
+
+    _LET = ["q = 1 / int(Param.X)"]
+    _EXPECTED = "script let binding 'q': Division by zero\n  1 / int(Param.X)\n  ~~^~~~~~~~~~~~~~"
+
+    @classmethod
+    def _decoded(cls, where: str) -> Any:
+        on_run = {"actions": {"onRun": {"command": "echo"}}}
+        template: dict[str, Any] = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "T",
+            "parameterDefinitions": [{"name": "X", "type": "STRING"}, {"name": "N", "type": "INT"}],
+            "steps": [{"name": "S", "script": on_run}],
+        }
+        if where == "step":
+            template["steps"][0]["script"] = {"let": cls._LET, **on_run}
+        else:
+            template["jobEnvironments"] = [
+                {
+                    "name": "E",
+                    "script": {"let": cls._LET, "actions": {"onEnter": {"command": "echo"}}},
+                }
+            ]
+        return decode_job_template(template=template, supported_extensions=["EXPR"])
+
+    @pytest.mark.parametrize("where", ["step", "job environment"])
+    def test_the_diagnostic_is_the_same_for_both(self, where: str) -> None:
+        with pytest.raises(ExpressionError) as excinfo:
+            create_job(job_template=self._decoded(where), job_parameter_values={"X": "0", "N": "1"})
+        assert str(excinfo.value) == self._EXPECTED
+
+    @pytest.mark.parametrize("where", ["step", "job environment"])
+    def test_a_value_that_evaluates_creates_the_job(self, where: str) -> None:
+        job = create_job(
+            job_template=self._decoded(where), job_parameter_values={"X": "2", "N": "1"}
+        )
+        assert job.name == "T"
+
+
+class TestCreateJobMissingExtensionsAreSorted:
+    """openjd-model 0.10.1 (openjd-rs#410) lists the extensions a ``create_job``
+    context is missing in sorted order, whatever order the template declares them in."""
+
+    def test_two_missing_extensions_are_listed_sorted(self) -> None:
+        decoded = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["FEATURE_BUNDLE_1", "EXPR"],
+                "name": "T",
+                "steps": [{"name": "S", "script": {"actions": {"onRun": {"command": "echo"}}}}],
+            },
+            supported_extensions=["EXPR", "FEATURE_BUNDLE_1"],
+        )
+        with pytest.raises(ModelValidationError) as excinfo:
+            create_job(
+                job_template=decoded,
+                job_parameter_values={},
+                validation_context=ValidationContext(ModelProfile(extensions=[])),
+            )
+        assert str(excinfo.value) == (
+            "create_job requires a context enabling every extension the template declares: "
+            "missing EXPR, FEATURE_BUNDLE_1. An application that does not support an extension "
+            "should reject the template at decode via its supported-extensions list."
+        )
