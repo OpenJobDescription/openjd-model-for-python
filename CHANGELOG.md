@@ -1,3 +1,12 @@
+## 0.13.0 (2026-10-05)
+
+
+### Features
+* Bump openjd-* Rust crates to the openjd-model 0.11.0 release (#375) ([`32fed4b`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/32fed4bfca1e6f057f70da0841fe5534a7e97219))
+* Bump openjd-* Rust crates to the openjd-model 0.11.0 release ([`32fed4b`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/32fed4bfca1e6f057f70da0841fe5534a7e97219))
+
+
+
 ## 0.12.0 (2026-09-28)
 
 
