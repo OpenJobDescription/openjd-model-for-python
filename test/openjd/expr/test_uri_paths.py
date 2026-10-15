@@ -211,3 +211,19 @@ class TestUriPathInSymbolTable:
             "P.with_suffix('.png')", values=symtab, path_format=PathFormat.POSIX
         )
         assert str(result) == "s3://bucket/scene.png"
+
+
+class TestSingleLetterSchemeIsAPath:
+    """openjd-expr 0.11.0 (openjd-rs#424, openjd-specifications#192): a URI scheme has
+    at least two characters, so ``C://`` is a Windows drive with a doubled separator,
+    not a URI with scheme ``c``. Before, it kept its ``//`` like ``s3://``.
+    """
+
+    def test_a_drive_letter_is_normalized_as_a_path(self) -> None:
+        assert str(evaluate_expression('path("C://scenes/a.ma").parent')) == "C:/scenes"
+
+    def test_the_list_constructor_applies_the_same_rule(self) -> None:
+        assert str(evaluate_expression('path(["C://scenes", "a.ma"])')) == "C:/scenes/a.ma"
+
+    def test_a_two_letter_scheme_is_still_a_uri(self) -> None:
+        assert str(evaluate_expression('path("s3://bucket/a/b").parent')) == "s3://bucket/a"

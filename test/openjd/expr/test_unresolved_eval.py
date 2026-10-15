@@ -348,7 +348,7 @@ class TestUnknownListLiterals:
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("[X, Y]", values=values)
         expected = [
-            "List literal contains incompatible types: int, string\n",
+            "List literal contains incompatible types: int and string\n",
             "  [X, Y]\n",
             "  ^~~~~~",
         ]
@@ -908,3 +908,38 @@ class TestIfExpBudgetErrorsPropagate:
     def test_the_expression_fits_within_a_generous_budget(self, expression: str) -> None:
         result = evaluate_expression(expression, values=self._values())
         assert result.type == ExprType("unresolved[string]")
+
+
+_UNRESOLVED_INT = ExprValue.unresolved(ExprType("int"))
+_UNRESOLVED_BOOL = ExprValue.unresolved(ExprType("bool"))
+
+
+class TestBoolOpAfterAnUnresolvedOperand:
+    """openjd-expr 0.12.0 (openjd-rs#435): once an and/or operand is unresolved, the
+    result is the union of every operand it could return. Before, the first later
+    concrete operand decided it, so a value error there rejected a valid expression
+    and a static value appeared that run time never produces.
+    """
+
+    @pytest.mark.parametrize(
+        ("expression", "values", "expected"),
+        [
+            # 0.11.0: "Division by zero", though X may decide the result at run time.
+            ("10 // (X or Z)", {"X": _UNRESOLVED_INT, "Z": ExprValue(0)}, "unresolved[int]"),
+            # 0.11.0: ExprValue(3).
+            ("X or N", {"X": _UNRESOLVED_INT, "N": ExprValue(3)}, "unresolved[int]"),
+            # 0.11.0: typed as bool, so "upper() is not available for bool".
+            (
+                "(F and S).upper()",
+                {"F": _UNRESOLVED_BOOL, "S": ExprValue("abc")},
+                "unresolved[string]",
+            ),
+            # 0.11.0: ExprValue(0).
+            ("F and 1 or 0", {"F": _UNRESOLVED_BOOL}, "unresolved[int]"),
+        ],
+    )
+    def test_the_result_is_unresolved_of_every_reachable_operand(
+        self, expression: str, values: dict, expected: str
+    ) -> None:
+        result = evaluate_expression(expression, values=SymbolTable(values))
+        assert result.type == ExprType(expected)
