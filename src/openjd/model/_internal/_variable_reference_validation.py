@@ -236,7 +236,7 @@ def _internal_deepcopy(value: Any) -> Any:
 
 
 def _validate_model_template_variable_references(
-    model: Type,
+    model: Any,  # a field annotation: a class, a Union, or a generic alias
     value: Any,
     current_scope: ResolutionScope,
     symbol_prefix: str,
@@ -831,7 +831,7 @@ def _symbol_expr_type(value: dict, raw: bool) -> Optional[str]:
 
 
 def _collect_variable_definitions(  # noqa: C901  (suppress: too complex)
-    model: Type,
+    model: Any,  # a field annotation: a class, a Union, or a generic alias
     value: Any,
     current_scope: ResolutionScope,
     symbol_prefix: str,
