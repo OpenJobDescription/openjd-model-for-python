@@ -1,3 +1,16 @@
+## 0.14.0 (2026-10-15)
+
+
+### BREAKING CHANGES
+* `create_job` raises `ModelValidationError` instead of `ExpressionError` for a let-binding failure, some templates that decoded before are now rejected (`and`/`or` after an unresolved operand, nested lists with mismatched element types, parameter-dependent invalid timeouts), and building from source needs Rust 1.97 (#378) ([`d9322c9`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d9322c91c90e40d27d0c3bbee0af531e83a67a7b))
+
+### Features
+* Bump the openjd-rs crates to the openjd-model 0.13.0 release: openjd-expr 0.12.0, openjd-model 0.13.0, openjd-sessions 0.8.1 (#378) ([`d9322c9`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d9322c91c90e40d27d0c3bbee0af531e83a67a7b))
+
+### Bug Fixes
+* Type field-annotation walkers' model as Any for pydantic 2.14 (#378) ([`d9322c9`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d9322c91c90e40d27d0c3bbee0af531e83a67a7b))
+
+
 ## 0.13.0 (2026-10-05)
 
 
