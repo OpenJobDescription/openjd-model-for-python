@@ -16,6 +16,8 @@ the Rust-backed binding spells that as ``str(value)``. Identical
 output, identical contract.
 """
 
+import pytest
+
 from openjd.expr import ExprValue, PathFormat, SymbolTable, evaluate_expression
 
 
@@ -216,14 +218,21 @@ class TestUriPathInSymbolTable:
 class TestSingleLetterSchemeIsAPath:
     """openjd-expr 0.11.0 (openjd-rs#424, openjd-specifications#192): a URI scheme has
     at least two characters, so ``C://`` is a Windows drive with a doubled separator,
-    not a URI with scheme ``c``. Before, it kept its ``//`` like ``s3://``.
+    not a URI with scheme ``c``. Before, it kept its ``//`` like ``s3://``. The path
+    format is pinned because the default follows the host.
     """
 
-    def test_a_drive_letter_is_normalized_as_a_path(self) -> None:
-        assert str(evaluate_expression('path("C://scenes/a.ma").parent')) == "C:/scenes"
-
-    def test_the_list_constructor_applies_the_same_rule(self) -> None:
-        assert str(evaluate_expression('path(["C://scenes", "a.ma"])')) == "C:/scenes/a.ma"
-
-    def test_a_two_letter_scheme_is_still_a_uri(self) -> None:
-        assert str(evaluate_expression('path("s3://bucket/a/b").parent')) == "s3://bucket/a"
+    @pytest.mark.parametrize(
+        ("expression", "posix", "windows"),
+        [
+            ('path("C://scenes/a.ma").parent', "C:/scenes", "C:\\scenes"),
+            ('path(["C://scenes", "a.ma"])', "C:/scenes/a.ma", "C:\\scenes\\a.ma"),
+            # Control: a two-letter scheme is still a URI under either format.
+            ('path("s3://bucket/a/b").parent', "s3://bucket/a", "s3://bucket/a"),
+        ],
+    )
+    def test_a_drive_letter_is_a_path_and_a_scheme_is_a_uri(
+        self, expression: str, posix: str, windows: str
+    ) -> None:
+        assert str(evaluate_expression(expression, path_format=PathFormat.POSIX)) == posix
+        assert str(evaluate_expression(expression, path_format=PathFormat.WINDOWS)) == windows
