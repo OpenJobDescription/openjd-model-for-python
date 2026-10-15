@@ -1,3 +1,14 @@
+## 0.14.0 (2026-10-15)
+
+
+### Features
+* Bump openjd-* Rust crates to the openjd-model 0.13.0 release (#378) ([`d9322c9`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d9322c91c90e40d27d0c3bbee0af531e83a67a7b))
+* Bump openjd-* Rust crates to the openjd-model 0.13.0 release ([`d9322c9`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d9322c91c90e40d27d0c3bbee0af531e83a67a7b))
+
+### Bug Fixes
+* Type field-annotation walkers' model as Any for pydantic 2.14 ([`d9322c9`](https://github.com/OpenJobDescription/openjd-model-for-python/commit/d9322c91c90e40d27d0c3bbee0af531e83a67a7b))
+
+
 ## 0.13.0 (2026-10-05)
 
 
