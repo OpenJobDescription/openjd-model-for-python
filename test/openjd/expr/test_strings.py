@@ -650,10 +650,21 @@ class TestReprPwshComprehensive:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="PowerShell validation only on Windows")
+# pytest-timeout counts the class-scoped warm-up below against the first test.
+@pytest.mark.timeout(180)
 class TestReprPwshWindowsValidation:
     """Validate repr_pwsh output by running PowerShell subprocess on Windows."""
 
-    def _pwsh_eval(self, expr: str) -> str:
+    @staticmethod
+    @pytest.fixture(scope="class", autouse=True)
+    def _warm_powershell() -> None:
+        # The first PowerShell launch on a fresh Windows runner can exceed the
+        # per-call timeout. Pay that once here, with a deadline sized for it.
+        ready = TestReprPwshWindowsValidation._pwsh_eval("Write-Output ready", timeout=120)
+        assert ready == "ready"
+
+    @staticmethod
+    def _pwsh_eval(expr: str, *, timeout: float = 10) -> str:
         """Write expr to a temporary .ps1 file and execute it, so PowerShell
         interprets the repr_pwsh output exactly once (no argument-layer parsing)."""
         import subprocess
@@ -667,7 +678,7 @@ class TestReprPwshWindowsValidation:
                 ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1_path],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=timeout,
             )
             return result.stdout.strip()
         finally:
