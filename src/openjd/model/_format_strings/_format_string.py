@@ -236,8 +236,13 @@ class FormatString(DynamicConstrainedStr):
         return self.resolve(symtab=symtab, path_format=path_format)
 
     def resolve_list_item(
-        self, *, symtab: SymbolTable, target_type: str, path_format: Optional[object] = None
-    ) -> list[Any]:
+        self,
+        *,
+        symtab: SymbolTable,
+        target_type: str,
+        room: Optional[int] = None,
+        path_format: Optional[object] = None,
+    ) -> Optional[list[Any]]:
         """Resolve this format string as a list item (Expression Language §1.3.2).
 
         When the format string is exactly one EXPR ``{{ ... }}`` expression,
@@ -246,7 +251,8 @@ class FormatString(DynamicConstrainedStr):
         such as ``"int | list[int] | nulltype"``): a ``null`` result contributes no values, a list
         contributes one value per member, and any other result contributes
         itself. The values are the engine's ``ExprValue``s. A result that does
-        not coerce to the target raises.
+        not coerce to the target raises. A list longer than ``room`` (when
+        given) returns ``None`` before its members are copied.
 
         Any other format string (text around its expressions, several
         expressions, or a template without EXPR, whose expressions are bare
@@ -280,6 +286,8 @@ class FormatString(DynamicConstrainedStr):
                 if getattr(value, "is_null", False):
                     return []
                 if str(value.type).startswith("list["):
+                    if room is not None and len(value) > room:
+                        return None
                     return list(value)
                 return [value]
         return [self.resolve(symtab=symtab, path_format=path_format)]

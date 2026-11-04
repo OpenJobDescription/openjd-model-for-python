@@ -128,3 +128,45 @@ def test_v1_accepts_format_string_in_int_range_list() -> None:
             ],
         }
     )
+
+
+# With EXPR, v0 resolves a FLOAT range list element as a list item (Expression
+# Language §1.3.2), so a list flattens. v1's openjd-model 0.13.0 resolves it to
+# text and fails to parse it. Same resolution as the test above.
+
+
+@pytest.mark.xfail(strict=True, reason="bindings pin openjd-model 0.13.0 (FLOAT elements as text)")
+def test_v1_flattens_list_in_float_range_list() -> None:
+    from pathlib import Path
+
+    import openjd.model._v1 as v1
+
+    template = v1.decode_job_template(
+        {
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "T",
+            "steps": [
+                {
+                    "name": "S",
+                    "parameterSpace": {
+                        "taskParameterDefinitions": [
+                            {"name": "X", "type": "FLOAT", "range": [1.5, "{{ [2, 2.5] }}"]}
+                        ]
+                    },
+                    "script": {"actions": {"onRun": {"command": "echo"}}},
+                }
+            ],
+        },
+        supported_extensions=["EXPR"],
+    )
+    params = v1.preprocess_job_parameters(
+        job_template=template,
+        job_parameter_values={},
+        job_template_dir=Path.cwd(),
+        current_working_dir=Path.cwd(),
+    )
+    job = v1.create_job(job_template=template, job_parameter_values=params)
+    space = job.steps[0].parameter_space
+    assert space is not None
+    assert len(space.task_parameter_definitions["X"].range) == 3

@@ -1451,14 +1451,26 @@ def _convert_string_range_list_item(value: Any) -> Any:
 # list item, with target type `T? | list[T]` for element type T. A FLOAT
 # element's target also accepts int, so an integer keeps the form it is
 # written in, as in openjd-rs. Without EXPR every element resolves to a string.
+# Resolution stops at the element that takes a list past the §3.4 maximum, so
+# a template cannot make job creation build a long list just to reject it.
+_RANGE_LIST_TOO_LONG = f"range exceeds {_MAX_TASK_PARAM_RANGE_LEN} elements."
 _INT_RANGE_LIST_ITEM = ListItemSpec(
-    target_type="int | list[int] | nulltype", convert=_convert_int_range_list_item
+    target_type="int | list[int] | nulltype",
+    convert=_convert_int_range_list_item,
+    max_len=_MAX_TASK_PARAM_RANGE_LEN,
+    too_long_message=_RANGE_LIST_TOO_LONG,
 )
 _FLOAT_RANGE_LIST_ITEM = ListItemSpec(
-    target_type="float | int | list[float] | nulltype", convert=_convert_float_range_list_item
+    target_type="float | int | list[float] | nulltype",
+    convert=_convert_float_range_list_item,
+    max_len=_MAX_TASK_PARAM_RANGE_LEN,
+    too_long_message=_RANGE_LIST_TOO_LONG,
 )
 _STRING_RANGE_LIST_ITEM = ListItemSpec(
-    target_type="string | list[string] | nulltype", convert=_convert_string_range_list_item
+    target_type="string | list[string] | nulltype",
+    convert=_convert_string_range_list_item,
+    max_len=_MAX_TASK_PARAM_RANGE_LEN,
+    too_long_message=_RANGE_LIST_TOO_LONG,
 )
 
 

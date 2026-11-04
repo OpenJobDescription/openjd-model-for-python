@@ -270,10 +270,16 @@ class ListItemSpec:
         convert: Turns one resolved value, an ``openjd.expr.ExprValue`` from a
             typed element or the ``str`` of any other element, into the
             instantiated element. Raises ``ValueError`` to reject it.
+        max_len: The most elements the list may resolve to. Resolution stops
+            at the element that would take it past this, before that
+            element's members are copied, and fails with ``too_long_message``.
+        too_long_message: The error for a list past ``max_len``.
     """
 
     target_type: str
     convert: Callable[[Any], Any]
+    max_len: int
+    too_long_message: str
 
 
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)
