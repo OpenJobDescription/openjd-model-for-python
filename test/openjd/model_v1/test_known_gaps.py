@@ -93,3 +93,38 @@ def test_v0_joins_list_path_defaults_to_the_template_directory() -> None:
 def test_v0_normalizes_a_relative_submitted_path() -> None:
     out = _v0_preprocess({"name": "P", "type": "PATH"}, {"P": "sub/../other"})
     assert out["P"] == "/tmp/cwd/other"
+
+
+# ── v1 rejects format string elements in INT range lists ──
+#
+# Template Schemas §3.4.1.1 allows a <TaskParameterStringValue> element in an
+# INT (and CHUNK[INT]) range list, and v0 accepts one. The bindings build
+# against openjd-model 0.13.0, whose `IntRange::List` holds integers only, so v1
+# fails to decode the template. The openjd-rs fix changes `IntRange::List` to
+# `Vec<IntOrFormatString>`; this resolves when the bindings move to an
+# openjd-model release with it, and `int_range_to_py` handles the new element
+# type. ``test_range_list_items.py`` in model_v0 covers the v0 behavior.
+
+
+@pytest.mark.xfail(strict=True, reason="bindings pin openjd-model 0.13.0 (IntRange::List of i64)")
+def test_v1_accepts_format_string_in_int_range_list() -> None:
+    import openjd.model._v1 as v1
+
+    v1.decode_job_template(
+        {
+            "specificationVersion": "jobtemplate-2023-09",
+            "name": "T",
+            "parameterDefinitions": [{"name": "I", "type": "INT", "default": 10}],
+            "steps": [
+                {
+                    "name": "S",
+                    "parameterSpace": {
+                        "taskParameterDefinitions": [
+                            {"name": "X", "type": "INT", "range": [1, "{{Param.I}}"]}
+                        ]
+                    },
+                    "script": {"actions": {"onRun": {"command": "echo"}}},
+                }
+            ],
+        }
+    )

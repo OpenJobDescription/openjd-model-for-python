@@ -86,8 +86,23 @@ class InterpolationExpression:
 
         raise ExpressionError(f"Nonvalid result type: {result} of type {type(result)}")
 
-    def evaluate_value(self, *, symtab: SymbolTable, path_format: Optional[Any] = None) -> Any:
+    @property
+    def is_expr(self) -> bool:
+        """Whether this expression uses the EXPR language (Expression Language),
+        rather than the base 2023-09 value-reference grammar."""
+        return getattr(self._expresion_tree, "allows_nonscalar", False)
+
+    def evaluate_value(
+        self,
+        *,
+        symtab: SymbolTable,
+        path_format: Optional[Any] = None,
+        target_type: Optional[Any] = None,
+    ) -> Any:
         """Evaluate the expression, preferring the engine's typed value form.
+
+        ``target_type`` (an ``openjd.expr.ExprType``), when given, applies to
+        EXPR-backed expressions: the result is coerced toward it.
 
         For EXPR-backed expressions this returns the engine ``ExprValue``,
         which keeps the result's EXPR type (path/int/float/list/...) and its
@@ -103,6 +118,10 @@ class InterpolationExpression:
         if evaluate_value is None:
             return self.evaluate(symtab=symtab, path_format=path_format)
         try:
+            if target_type is not None:
+                return evaluate_value(
+                    symtab=symtab, path_format=path_format, target_type=target_type
+                )
             return evaluate_value(symtab=symtab, path_format=path_format)
         except ValueError as exc:
             raise ExpressionError(f"Expression failed validation: {str(exc)}")

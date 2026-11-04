@@ -9,7 +9,7 @@ from pydantic_core import InitErrorDetails
 
 from .._symbol_table import SymbolTable
 from .._format_strings import FormatString
-from .._types import ModelParsingContextInterface, OpenJDModel
+from .._types import ListItemSpec, ModelParsingContextInterface, OpenJDModel
 
 __all__ = ("instantiate_model", "resolve_whole_field_typed_list")
 
@@ -262,6 +262,15 @@ def _instantiate_model(  # noqa: C901
                     instantiated = coerce(model, field_name, raw_typed)
                 else:
                     instantiated = unwrap_typed_resolution(raw_typed)
+            elif (
+                isinstance(field_value, list)
+                and field_name in model._job_creation_metadata.list_item_fields
+            ):
+                instantiated = _instantiate_list_items(
+                    field_value,
+                    symtab,
+                    model._job_creation_metadata.list_item_fields[field_name],
+                )
             elif isinstance(field_value, list):
                 if field_name in model._job_creation_metadata.reshape_field_to_dict:
                     key_field = model._job_creation_metadata.reshape_field_to_dict[field_name]
@@ -363,6 +372,45 @@ def _instantiate_list_field_as_list(  # noqa: C901
             title="_instantiate_list_field_as_list", line_errors=errors
         )
 
+    return result
+
+
+def _instantiate_list_items(
+    value: list[Any],
+    symtab: SymbolTable,
+    spec: ListItemSpec,
+) -> list[Any]:
+    """Instantiate a list whose format string elements are list items
+    (Expression Language §1.3.2; see ``JobCreationMetadata.list_item_fields``).
+
+    Each format string element contributes the values
+    :meth:`FormatString.resolve_list_item` resolves it to, and every value,
+    and every element that is not a format string, goes through
+    ``spec.convert``. Errors are reported at the element's index in the list
+    as written.
+
+    Raises:
+        ValidationError: if an element fails to resolve or convert.
+        ValueError: if a list that was not empty resolves to no elements.
+    """
+    errors: list[InitErrorDetails] = []
+    result: list[Any] = []
+    for idx, item in enumerate(value):
+        with capture_validation_errors(output_errors=errors, loc=(idx,), input=value):
+            if isinstance(item, FormatString):
+                resolved = item.resolve_list_item(symtab=symtab, target_type=spec.target_type)
+            else:
+                resolved = [item]
+            result.extend(spec.convert(v) for v in resolved)
+
+    if errors:
+        raise ValidationError.from_exception_data(
+            title="_instantiate_list_items", line_errors=errors
+        )
+    # The non-empty rule is checked on the list as written, at decode; dropped
+    # elements can still leave it empty.
+    if value and not result:
+        raise ValueError("has no elements after resolution.")
     return result
 
 

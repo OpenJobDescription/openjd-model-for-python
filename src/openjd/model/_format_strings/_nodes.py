@@ -220,12 +220,17 @@ class ExprNode(Node):
                 "a variable that already exists at this location."
             )
 
-    def _evaluate_raw(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
+    def _evaluate_raw(
+        self, *, symtab: SymbolTable, path_format: Any = None, target_type: Any = None
+    ) -> Any:
         """Evaluate the expression and return the engine's ``ExprValue``.
 
         Shared by :meth:`evaluate` (which unwraps to the native Python value)
         and :meth:`evaluate_to_str` (which uses the engine's spec-defined string
         coercion). Re-raises engine errors as the model's ``ExpressionError``.
+        ``target_type`` (an ``openjd.expr.ExprType``), when given, is the
+        result's target type (Expression Language §1.2.3): the result is
+        coerced toward it, and evaluation fails when it cannot be.
         """
         from ._expr_support import (
             map_eval_error,
@@ -242,16 +247,20 @@ class ExprNode(Node):
         )
         profile = profile_for_symtab(symtab)
         try:
-            return self._parsed.evaluate(values=values, profile=profile, path_format=path_format)
+            return self._parsed.evaluate(
+                values=values, profile=profile, path_format=path_format, target_type=target_type
+            )
         except Exception as exc:  # noqa: BLE001 - boundary; re-raise as model error
             raise map_eval_error(exc)
 
     def evaluate(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
         return self._evaluate_raw(symtab=symtab, path_format=path_format).item()
 
-    def evaluate_value(self, *, symtab: SymbolTable, path_format: Any = None) -> Any:
+    def evaluate_value(
+        self, *, symtab: SymbolTable, path_format: Any = None, target_type: Any = None
+    ) -> Any:
         """Evaluate and return the engine's ``ExprValue`` (not unwrapped to a
-        native Python value).
+        native Python value), coerced toward ``target_type`` when given.
 
         Callers that re-seed the result into a symbol table (e.g. the session
         runtime's ``let`` bindings, RFC 0007) should use this form: the typed
@@ -261,7 +270,7 @@ class ExprNode(Node):
         are preserved), matching the Rust runtime's natively typed symbol
         table.
         """
-        return self._evaluate_raw(symtab=symtab, path_format=path_format)
+        return self._evaluate_raw(symtab=symtab, path_format=path_format, target_type=target_type)
 
     def evaluate_to_str(self, *, symtab: SymbolTable, path_format: Any = None) -> str:
         # ``str(ExprValue)`` applies the engine's RFC 0005 format-string
