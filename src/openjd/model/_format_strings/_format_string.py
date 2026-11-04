@@ -241,7 +241,7 @@ class FormatString(DynamicConstrainedStr):
         symtab: SymbolTable,
         target_type: str,
         room: Optional[int] = None,
-        path_format: Optional[object] = None,
+        path_format: Optional[Any] = None,
     ) -> Optional[list[Any]]:
         """Resolve this format string as a list item (Expression Language §1.3.2).
 
@@ -258,6 +258,10 @@ class FormatString(DynamicConstrainedStr):
         expressions, or a template without EXPR, whose expressions are bare
         value references that cannot produce ``null`` or a list) contributes
         its resolved string, as :meth:`resolve` returns it.
+
+        Returns:
+            The values the element contributes, or ``None`` when it is a list
+            longer than ``room``.
 
         Raises:
             FormatStringError: if the expression cannot be evaluated or its

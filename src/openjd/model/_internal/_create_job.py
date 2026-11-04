@@ -411,8 +411,11 @@ def _instantiate_list_items(
             if resolved is not None:
                 result.extend(spec.convert(v) for v in resolved)
         # The length is a property of the whole list, so it is reported at the
-        # field rather than at the element that went over.
+        # field rather than at the element that went over. An element error
+        # found before it is reported instead, as openjd-rs does.
         if resolved is None or len(result) > spec.max_len:
+            if errors:
+                break
             raise ValueError(spec.too_long_message)
 
     if errors:
