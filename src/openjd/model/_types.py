@@ -259,6 +259,24 @@ class JobCreateAsMetadata:
 
 
 @dataclass(frozen=True, eq=False, **dataclass_kwargs)
+class ListItemSpec:
+    """How the elements of a list field resolve as list items (see
+    ``JobCreationMetadata.list_item_fields``).
+
+    Attributes:
+        target_type: The EXPR type string of a whole-field EXPR element's
+            target, of the form ``T? | list[T]``, such as
+            ``"int | list[int] | nulltype"``.
+        convert: Turns one resolved value, an ``openjd.expr.ExprValue`` from a
+            typed element or the ``str`` of any other element, into the
+            instantiated element. Raises ``ValueError`` to reject it.
+    """
+
+    target_type: str
+    convert: Callable[[Any], Any]
+
+
+@dataclass(frozen=True, eq=False, **dataclass_kwargs)
 class JobCreationMetadata:
     """Metadata for creating a job out of a job template.
     This metadata instructs the recursive algorithm as to what special
@@ -300,6 +318,19 @@ class JobCreationMetadata:
     bool in an INT task-parameter range); the error is aggregated into the
     model's validation errors. When unset, the raw result is unwrapped to a
     native Python list unchanged.
+    """
+
+    list_item_fields: dict[str, "ListItemSpec"] = field(default_factory=dict)
+    """List fields (a subset of ``resolve_fields``) whose format string
+    elements are list items (Expression Language §1.3.2), keyed by field name.
+    Each element resolves through :meth:`FormatString.resolve_list_item` with
+    the spec's target type, so with EXPR a whole-field ``null`` drops the
+    element and a list flattens into one element per member. The spec's
+    ``convert`` turns each resolved value into the instantiated element, and
+    may raise ``ValueError`` to reject it; the error is reported at the
+    element's index in the list as written. A list that was not empty as
+    written but resolves to no elements is rejected. Used by task-parameter
+    ``range`` lists.
     """
 
     create_as: Optional[JobCreateAsMetadata] = field(default=None)

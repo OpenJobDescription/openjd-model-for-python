@@ -1,5 +1,6 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 
+import functools
 from dataclasses import dataclass
 from typing import Any, Optional, Union
 
@@ -8,6 +9,16 @@ from .._symbol_table import SymbolTable
 from ._dyn_constrained_str import DynamicConstrainedStr
 from ._expression import InterpolationExpression
 from .._types import ModelParsingContextInterface, SpecificationRevision
+
+
+@functools.lru_cache(maxsize=None)
+def _expr_type(type_string: str) -> Any:
+    """The ``openjd.expr.ExprType`` for ``type_string``. Imported here, on
+    first use, because importing openjd.model must not load the native
+    extension; only an EXPR template reaches the callers."""
+    from openjd.expr import ExprType
+
+    return ExprType(type_string)
 
 
 class _ReconstructionContext(ModelParsingContextInterface):
@@ -223,6 +234,55 @@ class FormatString(DynamicConstrainedStr):
                     details=str(exc),
                 )
         return self.resolve(symtab=symtab, path_format=path_format)
+
+    def resolve_list_item(
+        self, *, symtab: SymbolTable, target_type: str, path_format: Optional[object] = None
+    ) -> list[Any]:
+        """Resolve this format string as a list item (Expression Language §1.3.2).
+
+        When the format string is exactly one EXPR ``{{ ... }}`` expression,
+        with no text around it, the expression is evaluated with
+        ``target_type`` (an EXPR type string of the form ``T? | list[T]``,
+        such as ``"int | list[int] | nulltype"``): a ``null`` result contributes no values, a list
+        contributes one value per member, and any other result contributes
+        itself. The values are the engine's ``ExprValue``s. A result that does
+        not coerce to the target raises.
+
+        Any other format string (text around its expressions, several
+        expressions, or a template without EXPR, whose expressions are bare
+        value references that cannot produce ``null`` or a list) contributes
+        its resolved string, as :meth:`resolve` returns it.
+
+        Raises:
+            FormatStringError: if the expression cannot be evaluated or its
+                result does not coerce to ``target_type``.
+        """
+        expressions = self.expressions
+        if len(expressions) == 1:
+            info = expressions[0]
+            expression = info.expression
+            whole_field = info.start_pos == 0 and info.end_pos == len(self.original_value)
+            if whole_field and expression is not None and getattr(expression, "is_expr", False):
+                try:
+                    value = expression.evaluate_value(
+                        symtab=symtab,
+                        path_format=path_format,
+                        target_type=_expr_type(target_type),
+                    )
+                except ExpressionError as exc:
+                    raise FormatStringError(
+                        string=self.original_value,
+                        start=info.start_pos,
+                        end=info.end_pos,
+                        expr=expression.expr,
+                        details=str(exc),
+                    )
+                if getattr(value, "is_null", False):
+                    return []
+                if str(value.type).startswith("list["):
+                    return list(value)
+                return [value]
+        return [self.resolve(symtab=symtab, path_format=path_format)]
 
     def _preprocess(
         self, *, context: ModelParsingContextInterface

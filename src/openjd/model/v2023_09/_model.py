@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import secrets
 import string
@@ -55,6 +56,7 @@ from .._types import (
     JobCreateAsMetadata,
     JobCreationMetadata,
     JobParameterInterface,
+    ListItemSpec,
     ModelParsingContextInterface,
     OpenJDModel,
     ResolutionScope,
@@ -1399,6 +1401,67 @@ def _range_element_type_name(elem: Any) -> str:
     return "list" if type_str.startswith("list[") else type_str
 
 
+def _expr_value_type(value: Any) -> Optional[str]:
+    """The EXPR type of an engine ``ExprValue``, or ``None`` for a native value."""
+    value_type = getattr(value, "type", None)
+    return None if value_type is None else str(value_type)
+
+
+def _convert_int_range_list_item(value: Any) -> int:
+    """One INT or CHUNK[INT] range list element (Template Schemas §3.4.1.1),
+    from a literal, a typed list item, or a resolved format string, which
+    must be the string representation of an integer."""
+    if _expr_value_type(value) == "int":
+        return value.item()
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            raise ValueError(f"value {value!r} is not an integer.")
+    return value
+
+
+def _convert_float_range_list_item(value: Any) -> Any:
+    """One FLOAT range list element (Template Schemas §3.4.1.2). A typed list
+    item becomes its string form, which keeps a float's spelling and writes an
+    integer as written (openjd-rs does the same), and a resolved string must
+    be the string representation of a finite floating point value. Strings
+    are normalized by ``RangeListTaskParameterDefinition`` (§7.5)."""
+    if _expr_value_type(value) is not None:
+        value = str(value)
+    if isinstance(value, str):
+        try:
+            number = float(value)
+        except ValueError:
+            raise ValueError(f"value {value!r} is not a number.")
+        if not math.isfinite(number):
+            raise ValueError(f"value {value!r} is not finite.")
+    return value
+
+
+def _convert_string_range_list_item(value: Any) -> Any:
+    """One STRING or PATH range list element: a typed list item becomes its
+    string form (Expression Language string coercion)."""
+    if _expr_value_type(value) is not None:
+        return str(value)
+    return value
+
+
+# Expression Language §1.3.2: each element of a task parameter range list is a
+# list item, with target type `T? | list[T]` for element type T. A FLOAT
+# element's target also accepts int, so an integer keeps the form it is
+# written in, as in openjd-rs. Without EXPR every element resolves to a string.
+_INT_RANGE_LIST_ITEM = ListItemSpec(
+    target_type="int | list[int] | nulltype", convert=_convert_int_range_list_item
+)
+_FLOAT_RANGE_LIST_ITEM = ListItemSpec(
+    target_type="float | int | list[float] | nulltype", convert=_convert_float_range_list_item
+)
+_STRING_RANGE_LIST_ITEM = ListItemSpec(
+    target_type="string | list[string] | nulltype", convert=_convert_string_range_list_item
+)
+
+
 def _coerce_typed_range_elements(model: Any, field_name: str, raw: Any) -> list:
     """``typed_resolve_coerce`` hook for task-parameter ``range`` fields.
 
@@ -1521,6 +1584,7 @@ class IntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_09
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
         typed_resolve_coerce=_coerce_typed_range_elements,
+        list_item_fields={"range": _INT_RANGE_LIST_ITEM},
         exclude_fields={"name"},
     )
 
@@ -1589,6 +1653,7 @@ class FloatTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
         typed_resolve_coerce=_coerce_typed_range_elements,
+        list_item_fields={"range": _FLOAT_RANGE_LIST_ITEM},
         exclude_fields={"name"},
     )
 
@@ -1635,6 +1700,7 @@ class StringTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
         typed_resolve_coerce=_coerce_typed_range_elements,
+        list_item_fields={"range": _STRING_RANGE_LIST_ITEM},
         exclude_fields={"name"},
     )
 
@@ -1670,6 +1736,7 @@ class PathTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v2023_0
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
         typed_resolve_coerce=_coerce_typed_range_elements,
+        list_item_fields={"range": _STRING_RANGE_LIST_ITEM},
         exclude_fields={"name"},
     )
 
@@ -1725,6 +1792,7 @@ class ChunkIntTaskParameterDefinition(NameIdentifierLengthMixin, OpenJDModel_v20
         resolve_fields={"range"},
         typed_resolve_fields={"range"},
         typed_resolve_coerce=_coerce_typed_range_elements,
+        list_item_fields={"range": _INT_RANGE_LIST_ITEM},
         exclude_fields={"name"},
     )
 
