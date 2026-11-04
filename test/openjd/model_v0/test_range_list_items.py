@@ -353,6 +353,22 @@ class TestWithExpr:
                 "range exceeds 1024 elements."
             ), range_
 
+    def test_element_error_before_the_limit_is_reported(self, tmp_path) -> None:
+        error = _range_error(
+            tmp_path,
+            {"type": "INT", "range": ["{{ Param.S }}", "{{ [1] * 1024 }}", 2]},
+            _STRING_S,
+            {"S": "x"},
+            ["EXPR"],
+        )
+        assert error == (
+            "1 validation errors for JobTemplate\n"
+            "steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[0]:\n\t"
+            "Failed to parse interpolation expression at [0, 13]. Expression:  Param.S . "
+            "Reason: Expression failed validation: Cannot coerce string to int | list[int] | nulltype\n"
+            "  Param.S\n  ~~~~~~^."
+        )
+
     def test_errors_name_the_element_as_written(self, tmp_path) -> None:
         # The element that fails is element 2 of the list as written, even
         # though the first element flattened into three values.
@@ -370,3 +386,26 @@ class TestWithExpr:
             "Reason: Expression failed validation: Cannot coerce string to int | list[int] | nulltype\n"
             "  Param.S\n  ~~~~~~^."
         )
+
+
+class TestResolveListItem:
+    """``FormatString.resolve_list_item`` directly: a list longer than the
+    room left is reported before its members are copied."""
+
+    def test_list_longer_than_room_returns_none(self) -> None:
+        from openjd.model import SymbolTable
+        from openjd.model._format_strings import FormatString
+        from openjd.model.v2023_09 import ModelParsingContext
+
+        fs = FormatString(
+            "{{ range_expr('1-9999999') }}",
+            context=ModelParsingContext(supported_extensions=["EXPR"]),
+        )
+        target = "int | list[int] | nulltype"
+        assert fs.resolve_list_item(symtab=SymbolTable(), target_type=target, room=1024) is None
+        small = FormatString(
+            "{{ [1, 2, 3] }}", context=ModelParsingContext(supported_extensions=["EXPR"])
+        )
+        assert small.resolve_list_item(symtab=SymbolTable(), target_type=target, room=2) is None
+        values = small.resolve_list_item(symtab=SymbolTable(), target_type=target, room=3)
+        assert values is not None and [v.item() for v in values] == [1, 2, 3]
