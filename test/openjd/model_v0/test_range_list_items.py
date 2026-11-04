@@ -225,6 +225,14 @@ class TestWithExpr:
         # Text around the expression, even white space, makes the element a
         # string rather than a list item.
         assert result == ["/c", "/a", "/b", " x "]
+        result = _range(
+            tmp_path,
+            {"type": param_type, "range": ["{{ 'x' }} ", " {{ 'y' }}"]},
+            [{"name": "L", "type": "LIST[STRING]"}],
+            {"L": "[]"},
+            ["EXPR"],
+        )
+        assert result == ["x ", " y"]
 
     @pytest.mark.parametrize(
         "task_param, extensions, target",
@@ -306,13 +314,59 @@ class TestWithExpr:
             "has no elements after resolution."
         )
 
-    def test_flattened_list_past_element_limit_rejected(self, tmp_path) -> None:
+    @pytest.mark.parametrize(
+        "task_param, extensions, member, scalar",
+        [
+            pytest.param({"type": "INT"}, ["EXPR"], "1", "7", id="INT"),
+            pytest.param(
+                {"type": "CHUNK[INT]", "chunks": _CHUNKS},
+                ["EXPR", "TASK_CHUNKING"],
+                "1",
+                "7",
+                id="CHUNK",
+            ),
+            pytest.param({"type": "FLOAT"}, ["EXPR"], "1.5", "2.5", id="FLOAT"),
+            pytest.param({"type": "STRING"}, ["EXPR"], "'a'", "b", id="STRING"),
+            pytest.param({"type": "PATH"}, ["EXPR"], "'a'", "b", id="PATH"),
+        ],
+    )
+    def test_flattened_list_past_element_limit_rejected(
+        self, tmp_path, task_param, extensions, member, scalar
+    ) -> None:
+        full = f"{{{{ [{member}] * 1024 }}}}"
+        assert len(
+            _range(tmp_path, {**task_param, "range": [full]}, _STRING_S, {"S": "x"}, extensions)
+        ) == (1024)
+        for range_ in (
+            [scalar, full],
+            [full, scalar],
+            # Resolution stops at the second element, before its members are
+            # copied; a ten-million-member list would otherwise take seconds.
+            [full, "{{ range_expr('1-9999999') }}" if member == "1" else full],
+        ):
+            error = _range_error(
+                tmp_path, {**task_param, "range": range_}, _STRING_S, {"S": "x"}, extensions
+            )
+            assert error == (
+                "1 validation errors for JobTemplate\n"
+                "steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range:\n\t"
+                "range exceeds 1024 elements."
+            ), range_
+
+    def test_errors_name_the_element_as_written(self, tmp_path) -> None:
+        # The element that fails is element 2 of the list as written, even
+        # though the first element flattened into three values.
         error = _range_error(
             tmp_path,
-            {"type": "INT", "range": [0, "{{ range_expr('1-1024') }}"]},
+            {"type": "INT", "range": ["{{ [1, 2, 3] }}", "{{ null }}", "{{ Param.S }}"]},
             _STRING_S,
             {"S": "x"},
             ["EXPR"],
         )
-        assert "steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range:\n\t" in error
-        assert "1024" in error
+        assert error == (
+            "1 validation errors for JobTemplate\n"
+            "steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[2]:\n\t"
+            "Failed to parse interpolation expression at [0, 13]. Expression:  Param.S . "
+            "Reason: Expression failed validation: Cannot coerce string to int | list[int] | nulltype\n"
+            "  Param.S\n  ~~~~~~^."
+        )

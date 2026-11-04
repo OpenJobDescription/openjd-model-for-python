@@ -387,21 +387,33 @@ def _instantiate_list_items(
     :meth:`FormatString.resolve_list_item` resolves it to, and every value,
     and every element that is not a format string, goes through
     ``spec.convert``. Errors are reported at the element's index in the list
-    as written.
+    as written. Resolution stops at the first element that takes the list
+    past ``spec.max_len``, before a flattened element's members are copied.
 
     Raises:
         ValidationError: if an element fails to resolve or convert.
-        ValueError: if a list that was not empty resolves to no elements.
+        ValueError: if the list resolves to more than ``spec.max_len``
+            elements, or a list that was not empty resolves to none.
     """
     errors: list[InitErrorDetails] = []
     result: list[Any] = []
     for idx, item in enumerate(value):
+        resolved: Optional[list[Any]] = []
         with capture_validation_errors(output_errors=errors, loc=(idx,), input=value):
             if isinstance(item, FormatString):
-                resolved = item.resolve_list_item(symtab=symtab, target_type=spec.target_type)
+                resolved = item.resolve_list_item(
+                    symtab=symtab,
+                    target_type=spec.target_type,
+                    room=spec.max_len - len(result),
+                )
             else:
                 resolved = [item]
-            result.extend(spec.convert(v) for v in resolved)
+            if resolved is not None:
+                result.extend(spec.convert(v) for v in resolved)
+        # The length is a property of the whole list, so it is reported at the
+        # field rather than at the element that went over.
+        if resolved is None or len(result) > spec.max_len:
+            raise ValueError(spec.too_long_message)
 
     if errors:
         raise ValidationError.from_exception_data(
