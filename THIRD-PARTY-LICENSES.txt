@@ -24,7 +24,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------
-** pydantic; version 2.14.1 -- https://pypi.org/project/pydantic/
+** pydantic; version 2.14.3 -- https://pypi.org/project/pydantic/
 The MIT License (MIT)
 
 Copyright (c) 2017 to present Pydantic Services Inc. and individual contributors.
@@ -48,7 +48,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------
-** pydantic_core; version 2.50.1 -- https://pypi.org/project/pydantic_core/
+** pydantic_core; version 2.50.4 -- https://pypi.org/project/pydantic_core/
 The MIT License (MIT)
 
 Copyright (c) 2022 Samuel Colvin
@@ -95,7 +95,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ------
-** typing-inspection; version 0.4.4 -- https://pypi.org/project/typing-inspection/
+** typing-inspection; version 0.4.5 -- https://pypi.org/project/typing-inspection/
 MIT License
 
 Copyright (c) Pydantic Services Inc. 2025 to present
