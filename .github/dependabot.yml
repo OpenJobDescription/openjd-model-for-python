@@ -13,6 +13,9 @@ updates:
     commit-message: 
       prefix: "chore(deps):"
     ignore:
+      # The OpenJD release train bumps the openjd-* packages itself (release_train.yml), with its tests and
+      # release notes; a Dependabot PR for them would race it.
+      - dependency-name: "openjd-*"
       # black 26+ drops Python 3.9 compat and produces different formatting
       - dependency-name: "black"
         update-types: ["version-update:semver-major"]
