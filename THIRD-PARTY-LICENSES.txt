@@ -3239,7 +3239,7 @@ USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ------
 ** tokio-util; version 0.7.19 -- https://crates.io/crates/tokio-util
-** tokio; version 1.53.1 -- https://crates.io/crates/tokio
+** tokio; version 1.53.3 -- https://crates.io/crates/tokio
 MIT License
 
 Copyright (c) Tokio Contributors
