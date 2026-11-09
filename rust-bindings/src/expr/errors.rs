@@ -15,8 +15,8 @@
 //! with `#[pymethods]` declaring everything natively. PyO3 only
 //! supports subclassing built-in exceptions on Python 3.12+ when
 //! the `abi3` feature is enabled (per PyO3's exception guide), and
-//! this crate targets `abi3-py39` to support every interpreter
-//! from 3.9 forward. So `#[pyclass(extends = PyValueError)]` is off
+//! this crate targets `abi3-py310` to support every interpreter
+//! from 3.10 forward. So `#[pyclass(extends = PyValueError)]` is off
 //! the table for these classes.
 //!
 //! The next-cleanest model — and the one used here — is to keep
