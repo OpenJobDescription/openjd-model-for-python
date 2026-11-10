@@ -124,6 +124,14 @@ class TestListLiteralTypeInference:
         with pytest.raises(ExpressionError, match="nested at most 2 levels"):
             evaluate_expression("[[[x]] for x in [1, 2]]")
 
+    def test_a_range_expr_in_two_levels_is_not_a_third(self) -> None:
+        """A ``range_expr`` element is not a list level, so ``[[r]]`` is two
+        levels deep (Expression Language §1.2.1). openjd-expr 0.13.0
+        (openjd-rs#462); before, it raised "Lists may be nested at most 2
+        levels deep"."""
+        result = evaluate_expression("[[range_expr('1-3')]]")
+        assert result.type == ExprType("list[list[range_expr]]")
+
 
 class TestListElementCoercion:
     """Tests for list element coercion when target type has single list type (RFC 0005)."""

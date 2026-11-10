@@ -765,7 +765,9 @@ A `RangeExpr` is kept in the canonical form of Template Schemas
 `1-9:2` and `RangeExpr("1-2").ranges()` is two single-value ranges.
 Two `RangeExpr`s are equal exactly when they have the same values.
 Every constructor raises `RangeExprError` when the canonical form would
-have more than 50,000 runs. The pure-Python
+have more than 50,000 runs, and parsing accepts at most 50,000
+comma-separated elements. Values can be any 64-bit integer except the
+most negative one. The pure-Python
 `openjd.model._range_expr.IntRangeExpr` follows the input's elements
 instead.
 

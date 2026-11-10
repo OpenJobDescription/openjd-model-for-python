@@ -220,6 +220,21 @@ class TestRangeExprCanonicalForm:
         assert a == b
         assert hash(a) == hash(b)
 
+    def test_values_span_the_64_bit_range(self) -> None:
+        """openjd-expr 0.13.0 (openjd-rs#469) widened the value domain from
+        magnitudes below 2**62 to every 64-bit integer except the most
+        negative one. Before, both of these raised an overflow error."""
+        assert str(RangeExpr("-9223372036854775807,9223372036854775807")) == (
+            "-9223372036854775807,9223372036854775807"
+        )
+        assert str(RangeExpr("4611686018427387904")) == "4611686018427387904"
+
+    def test_parsing_accepts_more_than_10000_elements(self) -> None:
+        """openjd-expr 0.14.0 (openjd-rs#470) raised the element cap from
+        10,000 to 50,000. Before, 12,000 elements raised ``RangeExprError``."""
+        r = RangeExpr(",".join(str(i * 3) for i in range(12_000)))
+        assert r.ranges() == [IntRange(0, 35_997, 3)]
+
     def test_from_list_caps_the_canonical_runs(self) -> None:
         """openjd-expr 0.14.0 (openjd-rs#470) caps every constructor at 50,000
         runs of the canonical form. 25,000 pairs are 50,000 runs, and one more
