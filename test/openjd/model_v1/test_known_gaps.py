@@ -101,11 +101,12 @@ def test_v0_normalizes_a_relative_submitted_path() -> None:
 # chunk in the canonical form of §3.4.1.1.1, which keeps a run only when it has
 # three or more values, so ``[1, 2, 4, 6]`` is ``1,2-6:2``. v0's
 # ``IntRangeExpr.from_list`` commits to the first gap as the step and writes
-# ``1,2,4,6``. openjd-model 0.14.0 (openjd-rs#469) brought v1 to canonical form;
+# ``1,2,4,6``, and ``IntRangeExpr.from_str`` keeps the input's elements.
+# openjd-model 0.14.0 (openjd-rs#469) brought v1 to canonical form;
 # ``TestNoncontiguousChunkRendering`` in ``test_step_param_space_iter.py`` pins
 # the v1 side.
 
-_V0_CANONICAL_GAP = "v0 IntRangeExpr.from_list does not write canonical form (§3.4.1.1.1)"
+_V0_CANONICAL_GAP = "v0 IntRangeExpr does not write canonical form (§3.4.1.1.1)"
 
 
 @pytest.mark.xfail(strict=True, reason=_V0_CANONICAL_GAP)

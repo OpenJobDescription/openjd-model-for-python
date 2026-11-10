@@ -65,6 +65,8 @@ metered.operation_count    # operations performed (>= 0)
 ### `escape_format_string`
 
 Escape `{{` and `}}` in a string for use as a literal in a format string.
+A lone `{` just before `}}` is escaped too, so the result always parses
+and resolves back to the input.
 
 ```python
 from openjd.expr import escape_format_string
@@ -373,6 +375,9 @@ When several rules match a path, the one whose source path has the
 most names applies, wherever it is in the list, and between rules for
 the same location the last one given applies (How Jobs Are Run, "Path
 Mapping"). The order of `rules` matters only for that tie.
+A `source_path` or `destination_path` longer than 32,768 bytes makes a
+rule invalid, a path longer than that matches no rule, and the rules
+together are limited to about 30 MiB of lookup structure.
 
 ```python
 # Inspecting a profile
@@ -646,9 +651,11 @@ matched, result = rule.apply(path="/mnt/shared/project/file.exr")
 matched, result = rule.apply(path="/other/path")
 # matched=False, result="/other/path"
 
-# A rule whose POSIX or WINDOWS source_path is not absolute can be
+# A rule whose POSIX or WINDOWS source_path is not absolute, or whose
+# source_path or destination_path is longer than 32,768 bytes, can be
 # constructed, but apply() raises ValueError for it:
 # "source_path 'rel' must be an absolute POSIX path, starting with '/'"
+# A path longer than 32,768 bytes matches no rule.
 
 # Serialization
 d = rule.to_dict()

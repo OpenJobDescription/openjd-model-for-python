@@ -2190,7 +2190,7 @@ class Session:
         Extend the session's path mapping rules with additional rules.
 
         When several rules match a path, the one whose source path has the
-        most components wins, and between rules for the same location the
+        most names wins, and between rules for the same location the
         one given last wins, wherever it sits in the list.
 
         Consumers (notably the Deadline Cloud worker agent's Job Attachments

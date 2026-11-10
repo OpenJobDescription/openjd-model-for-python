@@ -415,6 +415,61 @@ class TestTrailingSlash:
         assert result.endswith("/") or result.endswith(os.sep) or result.endswith("\\")
 
 
+class TestDestinationEndingInASeparator:
+    """Since openjd-expr 0.14.0 (openjd-rs#483) no separator is added after a
+    destination that already ends with one. Before, ``/dst/`` gave
+    ``/dst//a/b``. The pure-Python reference gives ``/dst/a/b`` too."""
+
+    def test_apply(self) -> None:
+        rule = PathMappingRule(
+            source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path="/dst/"
+        )
+        assert rule.apply(path="/mnt/a/b", output_format=PathFormat.POSIX) == (True, "/dst/a/b")
+
+    def test_apply_path_mapping(self) -> None:
+        from openjd.expr import parse_expression
+
+        rule = PathMappingRule(
+            source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path="/dst/"
+        )
+        profile = ExprProfile().with_host_context(HostContext.with_rules([rule]))
+        parsed = parse_expression("apply_path_mapping('/mnt/a/b')")
+        result = parsed.evaluate(profile=profile, path_format=PathFormat.POSIX)
+        assert result.item() == "/dst/a/b"
+
+
+class TestPathLengthLimit:
+    """Since openjd-expr 0.14.0 (openjd-rs#472) a path or rule path longer than
+    32 KiB (``MAX_PATH_LEN``, 32,768 bytes) is refused. A longer path matches
+    no rule, and a rule with a longer source or destination path is invalid.
+    Before, both mapped. The pure-Python reference still maps them."""
+
+    _RULE = PathMappingRule(
+        source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path="/dst"
+    )
+
+    def test_a_path_at_the_limit_maps(self) -> None:
+        path = "/mnt/" + "a" * (32 * 1024 - len("/mnt/"))
+        matched, _ = self._RULE.apply(path=path, output_format=PathFormat.POSIX)
+        assert matched is True
+
+    def test_a_longer_path_matches_no_rule(self) -> None:
+        path = "/mnt/" + "a" * (32 * 1024 - len("/mnt/") + 1)
+        assert self._RULE.apply(path=path) == (False, path)
+
+    def test_a_longer_destination_path_is_invalid(self) -> None:
+        rule = PathMappingRule(
+            source_path_format=PathFormat.POSIX,
+            source_path="/mnt",
+            destination_path="/" + "d" * (32 * 1024),
+        )
+        with pytest.raises(ValueError) as exc_info:
+            rule.apply(path="/mnt/x")
+        assert str(exc_info.value) == (
+            "destination_path is 32769 bytes long, more than the limit of 32768 bytes"
+        )
+
+
 class TestFormatMismatch:
     """Tests that constructor rejects wrong path types for the format."""
 

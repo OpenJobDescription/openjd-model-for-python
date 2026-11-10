@@ -177,11 +177,14 @@ enforces nothing beyond the spec.
 
 `path_mapping_rules`, and the rules given to
 `extend_path_mapping_rules`, must each have an absolute POSIX or
-WINDOWS `source_path` (How Jobs Are Run, "Path Mapping"). A set with
-an invalid rule raises `SessionError`, and `extend_path_mapping_rules`
-leaves the existing rules unchanged. When several rules match a path,
-the one whose source path has the most names applies, wherever it is
-in the list.
+WINDOWS `source_path`, and no `source_path` or `destination_path`
+longer than 32,768 bytes (How Jobs Are Run, "Path Mapping"). A set
+with an invalid rule raises `SessionError`, and
+`extend_path_mapping_rules` leaves the existing rules unchanged. When
+several rules match a path, the one whose source path has the most
+names applies, wherever it is in the list. Between rules for the same
+location the last one applies, so a rule added by
+`extend_path_mapping_rules` replaces an existing rule for its location.
 
 ### SessionUser (stays in Python, passed to Rust)
 
