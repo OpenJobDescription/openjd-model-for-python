@@ -653,6 +653,28 @@ class TestPathMappingViaProfile:
         parsed = parse_expression("apply_path_mapping('/mnt/shared/file.exr')")
         assert parsed.evaluate(profile=profile).item() == long_dest + os.sep + "file.exr"
 
+    def test_the_last_rule_for_the_same_location_wins(self, tmp_path) -> None:
+        """Rules whose source paths have the same components name the same
+        location, and the last one given applies (How Jobs Are Run, "Applying
+        Path Mapping Rules within a Job Template", item 3). openjd-expr 0.14.0
+        (openjd-rs#472); before, the first one applied. ``/mnt`` and ``/mnt/``
+        name the same location."""
+        from openjd.expr import parse_expression
+
+        first = str(tmp_path / "first")
+        last = str(tmp_path / "last")
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path=first
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="/mnt/", destination_path=last
+            ),
+        ]
+        profile = ExprProfile().with_host_context(HostContext.with_rules(rules))
+        parsed = parse_expression("apply_path_mapping('/mnt/file.exr')")
+        assert parsed.evaluate(profile=profile).item() == last + os.sep + "file.exr"
+
     def test_format_string_resolve_applies_rules(self, tmp_path) -> None:
         from openjd.expr import FormatString, SymbolTable
 

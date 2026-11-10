@@ -355,6 +355,33 @@ class TestInterpolationExpressionEvaluateValue:
         assert str(value) == "1.50"
 
 
+class TestHostRules:
+    """A session sets ``expr_host_rules`` on the symbol table, which gives the
+    engine a ``HostContext.with_rules`` profile."""
+
+    def test_an_invalid_rule_raises_an_expression_error(self):
+        """Since openjd-expr 0.14.0 (openjd-rs#472) ``HostContext.with_rules``
+        rejects a rule whose source path is not absolute (How Jobs Are Run,
+        "Path Mapping"), so every EXPR expression evaluated under such a set of
+        rules fails, even one that maps no path. The failure is the model's
+        ``ExpressionError``, not a bare ``ValueError``."""
+        from openjd.expr import PathMappingRule
+
+        st = SymbolTable()
+        st.expr_host_rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="rel", destination_path="/b"
+            )
+        ]
+        node = parse_format_string_expr("1 + 2", context=_ctx(["EXPR"]))
+        with pytest.raises(ExpressionError) as excinfo:
+            node.evaluate(symtab=st)
+        assert str(excinfo.value) == (
+            "path mapping rule 0: source_path 'rel' must be an absolute POSIX path, "
+            "starting with '/'"
+        )
+
+
 class TestFormatStringResolveValue:
     """`FormatString.resolve_value` (RFC 0005/0006 typed resolution): a
     whole-field `{{ ... }}` EXPR expression resolves to the engine's typed

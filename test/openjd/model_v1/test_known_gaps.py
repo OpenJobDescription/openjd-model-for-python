@@ -120,3 +120,19 @@ def test_v0_range_list_renders_in_canonical_form(values: list[int], expected: st
     from openjd.model._range_expr import IntRangeExpr
 
     assert str(IntRangeExpr.from_list(values)) == expected
+
+
+@pytest.mark.xfail(strict=True, reason=_V0_CANONICAL_GAP)
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        pytest.param("1,3,5,7,9", "1-9:2", id="singles join a run"),
+        pytest.param("1,2,4,6", "1,2-6:2", id="a pair leaves the run"),
+    ],
+)
+def test_v0_range_string_renders_in_canonical_form(text: str, expected: str) -> None:
+    """``openjd.expr.RangeExpr`` has written canonical form since openjd-expr
+    0.13.0; ``TestRangeExprCanonicalForm`` in ``test/openjd/expr`` pins it."""
+    from openjd.model._range_expr import IntRangeExpr
+
+    assert str(IntRangeExpr.from_str(text)) == expected
