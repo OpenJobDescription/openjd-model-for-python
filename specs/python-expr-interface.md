@@ -372,12 +372,15 @@ such as a POSIX or WINDOWS rule whose `source_path` is not absolute;
 the message names the rule's index, for example `path mapping rule 1:
 source_path 'rel' must be an absolute POSIX path, starting with '/'`.
 When several rules match a path, the one whose source path has the
-most names applies, wherever it is in the list, and between rules for
-the same location the last one given applies (How Jobs Are Run, "Path
-Mapping"). The order of `rules` matters only for that tie.
+most names applies, wherever it is in the list. Between a POSIX rule
+and a WINDOWS rule with the same number of names (both can match a
+path such as `//srv/share/x`), the WINDOWS rule applies. Between rules
+for the same location, the last one given applies (How Jobs Are Run,
+"Path Mapping"). The order of `rules` matters only for that last tie.
 A `source_path` or `destination_path` longer than 32,768 bytes makes a
-rule invalid, a path longer than that matches no rule, and the rules
-together are limited to about 30 MiB of lookup structure.
+rule invalid, and the rules together are limited to about 30 MiB of
+lookup structure. `apply_path_mapping` raises `ExpressionError` for a
+path longer than 32,768 bytes.
 
 ```python
 # Inspecting a profile
@@ -655,7 +658,8 @@ matched, result = rule.apply(path="/other/path")
 # source_path or destination_path is longer than 32,768 bytes, can be
 # constructed, but apply() raises ValueError for it:
 # "source_path 'rel' must be an absolute POSIX path, starting with '/'"
-# A path longer than 32,768 bytes matches no rule.
+# A path longer than 32,768 bytes matches no rule here (apply_path_mapping
+# raises for it instead).
 
 # Serialization
 d = rule.to_dict()
