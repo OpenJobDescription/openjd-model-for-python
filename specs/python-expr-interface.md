@@ -363,7 +363,18 @@ HostContext.unresolved().is_enabled()   # True
 HostContext.unresolved().is_unresolved()  # True — uses stub implementations
 HostContext.with_rules([]).is_enabled()   # True — empty rules ≠ no host context
 HostContext.with_rules([]).is_unresolved()  # False — uses real implementations
+```
 
+`HostContext.with_rules` raises `ValueError` when a rule is invalid,
+such as a POSIX or WINDOWS rule whose `source_path` is not absolute;
+the message names the rule's index, for example `path mapping rule 1:
+source_path 'rel' must be an absolute POSIX path, starting with '/'`.
+When several rules match a path, the one whose source path has the
+most names applies, wherever it is in the list, and between rules for
+the same location the last one given applies (How Jobs Are Run, "Path
+Mapping"). The order of `rules` matters only for that tie.
+
+```python
 # Inspecting a profile
 profile.revision      # ExprRevision.V2026_02
 profile.extensions    # [] today
@@ -634,6 +645,10 @@ matched, result = rule.apply(path="/mnt/shared/project/file.exr")
 
 matched, result = rule.apply(path="/other/path")
 # matched=False, result="/other/path"
+
+# A rule whose POSIX or WINDOWS source_path is not absolute can be
+# constructed, but apply() raises ValueError for it:
+# "source_path 'rel' must be an absolute POSIX path, starting with '/'"
 
 # Serialization
 d = rule.to_dict()

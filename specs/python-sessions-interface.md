@@ -175,6 +175,14 @@ boundary for those caps: a worker can run a job that never passed
 through the validating process, so a session that is given no limits
 enforces nothing beyond the spec.
 
+`path_mapping_rules`, and the rules given to
+`extend_path_mapping_rules`, must each have an absolute POSIX or
+WINDOWS `source_path` (How Jobs Are Run, "Path Mapping"). A set with
+an invalid rule raises `SessionError`, and `extend_path_mapping_rules`
+leaves the existing rules unchanged. When several rules match a path,
+the one whose source path has the most names applies, wherever it is
+in the list.
+
 ### SessionUser (stays in Python, passed to Rust)
 
 The `SessionUser` types involve OS-specific credential validation (sudo

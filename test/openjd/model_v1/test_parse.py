@@ -369,6 +369,25 @@ steps:
         with pytest.raises(DecodeValidationError):
             decode_job_template_str("specificationVersion: nope")
 
+    @pytest.mark.parametrize("scalar", ["tRUE", "fALSE", "nULL"])
+    def test_mixed_case_bool_and_null_spellings_are_strings(self, scalar: str) -> None:
+        """YAML 1.2 Core reads only ``true``/``True``/``TRUE`` (and the same for
+        ``false`` and ``null``) as booleans and null. Since openjd-model 0.15.0
+        (openjd-rs#487, serde-saphyr 2.1) other spellings are strings, as they
+        are in the pure-Python reference. Before, ``tRUE`` was a boolean and
+        ``nULL`` was null."""
+        t = decode_job_template_str(
+            "specificationVersion: jobtemplate-2023-09\n"
+            "name: T\n"
+            "parameterDefinitions:\n"
+            f"- {{name: P, type: STRING, default: {scalar}}}\n"
+            "steps:\n"
+            "- name: S\n"
+            "  script: {actions: {onRun: {command: echo}}}\n"
+        )
+        assert t.parameter_definitions is not None
+        assert t.parameter_definitions[0].default == scalar
+
 
 class TestDecodeEnvironmentTemplateStr:
     """``decode_environment_template_str`` wrapper: parses YAML or

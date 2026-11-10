@@ -93,3 +93,30 @@ def test_v0_joins_list_path_defaults_to_the_template_directory() -> None:
 def test_v0_normalizes_a_relative_submitted_path() -> None:
     out = _v0_preprocess({"name": "P", "type": "PATH"}, {"P": "sub/../other"})
     assert out["P"] == "/tmp/cwd/other"
+
+
+# ── v0 writes a NONCONTIGUOUS chunk outside canonical form ──
+#
+# This runs v0, not the binding. Template Schemas §3.4.1.5 writes a NONCONTIGUOUS
+# chunk in the canonical form of §3.4.1.1.1, which keeps a run only when it has
+# three or more values, so ``[1, 2, 4, 6]`` is ``1,2-6:2``. v0's
+# ``IntRangeExpr.from_list`` commits to the first gap as the step and writes
+# ``1,2,4,6``. openjd-model 0.14.0 (openjd-rs#469) brought v1 to canonical form;
+# ``TestNoncontiguousChunkRendering`` in ``test_step_param_space_iter.py`` pins
+# the v1 side.
+
+_V0_CANONICAL_GAP = "v0 IntRangeExpr.from_list does not write canonical form (§3.4.1.1.1)"
+
+
+@pytest.mark.xfail(strict=True, reason=_V0_CANONICAL_GAP)
+@pytest.mark.parametrize(
+    "values, expected",
+    [
+        pytest.param([1, 2, 4, 6], "1,2-6:2", id="pair then even progression"),
+        pytest.param([1, 3, 4, 5], "1,3-5", id="gap then consecutive run"),
+    ],
+)
+def test_v0_range_list_renders_in_canonical_form(values: list[int], expected: str) -> None:
+    from openjd.model._range_expr import IntRangeExpr
+
+    assert str(IntRangeExpr.from_list(values)) == expected

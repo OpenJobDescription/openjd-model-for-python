@@ -10,7 +10,7 @@
 //!
 //! Five typed pyclasses mirror the `TaskParameterDefinition` variants:
 //!
-//! * `IntTaskParameterDefinition` — `range: list[int] | FormatString`
+//! * `IntTaskParameterDefinition` — `range: list[int | FormatString] | FormatString`
 //! * `FloatTaskParameterDefinition` — `range: list[float | FormatString] | FormatString`
 //! * `StringTaskParameterDefinition` — `range: list[FormatString] | FormatString`
 //! * `PathTaskParameterDefinition` — `range: list[FormatString] | FormatString`
@@ -76,14 +76,14 @@ fn float_range_item_to_py<'py>(py: Python<'py>, v: &FloatRangeItem) -> PyResult<
     }
 }
 
-/// Convert an `IntRange` to a Python value (`list[int]` or
-/// `FormatString`).
+/// Convert an `IntRange` to a Python value (`list[int | FormatString]`
+/// or `FormatString`).
 fn int_range_to_py<'py>(py: Python<'py>, r: &IntRange) -> PyResult<Bound<'py, PyAny>> {
     match r {
         IntRange::List(items) => {
             let py_list = PyList::empty(py);
             for item in items {
-                py_list.append(item.0)?;
+                py_list.append(int_or_fs_to_py(py, item)?)?;
             }
             Ok(py_list.into_any())
         }
