@@ -181,6 +181,26 @@ class TestIntTaskParameterDefinition:
         assert isinstance(d.range, FormatString)
         assert d.range.raw() == "1-10:2"
 
+    def test_list_with_format_string(self) -> None:
+        """Since openjd-model 0.15.0 (openjd-rs#486) an INT list element may
+        be a format string, and it is exposed as a ``FormatString`` beside the
+        ``int`` literals, as the pure-Python reference exposes its
+        ``list[int | TaskParameterStringValue]``."""
+        step = _decode_step(
+            parameter_definitions=[{"name": "X", "type": "INT"}],
+            parameter_space={
+                "taskParameterDefinitions": [
+                    {"name": "F", "type": "INT", "range": [1, "{{Param.X}}", 3]},
+                ],
+            },
+        )
+        d = step.parameter_space.task_parameter_definitions[0]
+        items = d.range
+        assert items[0] == 1
+        assert isinstance(items[1], FormatString)
+        assert items[1].raw() == "{{Param.X}}"
+        assert items[2] == 3
+
 
 class TestFloatTaskParameterDefinition:
     def test_list_of_literals(self) -> None:
@@ -198,9 +218,15 @@ class TestFloatTaskParameterDefinition:
 
     def test_list_with_format_string(self) -> None:
         """``FloatRangeItem`` is a union — list elements can be
-        either literals (Python ``float``) or ``FormatString``s."""
+        either literals (Python ``float``) or ``FormatString``s.
+
+        ``Param.X`` is declared because since openjd-model 0.15.0
+        (openjd-rs#486) a FLOAT list element's format string is checked at
+        decode time, as the pure-Python reference already did; see
+        ``test_list_element_with_undefined_reference_is_rejected``."""
         step = _decode_step(
             extensions=["EXPR"],
+            parameter_definitions=[{"name": "X", "type": "FLOAT"}],
             parameter_space={
                 "taskParameterDefinitions": [
                     {
@@ -217,6 +243,29 @@ class TestFloatTaskParameterDefinition:
         assert isinstance(items[1], FormatString)
         assert items[1].raw() == "{{Param.X}}"
         assert items[2] == 3.5
+
+    def test_list_element_with_undefined_reference_is_rejected(self) -> None:
+        """openjd-model 0.15.0 (openjd-rs#486) checks the format strings in
+        FLOAT list elements at decode time. Before, an undefined reference
+        here decoded and failed only at job creation; the pure-Python
+        reference rejects it at decode time too."""
+        with pytest.raises(ModelValidationError) as exc_info:
+            _decode_step(
+                extensions=["EXPR"],
+                parameter_space={
+                    "taskParameterDefinitions": [
+                        {"name": "F", "type": "FLOAT", "range": [1.5, "{{Param.X}}"]},
+                    ],
+                },
+            )
+        assert str(exc_info.value) == (
+            "1 validation error for JobTemplate\n"
+            "steps[0] -> parameterSpace -> taskParameterDefinitions[0] -> range[1]:\n"
+            "\tFailed to parse interpolation expression at [0, 11]. "
+            "Undefined variable: 'Param.X'.\n"
+            "  Param.X\n"
+            "  ~~~~~~^"
+        )
 
 
 class TestStringTaskParameterDefinition:
@@ -284,6 +333,33 @@ class TestChunkIntTaskParameterDefinition:
         assert chunks.default_task_count == 4
         assert chunks.target_runtime_seconds is None
         assert chunks.range_constraint == "CONTIGUOUS"
+
+    def test_list_with_format_string(self) -> None:
+        """``CHUNK[INT]`` shares the INT range list type, so since
+        openjd-model 0.15.0 (openjd-rs#486) its list elements are also
+        ``int`` or ``FormatString``."""
+        step = _decode_step(
+            extensions=["TASK_CHUNKING"],
+            parameter_definitions=[{"name": "X", "type": "INT"}],
+            parameter_space={
+                "taskParameterDefinitions": [
+                    {
+                        "name": "F",
+                        "type": "CHUNK[INT]",
+                        "range": ["{{Param.X}}", 7],
+                        "chunks": {
+                            "defaultTaskCount": 4,
+                            "rangeConstraint": "NONCONTIGUOUS",
+                        },
+                    }
+                ]
+            },
+        )
+        d = step.parameter_space.task_parameter_definitions[0]
+        items = d.range
+        assert isinstance(items[0], FormatString)
+        assert items[0].raw() == "{{Param.X}}"
+        assert items[1] == 7
 
     def test_chunks_with_target_runtime(self) -> None:
         """``targetRuntimeSeconds`` and a ``NONCONTIGUOUS`` constraint

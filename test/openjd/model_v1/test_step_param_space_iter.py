@@ -1011,16 +1011,19 @@ class TestChunksTaskCountOverride:
 
 
 class TestNoncontiguousChunkRendering:
-    """A NONCONTIGUOUS chunk renders its values the way the v0 reference's
-    ``IntRangeExpr.from_list`` does: commit to the first gap as the step, and
-    consume a consecutive pair atomically. openjd-model 0.8.0 (openjd-rs#398).
-    0.7.1 used a compressor that only collapsed runs of three or more agreeing
-    gaps, so ``[1, 2, 4, 6]`` rendered as ``1,2-6:2``. Every spelling parses to
-    the same integers, which is why nothing caught the divergence; the rendered
-    text is what a task sees in ``{{Task.Param.Frame}}``.
+    """A NONCONTIGUOUS chunk renders its values in the canonical form of
+    Template Schemas §3.4.1.1.1, which the chunk definition (§3.4.1.5) requires.
+    The rendered text is what a task sees in ``{{Task.Param.Frame}}``.
 
-    Expected values are the v0 reference's output for the same template, checked
-    by running both paths side by side when this test was written.
+    openjd-model 0.14.0 (openjd-rs#469) writes range expressions in canonical
+    form, which starts a run at the first value not yet in one and keeps it only
+    when it has three or more values, so ``[1, 2, 4, 6]`` renders ``1,2-6:2``.
+    From openjd-model 0.8.0 (openjd-rs#398) until then, the binding matched the
+    pure-Python reference's ``IntRangeExpr.from_list``, which commits to the
+    first gap as the step and consumes a consecutive pair atomically, rendering
+    ``1,2,4,6``. The pure-Python reference still does that, so the first two
+    cases below differ from it; that is a gap in the reference, not here.
+    Every spelling parses to the same integers.
     """
 
     @staticmethod
@@ -1062,11 +1065,11 @@ class TestNoncontiguousChunkRendering:
     @pytest.mark.parametrize(
         "range_values, expected",
         [
-            pytest.param(["1", "2", "4", "6"], "1,2,4,6", id="pair then even progression"),
-            pytest.param(["1", "3", "4", "5"], "1,3,4,5", id="gap then consecutive run"),
+            pytest.param(["1", "2", "4", "6"], "1,2-6:2", id="pair then even progression"),
+            pytest.param(["1", "3", "4", "5"], "1,3-5", id="gap then consecutive run"),
             pytest.param(["7", "8"], "7,8", id="lone pair"),
             pytest.param(["1", "3", "5", "7"], "1-7:2", id="control: uniform step compresses"),
         ],
     )
-    def test_chunk_renders_like_the_reference(self, range_values: list[str], expected: str) -> None:
+    def test_chunk_renders_in_canonical_form(self, range_values: list[str], expected: str) -> None:
         assert self._frames(range_values, default_task_count=4) == [expected]

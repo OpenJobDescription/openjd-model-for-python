@@ -6,7 +6,7 @@ use pyo3::types::PyDict;
 #[cfg(feature = "stub-gen")]
 use pyo3_stub_gen::derive::*;
 
-use openjd_expr::path_mapping::{PathFormat, PathMappingRule};
+use openjd_expr::path_mapping::{PathFormat, PathMapper, PathMappingRule};
 
 use crate::expr::path_format::PyPathFormat;
 
@@ -167,16 +167,28 @@ impl PyPathMappingRule {
         h.finish()
     }
 
+    /// Apply this rule to `path`. Returns `(True, mapped)` when the rule
+    /// matches and `(False, path)` when it does not. Raises `ValueError`
+    /// when the rule itself is invalid, for example a POSIX or WINDOWS
+    /// `source_path` that is not absolute.
     #[pyo3(signature = (*, path, output_format=None))]
-    fn apply(&self, path: &str, output_format: Option<PyPathFormat>) -> (bool, String) {
-        let result = match output_format {
-            Some(fmt) => self.inner.apply_with_format(path, fmt.into()),
-            None => self.inner.apply(path),
+    fn apply(&self, path: &str, output_format: Option<PyPathFormat>) -> PyResult<(bool, String)> {
+        // openjd-expr applies rules only through a `PathMapper`, so a
+        // one-rule mapper gives this rule's mapping. `validate` first so the
+        // error does not name an index in a list the caller never made.
+        let invalid = |e: openjd_expr::path_mapping::InvalidPathMappingRule| {
+            pyo3::exceptions::PyValueError::new_err(e.to_string())
         };
-        match result {
+        self.inner.validate().map_err(invalid)?;
+        let mapper = PathMapper::new(vec![self.inner.clone()]).map_err(invalid)?;
+        let result = match output_format {
+            Some(fmt) => mapper.apply_with_format(path, fmt.into()),
+            None => mapper.apply(path),
+        };
+        Ok(match result {
             Some(mapped) => (true, mapped),
             None => (false, path.to_string()),
-        }
+        })
     }
 
     fn to_dict(&self) -> std::collections::HashMap<String, String> {

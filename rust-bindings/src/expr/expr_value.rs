@@ -331,7 +331,7 @@ impl PyExprValue {
 
     fn __len__(&self) -> PyResult<usize> {
         match &self.inner {
-            ExprValue::RangeExpr(r) => Ok(r.len()),
+            ExprValue::RangeExpr(r) => crate::len_to_usize(r.len()),
             _ => self.inner.list_len().ok_or_else(|| {
                 pyo3::exceptions::PyTypeError::new_err("ExprValue is not a list or range_expr")
             }),

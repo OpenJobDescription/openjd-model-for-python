@@ -4,7 +4,7 @@
 
 import sys
 import pytest
-from pathlib import PurePath
+from pathlib import PurePath, PurePosixPath
 from openjd.expr import evaluate_expression, ExprValue, ExpressionError, SymbolTable
 from openjd.expr import PathFormat
 
@@ -70,6 +70,24 @@ class TestPaths:
         symtab = SymbolTable({"Dir": _p(d)})
         result = evaluate_expression("Dir / 'subdir' / 'file.txt'", values=symtab)
         assert str(result) == str(d / "subdir" / "file.txt")
+
+    @pytest.mark.parametrize(
+        "left, right, expected",
+        [
+            pytest.param("", "a", "a", id="empty left"),
+            pytest.param(".", "a", "a", id="dot left"),
+            pytest.param("a", "", "a", id="empty right"),
+            pytest.param("/x", "", "/x", id="empty right after a root"),
+            pytest.param("", "", ".", id="both empty"),
+        ],
+    )
+    def test_path_join_with_an_empty_operand(self, left: str, right: str, expected: str) -> None:
+        """An empty operand gives the other operand, and two give ``.``, as
+        ``pathlib`` does (Expression Language §2.1.5). openjd-expr 0.14.0
+        (openjd-rs#516); before, ``path('') / 'a'`` gave ``./a`` and
+        ``path('a') / ''`` gave ``a/``."""
+        result = evaluate_expression(f"path('{left}') / '{right}'", path_format=PathFormat.POSIX)
+        assert str(result) == expected == str(PurePosixPath(left) / right)
 
     def test_path_concat(self, tmp_path) -> None:
         p = tmp_path / "output" / "file"

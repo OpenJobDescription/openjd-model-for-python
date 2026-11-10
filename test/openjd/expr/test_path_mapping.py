@@ -215,6 +215,59 @@ class TestPathMappingRuleFromUri:
 class TestPathMappingRuleValidation:
     """Tests for from_dict validation shared across formats."""
 
+    @pytest.mark.parametrize(
+        "source_path_format, source_path, expected",
+        [
+            pytest.param(
+                PathFormat.POSIX,
+                "rel/a",
+                "source_path 'rel/a' must be an absolute POSIX path, starting with '/'",
+                id="relative POSIX",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "a\\b",
+                "source_path 'a\\b' must be an absolute WINDOWS path, starting with a drive "
+                "such as 'C:\\' or a UNC share such as '\\\\server\\share'",
+                id="relative WINDOWS",
+            ),
+        ],
+    )
+    def test_apply_rejects_a_relative_source_path(
+        self, source_path_format: PathFormat, source_path: str, expected: str
+    ) -> None:
+        """Since openjd-expr 0.14.0 (openjd-rs#472) a rule must have an
+        absolute source path (How Jobs Are Run, "Applying Path Mapping Rules
+        within a Job Template", item 1), and applying one that doesn't raises.
+        Before, such a rule matched relative paths. The pure-Python reference
+        in openjd-sessions still accepts it."""
+        rule = PathMappingRule(
+            source_path_format=source_path_format,
+            source_path=source_path,
+            destination_path="/b",
+        )
+        with pytest.raises(ValueError) as exc_info:
+            rule.apply(path="rel/a/x")
+        assert str(exc_info.value) == expected
+
+    def test_with_rules_rejects_a_relative_source_path(self) -> None:
+        """``HostContext.with_rules`` checks every rule, and the message
+        names the rule's index."""
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="/a", destination_path="/b"
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="rel", destination_path="/b"
+            ),
+        ]
+        with pytest.raises(ValueError) as exc_info:
+            HostContext.with_rules(rules)
+        assert str(exc_info.value) == (
+            "path mapping rule 1: source_path 'rel' must be an absolute POSIX path, "
+            "starting with '/'"
+        )
+
 
 class TestPathMappingRuleSerialization:
     """Tests for from_dict/to_dict serialization."""
@@ -571,6 +624,34 @@ class TestPathMappingViaProfile:
         fs = FormatString("{{apply_path_mapping('/mnt/shared/file.exr')}}")
         result = fs.resolve_string(SymbolTable({}), profile=self._profile_with_rule(dest))
         assert result == dest + os.sep + "file.exr"
+
+    @pytest.mark.parametrize("reverse", [False, True], ids=["shorter first", "longer first"])
+    def test_the_rule_with_the_most_names_wins_in_any_order(self, tmp_path, reverse) -> None:
+        """Since openjd-expr 0.14.0 (openjd-rs#472) the rule whose source
+        path has the most names applies, wherever it is in the list (How
+        Jobs Are Run, "Applying Path Mapping Rules within a Job Template",
+        item 3). Before, ``with_rules`` used the first rule that matched."""
+        from openjd.expr import parse_expression
+
+        short_dest = str(tmp_path / "short")
+        long_dest = str(tmp_path / "long")
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX,
+                source_path="/mnt",
+                destination_path=short_dest,
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX,
+                source_path="/mnt/shared",
+                destination_path=long_dest,
+            ),
+        ]
+        if reverse:
+            rules.reverse()
+        profile = ExprProfile().with_host_context(HostContext.with_rules(rules))
+        parsed = parse_expression("apply_path_mapping('/mnt/shared/file.exr')")
+        assert parsed.evaluate(profile=profile).item() == long_dest + os.sep + "file.exr"
 
     def test_format_string_resolve_applies_rules(self, tmp_path) -> None:
         from openjd.expr import FormatString, SymbolTable
