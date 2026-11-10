@@ -121,7 +121,7 @@ When reviewing `rust-bindings/src/<component>/`, the agent **MUST** check the fo
 - **GIL handling**: Long-running Rust calls **SHOULD** use `Python::allow_threads` to release the GIL. Holding the GIL across blocking I/O (sessions subprocess wait, snapshots S3 ops) blocks every other Python thread.
 - **`#[pyclass]` constructor signatures**: Python `__init__` signatures must match what the spec advertises. Look for `#[pyo3(signature = ...)]` mismatches against `text_signature` and the spec.
 - **`Py<T>` lifetime correctness**: Make sure objects passed across the boundary are not reborrowed in ways that cause `BorrowMutError` or use-after-free in PyO3 0.20+ semantics.
-- **ABI3 compatibility**: `Cargo.toml` declares `abi3-py39`. Any binding code that uses Python C API features beyond ABI3 will fail at compile time on a strict ABI3 build — but check that there are no quietly-leaked feature flags.
+- **ABI3 compatibility**: `Cargo.toml` declares `abi3-py310`. Any binding code that uses Python C API features beyond ABI3 will fail at compile time on a strict ABI3 build — but check that there are no quietly-leaked feature flags.
 - **Stub generation**: `cargo run --bin stub_gen` produces `src/openjd/_openjd_rs.pyi`. This file **MUST** match the bindings; if it has drifted, regenerate it during the evaluation.
 
 ### Evaluation Procedure

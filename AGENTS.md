@@ -39,7 +39,7 @@ cargo test   --manifest-path rust-bindings/Cargo.toml
 cargo test   --manifest-path rust-bindings/Cargo.toml --doc
 ```
 
-Python: **3.9+** (declared via `abi3-py39` in `rust-bindings/Cargo.toml`, enforced by `pyproject.toml` `requires-python`).
+Python: **3.10+** (declared via `abi3-py310` in `rust-bindings/Cargo.toml`, enforced by `pyproject.toml` `requires-python`).
 
 ## Component Map
 
@@ -199,7 +199,7 @@ Items the `eval-bindings` skill checks; these are the recurring sources of behav
 - **Type conversions** — `IntoPyObject`/`FromPyObject` impls must preserve types faithfully. Watch the `int` ↔ `i64`/`u64` boundary, `float` NaN/Inf passthrough, `pathlib.Path` ↔ `Path`/`PathBuf`, and ordered vs unordered collections.
 - **GIL handling** — long-running Rust calls (sessions subprocess wait, large template parses) should release the GIL via `Python::allow_threads`. Holding the GIL across blocking I/O blocks every other Python thread.
 - **`#[pyclass]` constructor signatures** — Python `__init__` signatures must match what the spec advertises. Keep `#[pyo3(signature = ...)]` aligned with `text_signature` and the spec.
-- **ABI3 compatibility** — `Cargo.toml` declares `abi3-py39`. Don't introduce code that uses Python C-API features beyond ABI3.
+- **ABI3 compatibility** — `Cargo.toml` declares `abi3-py310`. Don't introduce code that uses Python C-API features beyond ABI3.
 - **Stub generation** — `scripts/generate_stubs.sh` runs the `stub_gen` binary and produces `src/openjd/_openjd_rs.pyi`. The stub must match the bindings; regenerate it whenever you change a public symbol's signature.
 
 ### Coding Style
@@ -215,7 +215,7 @@ PRs run these checks (all must pass):
 
 | Workflow | What it does |
 |----------|--------------|
-| **Code Quality** (`code_quality.yml`) | Python build + tests on `{ubuntu, windows, macos} × {3.9, 3.10, 3.11, 3.12, 3.13, 3.14}`. Uses the shared `OpenJobDescription/.github` reusable workflow, which runs `hatch run lint`, `hatch run typing`, and `hatch run test`. Transitively builds the Rust extension via the `maturin develop` step in `hatch.toml`. |
+| **Code Quality** (`code_quality.yml`) | Python build + tests on `{ubuntu, windows, macos} × {3.10, 3.11, 3.12, 3.13, 3.14}`. Uses the shared `OpenJobDescription/.github` reusable workflow, which runs `hatch run lint`, `hatch run typing`, and `hatch run test`. Transitively builds the Rust extension via the `maturin develop` step in `hatch.toml`. |
 | **Rust Quality** (`rust_quality.yml`) | `cargo build --all-targets`, `cargo clippy --all-targets -- -D warnings` (hard gate), `cargo test`, and `cargo test --doc` against `rust-bindings/`. Runs on `{ubuntu, windows, macos}`. Resolves `openjd-*` dependencies from crates.io at the versions pinned in `rust-bindings/Cargo.toml`. |
 | **CodeQL** (`codeql.yml`) | GitHub's static analysis. |
 | **PR opened/responded/auto_approve/stale_prs_and_issues/record_pr** | Repo housekeeping; not relevant to code changes. |
