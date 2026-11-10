@@ -186,8 +186,11 @@ names applies, wherever it is in the list, and a WINDOWS rule applies
 over a POSIX rule with the same number of names. Between rules for the
 same location the last one applies, so a rule added by
 `extend_path_mapping_rules` replaces an existing rule for its location.
-A PATH or LIST[PATH] value longer than 32,768 bytes is an error when
-the session resolves it.
+Rules match paths component by component, as described for
+`HostContext.with_rules` in
+[python-expr-interface.md](./python-expr-interface.md). A PATH or
+LIST[PATH] value longer than 32,768 bytes is an error when the session
+resolves it.
 
 `working_directory` is a directory under the session root whose name
 is 8 random characters from `[a-z0-9_]`, with no part of the session

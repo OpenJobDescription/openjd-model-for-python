@@ -377,6 +377,12 @@ and a WINDOWS rule with the same number of names (both can match a
 path such as `//srv/share/x`), the WINDOWS rule applies. Between rules
 for the same location, the last one given applies (How Jobs Are Run,
 "Path Mapping"). The order of `rules` matters only for that last tie.
+Paths are compared component by component, as How Jobs Are Run, "Path
+Mapping" item 2 says: a drive or UNC share must match as a whole,
+WINDOWS components compare the way Windows compares file names
+(non-ASCII letters included), and `.` and empty components are ignored
+and left out of the mapped path. The pure-Python reference in
+openjd-sessions folds only ASCII letters.
 A `source_path` or `destination_path` longer than 32,768 bytes makes a
 rule invalid, and the rules together are limited to about 30 MiB of
 lookup structure. `apply_path_mapping` raises `ExpressionError` for a
