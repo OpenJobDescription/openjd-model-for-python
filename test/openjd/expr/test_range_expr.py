@@ -4,7 +4,7 @@
 
 import pytest
 from openjd.expr import evaluate_expression, SymbolTable, ExpressionError, TypeCode
-from openjd.expr import RangeExpr, IntRange
+from openjd.expr import RangeExpr, RangeExprError, IntRange
 
 
 class TestRangeExpr:
@@ -182,6 +182,56 @@ class TestRangeExpr:
     def test_from_list_invalid_type_raises(self) -> None:
         with pytest.raises(TypeError, match="must be int or str"):
             RangeExpr.from_list([1.5])
+
+
+class TestRangeExprCanonicalForm:
+    """Since openjd-expr 0.13.0 (openjd-rs#469) a ``RangeExpr`` is kept and
+    written in the canonical form of Template Schemas §3.4.1.1.1, and two
+    compare equal exactly when they have the same values. Before, the string
+    and ``ranges()`` followed the input's elements, so ``"1,3,5,7,9"`` stayed
+    five runs and did not equal ``"1-9:2"``. The pure-Python
+    ``openjd.model._range_expr.IntRangeExpr`` still follows the input; see
+    ``test_v0_range_list_renders_in_canonical_form`` in
+    ``test/openjd/model_v1/test_known_gaps.py``."""
+
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            pytest.param("1,3,5,7,9", "1-9:2", id="singles join a run"),
+            pytest.param("1,2,4,6", "1,2-6:2", id="a pair leaves the run"),
+            pytest.param("1-10:2,11", "1-11:2", id="a run extends across elements"),
+            pytest.param("1-10:4", "1-9:4", id="the end is the last value"),
+            pytest.param("13-18,19", "13-19", id="adjacent elements merge"),
+        ],
+    )
+    def test_str_is_canonical(self, text: str, expected: str) -> None:
+        assert str(RangeExpr(text)) == expected
+        assert repr(RangeExpr(text)) == f'RangeExpr("{expected}")'
+
+    def test_ranges_are_the_canonical_runs(self) -> None:
+        """A run of two values is written as two single values, so ``"1-2"``
+        has two ranges."""
+        assert RangeExpr("1-2").ranges() == [IntRange(1, 1, 1), IntRange(2, 2, 1)]
+        assert RangeExpr("1,3,5,7,9").ranges() == [IntRange(1, 9, 2)]
+
+    def test_equality_is_by_value(self) -> None:
+        a = RangeExpr("1,3,5,7,9")
+        b = RangeExpr("1-9:2")
+        assert a == b
+        assert hash(a) == hash(b)
+
+    def test_from_list_caps_the_canonical_runs(self) -> None:
+        """openjd-expr 0.14.0 (openjd-rs#470) caps every constructor at 50,000
+        runs of the canonical form. 25,000 pairs are 50,000 runs, and one more
+        value is one too many."""
+        values = [v for i in range(25_000) for v in (i * 10, i * 10 + 1)]
+        assert len(RangeExpr.from_list(values).ranges()) == 50_000
+        with pytest.raises(RangeExprError) as exc_info:
+            RangeExpr.from_list(values + [10**7])
+        assert str(exc_info.value) == (
+            "Range expression has too many sub-ranges in canonical form (50001); "
+            "maximum is 50000"
+        )
 
 
 class TestExprValueRangeExprProtocols:

@@ -240,8 +240,12 @@ class ExprNode(Node):
         values = symtab_to_expr_values(
             symtab, types=symtab.expr_types or None, path_format=path_format
         )
-        profile = profile_for_symtab(symtab)
         try:
+            # Inside the try: ``HostContext.with_rules`` raises ``ValueError``
+            # for an invalid path mapping rule, such as one whose source path
+            # is not absolute, and that reaches the caller as an expression
+            # error like any other.
+            profile = profile_for_symtab(symtab)
             return self._parsed.evaluate(values=values, profile=profile, path_format=path_format)
         except Exception as exc:  # noqa: BLE001 - boundary; re-raise as model error
             raise map_eval_error(exc)

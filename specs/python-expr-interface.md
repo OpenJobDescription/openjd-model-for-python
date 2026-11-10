@@ -742,6 +742,16 @@ RangeExpr.from_list(["1", "2", "3"])      # 1-3
 input string. Two `RangeExpr` values that compare equal also hash
 equal (suitable as `set` / `dict` keys).
 
+A `RangeExpr` is kept in the canonical form of Template Schemas
+§3.4.1.1.1, whatever elements the input used. `str`, `repr` and
+`ranges()` give the canonical runs, so `RangeExpr("1,3,5,7,9")` is
+`1-9:2` and `RangeExpr("1-2").ranges()` is two single-value ranges.
+Two `RangeExpr`s are equal exactly when they have the same values.
+Every constructor raises `RangeExprError` when the canonical form would
+have more than 50,000 runs. The pure-Python
+`openjd.model._range_expr.IntRangeExpr` follows the input's elements
+instead.
+
 ### `IntRange`
 
 A single contiguous integer range — the element type returned by

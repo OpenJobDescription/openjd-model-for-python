@@ -2973,3 +2973,47 @@ class TestCreateJobMissingExtensionsAreSorted:
             "missing EXPR, FEATURE_BUNDLE_1. An application that does not support an extension "
             "should reject the template at decode via its supported-extensions list."
         )
+
+
+class TestIntRangeListFormatStringElements:
+    """Since openjd-model 0.15.0 (openjd-rs#486) an INT range list element may
+    be a format string. ``create_job`` resolves it and requires an integer
+    (Template Schemas §3.4.1, Expression Language §1.3.2)."""
+
+    @staticmethod
+    def _create(value: str) -> Any:
+        decoded = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "name": "T",
+                "parameterDefinitions": [{"name": "X", "type": "STRING"}],
+                "steps": [
+                    {
+                        "name": "S",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {"name": "F", "type": "INT", "range": [1, "{{Param.X}}"]}
+                            ]
+                        },
+                        "script": {"actions": {"onRun": {"command": "echo"}}},
+                    }
+                ],
+            }
+        )
+        return create_job(job_template=decoded, job_parameter_values={"X": value})
+
+    def test_an_integer_value_resolves(self) -> None:
+        job = self._create(" 7 ")
+        space = job.steps[0].parameterSpace
+        assert space is not None
+        assert space.taskParameterDefinitions["F"].range == [1, 7]
+
+    @pytest.mark.parametrize("value", ["abc", "1.5"])
+    def test_a_value_that_is_not_an_integer_fails(self, value: str) -> None:
+        from openjd.expr import ExpressionError
+
+        with pytest.raises(ExpressionError) as excinfo:
+            self._create(value)
+        assert (
+            str(excinfo.value) == f"Task parameter 'F' range[1]: value '{value}' is not an integer"
+        )
