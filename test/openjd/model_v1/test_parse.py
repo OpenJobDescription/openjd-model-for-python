@@ -389,6 +389,29 @@ steps:
         assert t.parameter_definitions is not None
         assert t.parameter_definitions[0].default == scalar
 
+    @pytest.mark.parametrize(
+        "ptype, scalar, expected",
+        [
+            pytest.param("FLOAT", "!!float 1.5", 1.5, id="float"),
+            pytest.param("INT", "!!int 3", 3, id="int"),
+        ],
+    )
+    def test_a_core_tagged_scalar_decodes(self, ptype: str, scalar: str, expected: Any) -> None:
+        """With serde-saphyr 2.1 a YAML 1.2 Core tag on a scalar is read as its
+        type. Before, with serde-saphyr 1.2, the decode failed with
+        ``cannot deserialize tagged scalar into string``."""
+        t = decode_job_template_str(
+            "specificationVersion: jobtemplate-2023-09\n"
+            "name: T\n"
+            "parameterDefinitions:\n"
+            f"- {{name: P, type: {ptype}, default: {scalar}}}\n"
+            "steps:\n"
+            "- name: S\n"
+            "  script: {actions: {onRun: {command: echo}}}\n"
+        )
+        assert t.parameter_definitions is not None
+        assert t.parameter_definitions[0].default == expected
+
 
 class TestDecodeEnvironmentTemplateStr:
     """``decode_environment_template_str`` wrapper: parses YAML or

@@ -7,7 +7,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 
 import pytest
 
-from openjd.expr import PathMappingRule, PathFormat, ExprProfile, HostContext
+from openjd.expr import ExpressionError, PathMappingRule, PathFormat, ExprProfile, HostContext
 
 
 class TestPathMappingRuleFromPosix:
@@ -457,6 +457,19 @@ class TestPathLengthLimit:
         path = "/mnt/" + "a" * (32 * 1024 - len("/mnt/") + 1)
         assert self._RULE.apply(path=path) == (False, path)
 
+    def test_apply_path_mapping_rejects_a_longer_path(self) -> None:
+        """The ``apply_path_mapping`` expression function raises rather than
+        returning the path unmapped."""
+        from openjd.expr import parse_expression
+
+        profile = ExprProfile().with_host_context(HostContext.with_rules([self._RULE]))
+        path = "/mnt/" + "a" * (32 * 1024 - len("/mnt/") + 1)
+        with pytest.raises(ExpressionError) as exc_info:
+            parse_expression(f"apply_path_mapping('{path}')").evaluate(profile=profile)
+        assert str(exc_info.value).split("\n")[0] == (
+            "apply_path_mapping: the path is 32769 bytes long, more than the limit of 32768 bytes"
+        )
+
     def test_a_longer_destination_path_is_invalid(self) -> None:
         rule = PathMappingRule(
             source_path_format=PathFormat.POSIX,
@@ -707,6 +720,34 @@ class TestPathMappingViaProfile:
         profile = ExprProfile().with_host_context(HostContext.with_rules(rules))
         parsed = parse_expression("apply_path_mapping('/mnt/shared/file.exr')")
         assert parsed.evaluate(profile=profile).item() == long_dest + os.sep + "file.exr"
+
+    @pytest.mark.parametrize("reverse", [False, True], ids=["WINDOWS first", "POSIX first"])
+    def test_windows_wins_a_tie_with_posix_in_any_order(self, reverse) -> None:
+        """A POSIX rule and a WINDOWS rule with the same number of names can
+        both match a path such as ``//srv/share/x``, and the WINDOWS rule
+        applies wherever it is in the list (How Jobs Are Run, "Applying Path
+        Mapping Rules within a Job Template", item 3). openjd-expr 0.14.0
+        (openjd-rs#472); before, the first one applied."""
+        from openjd.expr import parse_expression
+
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.WINDOWS,
+                source_path="\\\\srv\\share",
+                destination_path="/win",
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX,
+                source_path="//srv/share",
+                destination_path="/posix",
+            ),
+        ]
+        if reverse:
+            rules.reverse()
+        profile = ExprProfile().with_host_context(HostContext.with_rules(rules))
+        parsed = parse_expression("apply_path_mapping('//srv/share/x')")
+        result = parsed.evaluate(profile=profile, path_format=PathFormat.POSIX)
+        assert result.item() == "/win/x"
 
     def test_the_last_rule_for_the_same_location_wins(self, tmp_path) -> None:
         """Rules whose source paths have the same components name the same

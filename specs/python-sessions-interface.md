@@ -182,9 +182,16 @@ longer than 32,768 bytes (How Jobs Are Run, "Path Mapping"). A set
 with an invalid rule raises `SessionError`, and
 `extend_path_mapping_rules` leaves the existing rules unchanged. When
 several rules match a path, the one whose source path has the most
-names applies, wherever it is in the list. Between rules for the same
-location the last one applies, so a rule added by
+names applies, wherever it is in the list, and a WINDOWS rule applies
+over a POSIX rule with the same number of names. Between rules for the
+same location the last one applies, so a rule added by
 `extend_path_mapping_rules` replaces an existing rule for its location.
+A PATH or LIST[PATH] value longer than 32,768 bytes is an error when
+the session resolves it.
+
+`working_directory` is a directory under the session root whose name
+is 8 random characters from `[a-z0-9_]`, with no part of the session
+ID in it, as the pure-Python reference names it.
 
 ### SessionUser (stays in Python, passed to Rust)
 
