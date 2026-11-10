@@ -330,8 +330,15 @@ uuid = { version = "1", features = ["v4"] }
 The Rust sessions crate uses the `log` crate. We bridge to Python logging:
 
 - Set up a `log` → Python `logging` bridge in the PyO3 module init
-- The Rust `session_log!` macro tags messages with session_id and LogContent
-- The Python side receives structured log records matching the current format
+- The Rust `session_log!` macro tags messages with three extra attributes:
+  - `session_id`: the session correlation identifier, represented as a Python `str`
+  - `openjd_log_content`: the `LogContent` bitmask, represented as a decimal Python `str`
+  - `openjd_timestamp_usec`: microseconds since the Unix epoch, represented as a decimal Python `str`
+- `pyo3-log` stringifies Rust key-values while constructing the Python `LogRecord`.
+  The `openjd.sessions._v1` wrapper normalizes the content bitmask to its public
+  `LogContent` type and the timestamp to an `int` for consumers.
+- Rust records not emitted through `session_log!` may omit some or all of these
+  extra attributes.
 
 This preserves the existing log output that the worker agent and CLI parse.
 
