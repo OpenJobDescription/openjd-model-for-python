@@ -415,6 +415,78 @@ class TestTrailingSlash:
         assert result.endswith("/") or result.endswith(os.sep) or result.endswith("\\")
 
 
+class TestComponentMatching:
+    """Since openjd-expr 0.14.0 (openjd-rs#472) rules match whole components
+    the way How Jobs Are Run, "Applying Path Mapping Rules within a Job
+    Template", item 2 says: a UNC share is one component and must match as a
+    whole, WINDOWS components compare the way Windows compares file names
+    (non-ASCII letters too), and ``.`` and empty components are ignored and
+    left out of the mapped path. Before, a rooted path such as ``\\srv\\share``
+    matched a UNC rule, ``C:\\Ünï`` did not match ``C:\\üNÏ``, a ``.`` before
+    the end of the source path prevented a match, and ``.`` and empty
+    components after it were kept. The pure-Python reference agrees on every
+    row except the non-ASCII one, where it folds ASCII letters only."""
+
+    @pytest.mark.parametrize(
+        "source_path_format, source_path, path, expected",
+        [
+            pytest.param(
+                PathFormat.WINDOWS,
+                "\\\\srv\\share",
+                "\\\\SRV\\SHARE\\x",
+                (True, "/d/x"),
+                id="UNC share, case-insensitive",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "\\\\srv\\share",
+                "\\srv\\share\\x",
+                (False, "\\srv\\share\\x"),
+                id="a rooted path is not a UNC share",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "C:\\Ünï",
+                "C:\\üNÏ\\f",
+                (True, "/d/f"),
+                id="non-ASCII letters compare case-insensitively",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "C:\\proj",
+                "C:\\proj\\.\\f\\",
+                (True, "/d/f/"),
+                id="WINDOWS dot component dropped",
+            ),
+            pytest.param(
+                PathFormat.POSIX,
+                "/mnt/a",
+                "/mnt/./a/b",
+                (True, "/d/b"),
+                id="dot component inside the source path",
+            ),
+            pytest.param(
+                PathFormat.POSIX,
+                "/mnt/a",
+                "/mnt/a/./b//c",
+                (True, "/d/b/c"),
+                id="dot and empty components dropped",
+            ),
+        ],
+    )
+    def test_apply(
+        self,
+        source_path_format: PathFormat,
+        source_path: str,
+        path: str,
+        expected: tuple[bool, str],
+    ) -> None:
+        rule = PathMappingRule(
+            source_path_format=source_path_format, source_path=source_path, destination_path="/d"
+        )
+        assert rule.apply(path=path, output_format=PathFormat.POSIX) == expected
+
+
 class TestDestinationEndingInASeparator:
     """Since openjd-expr 0.14.0 (openjd-rs#483) no separator is added after a
     destination that already ends with one. Before, ``/dst/`` gave
