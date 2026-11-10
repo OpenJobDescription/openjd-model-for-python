@@ -377,8 +377,9 @@ and a WINDOWS rule with the same number of names (both can match a
 path such as `//srv/share/x`), the WINDOWS rule applies. Between rules
 for the same location, the last one given applies (How Jobs Are Run,
 "Path Mapping"). The order of `rules` matters only for that last tie.
-Paths are compared component by component, as How Jobs Are Run, "Path
-Mapping" item 2 says: a drive or UNC share must match as a whole,
+Paths are compared component by component, as How Jobs Are Run,
+"Applying Path Mapping Rules within a Job Template", item 2 says: a
+drive or UNC share must match as a whole,
 WINDOWS components compare the way Windows compares file names
 (non-ASCII letters included), and `.` and empty components are ignored
 and left out of the mapped path. The pure-Python reference in

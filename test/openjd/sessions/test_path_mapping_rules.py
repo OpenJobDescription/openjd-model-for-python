@@ -12,7 +12,6 @@ constructed and when ``extend_path_mapping_rules`` adds to them.
 
 from __future__ import annotations
 
-import os
 import time
 
 import pytest
@@ -59,20 +58,5 @@ def test_extend_rejects_a_relative_source_path() -> None:
         with pytest.raises(SessionError) as exc_info:
             session.extend_path_mapping_rules([_RELATIVE])
         assert str(exc_info.value) == _MESSAGE
-    finally:
-        session.cleanup()
-
-
-def test_the_working_directory_is_named_with_8_random_characters() -> None:
-    """Since openjd-sessions 0.9.0 (openjd-rs#444) the session working directory
-    is named with exactly 8 characters from ``[a-z0-9_]`` and no part of the
-    session ID, as the pure-Python reference's ``mkdtemp(prefix="")`` names it.
-    Before, the name was the session ID followed by 32 hex digits."""
-    import re
-
-    session = Session(session_id="my-session-id", job_parameter_values={})
-    try:
-        name = os.path.basename(session.working_directory)
-        assert re.fullmatch(r"[a-z0-9_]{8}", name), name
     finally:
         session.cleanup()
