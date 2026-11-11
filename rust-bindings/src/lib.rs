@@ -48,6 +48,18 @@ fn register_renamed_exception(
     Ok(())
 }
 
+/// Convert a `u64` count from the openjd crates to the `usize` that
+/// `__len__` must return. The crates keep counts 64-bit on every target,
+/// so on a 32-bit target a count above `usize::MAX` raises `OverflowError`,
+/// which is what Python's `len()` raises for a length it cannot represent.
+pub(crate) fn len_to_usize(len: u64) -> PyResult<usize> {
+    usize::try_from(len).map_err(|_| {
+        pyo3::exceptions::PyOverflowError::new_err(
+            "length does not fit in this platform's Py_ssize_t",
+        )
+    })
+}
+
 // ── Module ──
 
 #[pymodule]

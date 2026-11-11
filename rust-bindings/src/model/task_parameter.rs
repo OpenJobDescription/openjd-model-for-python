@@ -73,8 +73,8 @@ impl PyTaskChunksDefinition {
     #[new]
     #[pyo3(signature = (*, default_task_count, target_runtime_seconds=None, range_constraint))]
     fn new(
-        default_task_count: usize,
-        target_runtime_seconds: Option<usize>,
+        default_task_count: u64,
+        target_runtime_seconds: Option<u64>,
         range_constraint: &str,
     ) -> PyResult<Self> {
         let constraint = match range_constraint {
@@ -96,12 +96,12 @@ impl PyTaskChunksDefinition {
     }
 
     #[getter]
-    fn default_task_count(&self) -> usize {
+    fn default_task_count(&self) -> u64 {
         self.inner.default_task_count
     }
 
     #[getter]
-    fn target_runtime_seconds(&self) -> Option<usize> {
+    fn target_runtime_seconds(&self) -> Option<u64> {
         self.inner.target_runtime_seconds
     }
 

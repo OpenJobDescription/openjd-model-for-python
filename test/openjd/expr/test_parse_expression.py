@@ -263,3 +263,13 @@ class TestFormatString:
         fs = FormatString(escaped)
         st = SymbolTable()
         assert fs.resolve_string(st) == "{{literal}}"
+
+    @pytest.mark.parametrize("raw", ["{}}", "a{}}b", "{{}}}"])
+    def test_escaped_brace_before_a_closing_pair(self, raw: str) -> None:
+        """A lone ``{`` just before ``}}`` is escaped too, so the result
+        parses and resolves to ``raw``. openjd-expr 0.14.0 (openjd-rs#515);
+        before, ``"{}}"`` gave ``{{{ "}" + "}" }}``, which failed to parse."""
+        from openjd.expr import escape_format_string
+
+        escaped = escape_format_string(raw)
+        assert FormatString(escaped).resolve_string(SymbolTable()) == raw

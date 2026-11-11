@@ -109,13 +109,13 @@ pub(crate) struct PyStepParameterSpaceIterator {
     space: StepParameterSpace,
     /// Cached length captured at construction time. Used by `__len__`
     /// for non-adaptive spaces (adaptive spaces raise instead).
-    len: usize,
+    len: u64,
     /// Cached parameter names captured at construction time.
     names: HashSet<String>,
     /// The persistent iterator that backs `__next__`, `reset_iter`,
     /// `__contains__`, and `chunks_default_task_count` (getter and
     /// setter). Holding it across calls is what lets the setter
-    /// actually mutate state — the underlying `Arc<AtomicUsize>` for
+    /// actually mutate state — the underlying `Arc<AtomicU64>` for
     /// adaptive chunking lives inside this iterator.
     ///
     /// `Mutex` is required because pyclass types must be `Sync`. The
@@ -127,7 +127,7 @@ pub(crate) struct PyStepParameterSpaceIterator {
     /// so `__getitem__` can rebuild an equivalent iterator. Without it,
     /// random access would silently fall back to the template's own
     /// `defaultTaskCount` and disagree with iteration.
-    chunk_override: Option<usize>,
+    chunk_override: Option<u64>,
 }
 
 #[cfg_attr(feature = "stub-gen", gen_stub_pymethods)]
@@ -153,20 +153,20 @@ impl PyStepParameterSpaceIterator {
         space: Option<&PyStepParameterSpace>,
         chunks_task_count_override: Option<i64>,
     ) -> PyResult<Self> {
-        // Taken as i64, not usize, so a negative value reaches this check instead of
+        // Taken as i64, not u64, so a negative value reaches this check instead of
         // failing pyo3's unsigned extraction with OverflowError. Every non-positive
         // value should report the same ValueError the message and the spec promise.
         //
         // Rejected rather than clamped: openjd-model applies `.max(1)` to the override,
         // so 0 would silently mean 1. The `chunks_default_task_count` setter already
         // refuses 0, and the two should not disagree.
-        let chunks_task_count_override: Option<usize> = match chunks_task_count_override {
+        let chunks_task_count_override: Option<u64> = match chunks_task_count_override {
             Some(n) if n <= 0 => {
                 return Err(pyo3::exceptions::PyValueError::new_err(
                     "chunks_task_count_override must be a positive integer.",
                 ));
             }
-            Some(n) => Some(n as usize),
+            Some(n) => Some(n as u64),
             None => None,
         };
         let ps = if let Some(s) = space {
@@ -210,7 +210,7 @@ impl PyStepParameterSpaceIterator {
                 "Length is not available because the parameter space uses adaptive chunking.",
             ));
         }
-        Ok(self.len)
+        crate::len_to_usize(self.len)
     }
 
     fn __getitem__(&self, py: Python<'_>, index: isize) -> PyResult<Py<PyDict>> {
@@ -235,15 +235,15 @@ impl PyStepParameterSpaceIterator {
             ));
         }
         let idx = if index < 0 {
-            let adjusted = self.len as isize + index;
+            let adjusted = i128::from(self.len) + index as i128;
             if adjusted < 0 {
                 return Err(pyo3::exceptions::PyIndexError::new_err(
                     "index out of range",
                 ));
             }
-            adjusted as usize
+            adjusted as u64
         } else {
-            index as usize
+            index as u64
         };
         match iter.get(idx) {
             Some(params) => task_param_set_to_py(py, &params),
@@ -312,13 +312,13 @@ impl PyStepParameterSpaceIterator {
     }
 
     #[getter]
-    fn chunks_default_task_count(&self) -> Option<usize> {
+    fn chunks_default_task_count(&self) -> Option<u64> {
         let iter = lock_recover(&self.iter);
         iter.chunks_default_task_count()
     }
 
     #[setter]
-    fn set_chunks_default_task_count(&self, value: usize) -> PyResult<()> {
+    fn set_chunks_default_task_count(&self, value: u64) -> PyResult<()> {
         if value == 0 {
             return Err(pyo3::exceptions::PyValueError::new_err(
                 "chunks_default_task_count must be a positive integer.",

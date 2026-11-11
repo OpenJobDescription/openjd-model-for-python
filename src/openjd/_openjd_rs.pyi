@@ -1057,6 +1057,10 @@ class HostContext:
         host context (`apply_path_mapping` is registered, returns
         the path unchanged). Passing zero rules is *not* the same as
         passing no host context at all.
+
+        Raises `ValueError` when a rule is invalid, for example a POSIX or
+        WINDOWS `source_path` that is not absolute. The message names the
+        rule's index in `rules`.
         """
 
     def is_enabled(self) -> builtins.bool:
@@ -1913,7 +1917,14 @@ class PathMappingRule:
 
     def apply(
         self, *, path: builtins.str, output_format: typing.Optional[PathFormat] = None
-    ) -> tuple[builtins.bool, builtins.str]: ...
+    ) -> tuple[builtins.bool, builtins.str]:
+        r"""
+        Apply this rule to `path`. Returns `(True, mapped)` when the rule
+        matches and `(False, path)` when it does not. Raises `ValueError`
+        when the rule itself is invalid, for example a POSIX or WINDOWS
+        `source_path` that is not absolute.
+        """
+
     def to_dict(self) -> builtins.dict[builtins.str, builtins.str]: ...
     @staticmethod
     def from_dict(d: dict) -> PathMappingRule: ...
@@ -2178,8 +2189,9 @@ class Session:
         r"""
         Extend the session's path mapping rules with additional rules.
 
-        Rules are stored sorted by source-path length (longest first) so that
-        the most specific rule matches first during FormatString resolution.
+        When several rules match a path, the one whose source path has the
+        most names wins, and between rules for the same location the
+        one given last wins, wherever it sits in the list.
 
         Consumers (notably the Deadline Cloud worker agent's Job Attachments
         download action) call this after an action assigns additional path
@@ -2187,7 +2199,9 @@ class Session:
 
         Returns an error if an action is currently in-flight (the underlying
         Session has been taken by a background thread). Call this between
-        actions.
+        actions. Raises `SessionError`, leaving the rules unchanged, when an
+        added rule is invalid, for example a POSIX or WINDOWS `source_path`
+        that is not absolute.
         """
 
     def enter_environment(

@@ -1028,11 +1028,11 @@ underlying `template::TaskParameterDefinition` enum 1:1:
 
 | Variant | Pyclass | `range` element type |
 |---|---|---|
-| `INT` | `IntTaskParameterDefinition` | `list[int]` or `FormatString` |
+| `INT` | `IntTaskParameterDefinition` | `list[int \| FormatString]` or `FormatString` |
 | `FLOAT` | `FloatTaskParameterDefinition` | `list[float \| FormatString]` or `FormatString` |
 | `STRING` | `StringTaskParameterDefinition` | `list[FormatString]` or `FormatString` |
 | `PATH` | `PathTaskParameterDefinition` | `list[FormatString]` or `FormatString` |
-| `CHUNK[INT]` | `ChunkIntTaskParameterDefinition` | `list[int]` or `FormatString` |
+| `CHUNK[INT]` | `ChunkIntTaskParameterDefinition` | `list[int \| FormatString]` or `FormatString` |
 
 Common attributes on every variant:
 
@@ -1048,10 +1048,13 @@ For lists where the element type is `int`/`float`/`FormatString`, the
 list-form vs format-string-form is dispatched by the binding: the
 `.range` getter returns either a Python list (literal range) or a
 `FormatString` (e.g. `"1-10:2"`, possibly carrying a
-`{{Param.X}}` interpolation under the EXPR extension). Only `INT` and
-`CHUNK[INT]` accept the list-form `[1, 2, 3]`; the others always carry
-`FormatString` elements (which may themselves be literal or
-interpolating).
+`{{Param.X}}` interpolation under the EXPR extension). An `INT` or
+`CHUNK[INT]` list element is a `FormatString` when it holds an
+interpolation, such as `"{{Param.Frame}}"`, and an `int` otherwise
+(`"5"` reads as `5`). A `FLOAT` list element is a `float` when the
+template wrote a number and a `FormatString` when it wrote a string.
+`STRING` and `PATH` elements are always `FormatString` (which may
+itself be literal or interpolating).
 
 The `CHUNK[INT]` variant additionally exposes:
 
@@ -1233,7 +1236,10 @@ Iteration observes it, and `len()` counts the overridden granularity.
 The rendered form of a chunk depends on `rangeConstraint`, which matters
 because these are strings a consumer parses and may feed back through
 `__contains__`. A single-task chunk is `"1-1"` under `CONTIGUOUS` and a
-bare `"1"` under `NONCONTIGUOUS`.
+bare `"1"` under `NONCONTIGUOUS`. A `NONCONTIGUOUS` chunk is written in
+the canonical form of Template Schemas §3.4.1.1.1, so the values
+`[1, 2, 4, 6]` render `"1,2-6:2"`. The pure-Python reference renders
+`"1,2,4,6"` there.
 
 It is currently the only way to change the chunk size of a *static*
 chunked space: the `chunks_default_task_count` setter accepts adaptive

@@ -54,8 +54,8 @@ impl PyIntRange {
         self.inner.step()
     }
 
-    fn __len__(&self) -> usize {
-        self.inner.len()
+    fn __len__(&self) -> PyResult<usize> {
+        crate::len_to_usize(self.inner.len())
     }
 
     fn __contains__(&self, value: i64) -> bool {
@@ -205,8 +205,8 @@ impl PyRangeExpr {
             .ok_or_else(|| pyo3::exceptions::PyValueError::new_err("Range expression is empty"))
     }
 
-    fn __len__(&self) -> usize {
-        self.inner.len()
+    fn __len__(&self) -> PyResult<usize> {
+        crate::len_to_usize(self.inner.len())
     }
 
     fn __eq__(&self, other: &PyRangeExpr) -> bool {
@@ -218,13 +218,13 @@ impl PyRangeExpr {
     }
 
     fn __getitem__(&self, index: isize) -> PyResult<i64> {
-        let len = self.inner.len();
+        let len = i128::from(self.inner.len());
         let idx = if index < 0 {
-            len as isize + index
+            len + index as i128
         } else {
-            index
+            index as i128
         };
-        if idx < 0 || idx as usize >= len {
+        if idx < 0 || idx >= len {
             return Err(pyo3::exceptions::PyIndexError::new_err(
                 "index out of range",
             ));

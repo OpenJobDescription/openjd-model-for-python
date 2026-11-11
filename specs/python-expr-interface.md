@@ -65,6 +65,8 @@ metered.operation_count    # operations performed (>= 0)
 ### `escape_format_string`
 
 Escape `{{` and `}}` in a string for use as a literal in a format string.
+A lone `{` just before `}}` is escaped too, so the result always parses
+and resolves back to the input.
 
 ```python
 from openjd.expr import escape_format_string
@@ -363,7 +365,31 @@ HostContext.unresolved().is_enabled()   # True
 HostContext.unresolved().is_unresolved()  # True — uses stub implementations
 HostContext.with_rules([]).is_enabled()   # True — empty rules ≠ no host context
 HostContext.with_rules([]).is_unresolved()  # False — uses real implementations
+```
 
+`HostContext.with_rules` raises `ValueError` when a rule is invalid,
+such as a POSIX or WINDOWS rule whose `source_path` is not absolute;
+the message names the rule's index, for example `path mapping rule 1:
+source_path 'rel' must be an absolute POSIX path, starting with '/'`.
+When several rules match a path, the one whose source path has the
+most names applies, wherever it is in the list. Between a POSIX rule
+and a WINDOWS rule with the same number of names (both can match a
+path such as `//srv/share/x`), the WINDOWS rule applies. Between rules
+for the same location, the last one given applies (How Jobs Are Run,
+"Path Mapping"). The order of `rules` matters only for that last tie.
+Paths are compared component by component, as How Jobs Are Run,
+"Applying Path Mapping Rules within a Job Template", item 2 says: a
+drive or UNC share must match as a whole,
+WINDOWS components compare the way Windows compares file names
+(non-ASCII letters included), and `.` and empty components are ignored
+and left out of the mapped path. The pure-Python reference in
+openjd-sessions folds only ASCII letters.
+A `source_path` or `destination_path` longer than 32,768 bytes makes a
+rule invalid, and the rules together are limited to about 30 MiB of
+lookup structure. `apply_path_mapping` raises `ExpressionError` for a
+path longer than 32,768 bytes.
+
+```python
 # Inspecting a profile
 profile.revision      # ExprRevision.V2026_02
 profile.extensions    # [] today
@@ -635,6 +661,13 @@ matched, result = rule.apply(path="/mnt/shared/project/file.exr")
 matched, result = rule.apply(path="/other/path")
 # matched=False, result="/other/path"
 
+# A rule whose POSIX or WINDOWS source_path is not absolute, or whose
+# source_path or destination_path is longer than 32,768 bytes, can be
+# constructed, but apply() raises ValueError for it:
+# "source_path 'rel' must be an absolute POSIX path, starting with '/'"
+# A path longer than 32,768 bytes matches no rule here (apply_path_mapping
+# raises for it instead).
+
 # Serialization
 d = rule.to_dict()
 # {"source_path_format": "POSIX", "source_path": "/mnt/shared", "destination_path": "/local/cache"}
@@ -726,6 +759,18 @@ RangeExpr.from_list(["1", "2", "3"])      # 1-3
 `RangeExpr.from_str("...")` raise `RangeExprError` on a malformed
 input string. Two `RangeExpr` values that compare equal also hash
 equal (suitable as `set` / `dict` keys).
+
+A `RangeExpr` is kept in the canonical form of Template Schemas
+§3.4.1.1.1, whatever elements the input used. `str`, `repr` and
+`ranges()` give the canonical runs, so `RangeExpr("1,3,5,7,9")` is
+`1-9:2` and `RangeExpr("1-2").ranges()` is two single-value ranges.
+Two `RangeExpr`s are equal exactly when they have the same values.
+Every constructor raises `RangeExprError` when the canonical form would
+have more than 50,000 runs, and parsing accepts at most 50,000
+comma-separated elements. Values can be any 64-bit integer except the
+most negative one. The pure-Python
+`openjd.model._range_expr.IntRangeExpr` follows the input's elements
+instead.
 
 ### `IntRange`
 

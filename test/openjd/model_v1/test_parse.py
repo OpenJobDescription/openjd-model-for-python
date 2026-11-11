@@ -369,6 +369,49 @@ steps:
         with pytest.raises(DecodeValidationError):
             decode_job_template_str("specificationVersion: nope")
 
+    @pytest.mark.parametrize("scalar", ["tRUE", "fALSE", "nULL"])
+    def test_mixed_case_bool_and_null_spellings_are_strings(self, scalar: str) -> None:
+        """YAML 1.2 Core reads only ``true``/``True``/``TRUE`` (and the same for
+        ``false`` and ``null``) as booleans and null. With serde-saphyr 2.1,
+        which Cargo.lock resolves since the move to openjd-model 0.15.0
+        (openjd-rs adopted it in #487), other spellings are strings, as they
+        are in the pure-Python reference. Before, with serde-saphyr 1.2,
+        ``tRUE`` was a boolean and ``nULL`` was null."""
+        t = decode_job_template_str(
+            "specificationVersion: jobtemplate-2023-09\n"
+            "name: T\n"
+            "parameterDefinitions:\n"
+            f"- {{name: P, type: STRING, default: {scalar}}}\n"
+            "steps:\n"
+            "- name: S\n"
+            "  script: {actions: {onRun: {command: echo}}}\n"
+        )
+        assert t.parameter_definitions is not None
+        assert t.parameter_definitions[0].default == scalar
+
+    @pytest.mark.parametrize(
+        "ptype, scalar, expected",
+        [
+            pytest.param("FLOAT", "!!float 1.5", 1.5, id="float"),
+            pytest.param("INT", "!!int 3", 3, id="int"),
+        ],
+    )
+    def test_a_core_tagged_scalar_decodes(self, ptype: str, scalar: str, expected: Any) -> None:
+        """With serde-saphyr 2.1 a YAML 1.2 Core tag on a scalar is read as its
+        type. Before, with serde-saphyr 1.2, the decode failed with
+        ``cannot deserialize tagged scalar into string``."""
+        t = decode_job_template_str(
+            "specificationVersion: jobtemplate-2023-09\n"
+            "name: T\n"
+            "parameterDefinitions:\n"
+            f"- {{name: P, type: {ptype}, default: {scalar}}}\n"
+            "steps:\n"
+            "- name: S\n"
+            "  script: {actions: {onRun: {command: echo}}}\n"
+        )
+        assert t.parameter_definitions is not None
+        assert t.parameter_definitions[0].default == expected
+
 
 class TestDecodeEnvironmentTemplateStr:
     """``decode_environment_template_str`` wrapper: parses YAML or

@@ -7,7 +7,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 
 import pytest
 
-from openjd.expr import PathMappingRule, PathFormat, ExprProfile, HostContext
+from openjd.expr import ExpressionError, PathMappingRule, PathFormat, ExprProfile, HostContext
 
 
 class TestPathMappingRuleFromPosix:
@@ -215,6 +215,59 @@ class TestPathMappingRuleFromUri:
 class TestPathMappingRuleValidation:
     """Tests for from_dict validation shared across formats."""
 
+    @pytest.mark.parametrize(
+        "source_path_format, source_path, expected",
+        [
+            pytest.param(
+                PathFormat.POSIX,
+                "rel/a",
+                "source_path 'rel/a' must be an absolute POSIX path, starting with '/'",
+                id="relative POSIX",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "a\\b",
+                "source_path 'a\\b' must be an absolute WINDOWS path, starting with a drive "
+                "such as 'C:\\' or a UNC share such as '\\\\server\\share'",
+                id="relative WINDOWS",
+            ),
+        ],
+    )
+    def test_apply_rejects_a_relative_source_path(
+        self, source_path_format: PathFormat, source_path: str, expected: str
+    ) -> None:
+        """Since openjd-expr 0.14.0 (openjd-rs#472) a rule must have an
+        absolute source path (How Jobs Are Run, "Applying Path Mapping Rules
+        within a Job Template", item 1), and applying one that doesn't raises.
+        Before, such a rule matched relative paths. The pure-Python reference
+        in openjd-sessions still accepts it."""
+        rule = PathMappingRule(
+            source_path_format=source_path_format,
+            source_path=source_path,
+            destination_path="/b",
+        )
+        with pytest.raises(ValueError) as exc_info:
+            rule.apply(path="rel/a/x")
+        assert str(exc_info.value) == expected
+
+    def test_with_rules_rejects_a_relative_source_path(self) -> None:
+        """``HostContext.with_rules`` checks every rule, and the message
+        names the rule's index."""
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="/a", destination_path="/b"
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="rel", destination_path="/b"
+            ),
+        ]
+        with pytest.raises(ValueError) as exc_info:
+            HostContext.with_rules(rules)
+        assert str(exc_info.value) == (
+            "path mapping rule 1: source_path 'rel' must be an absolute POSIX path, "
+            "starting with '/'"
+        )
+
 
 class TestPathMappingRuleSerialization:
     """Tests for from_dict/to_dict serialization."""
@@ -360,6 +413,146 @@ class TestTrailingSlash:
         matched, result = rule.apply(path="C:\\projects\\subdir/")
         assert matched is True
         assert result.endswith("/") or result.endswith(os.sep) or result.endswith("\\")
+
+
+class TestComponentMatching:
+    """Since openjd-expr 0.14.0 (openjd-rs#472) rules match whole components
+    the way How Jobs Are Run, "Applying Path Mapping Rules within a Job
+    Template", item 2 says: a UNC share is one component and must match as a
+    whole, WINDOWS components compare the way Windows compares file names
+    (non-ASCII letters too), and ``.`` and empty components are ignored and
+    left out of the mapped path. Before, a rooted path such as ``\\srv\\share``
+    matched a UNC rule, ``C:\\Ünï`` did not match ``C:\\üNÏ``, a ``.`` before
+    the end of the source path prevented a match, and ``.`` and empty
+    components after it were kept. The pure-Python reference agrees on every
+    row except the non-ASCII one, where it folds ASCII letters only."""
+
+    @pytest.mark.parametrize(
+        "source_path_format, source_path, path, expected",
+        [
+            pytest.param(
+                PathFormat.WINDOWS,
+                "\\\\srv\\share",
+                "\\\\SRV\\SHARE\\x",
+                (True, "/d/x"),
+                id="UNC share, case-insensitive",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "\\\\srv\\share",
+                "\\srv\\share\\x",
+                (False, "\\srv\\share\\x"),
+                id="a rooted path is not a UNC share",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "C:\\Ünï",
+                "C:\\üNÏ\\f",
+                (True, "/d/f"),
+                id="non-ASCII letters compare case-insensitively",
+            ),
+            pytest.param(
+                PathFormat.WINDOWS,
+                "C:\\proj",
+                "C:\\proj\\.\\f\\",
+                (True, "/d/f/"),
+                id="WINDOWS dot component dropped",
+            ),
+            pytest.param(
+                PathFormat.POSIX,
+                "/mnt/a",
+                "/mnt/./a/b",
+                (True, "/d/b"),
+                id="dot component inside the source path",
+            ),
+            pytest.param(
+                PathFormat.POSIX,
+                "/mnt/a",
+                "/mnt/a/./b//c",
+                (True, "/d/b/c"),
+                id="dot and empty components dropped",
+            ),
+        ],
+    )
+    def test_apply(
+        self,
+        source_path_format: PathFormat,
+        source_path: str,
+        path: str,
+        expected: tuple[bool, str],
+    ) -> None:
+        rule = PathMappingRule(
+            source_path_format=source_path_format, source_path=source_path, destination_path="/d"
+        )
+        assert rule.apply(path=path, output_format=PathFormat.POSIX) == expected
+
+
+class TestDestinationEndingInASeparator:
+    """Since openjd-expr 0.14.0 (openjd-rs#483) no separator is added after a
+    destination that already ends with one. Before, ``/dst/`` gave
+    ``/dst//a/b``. The pure-Python reference gives ``/dst/a/b`` too."""
+
+    def test_apply(self) -> None:
+        rule = PathMappingRule(
+            source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path="/dst/"
+        )
+        assert rule.apply(path="/mnt/a/b", output_format=PathFormat.POSIX) == (True, "/dst/a/b")
+
+    def test_apply_path_mapping(self) -> None:
+        from openjd.expr import parse_expression
+
+        rule = PathMappingRule(
+            source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path="/dst/"
+        )
+        profile = ExprProfile().with_host_context(HostContext.with_rules([rule]))
+        parsed = parse_expression("apply_path_mapping('/mnt/a/b')")
+        result = parsed.evaluate(profile=profile, path_format=PathFormat.POSIX)
+        assert result.item() == "/dst/a/b"
+
+
+class TestPathLengthLimit:
+    """Since openjd-expr 0.14.0 (openjd-rs#472) a path or rule path longer than
+    32 KiB (``MAX_PATH_LEN``, 32,768 bytes) is refused. A longer path matches
+    no rule, and a rule with a longer source or destination path is invalid.
+    Before, both mapped. The pure-Python reference still maps them."""
+
+    _RULE = PathMappingRule(
+        source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path="/dst"
+    )
+
+    def test_a_path_at_the_limit_maps(self) -> None:
+        path = "/mnt/" + "a" * (32 * 1024 - len("/mnt/"))
+        matched, _ = self._RULE.apply(path=path, output_format=PathFormat.POSIX)
+        assert matched is True
+
+    def test_a_longer_path_matches_no_rule(self) -> None:
+        path = "/mnt/" + "a" * (32 * 1024 - len("/mnt/") + 1)
+        assert self._RULE.apply(path=path) == (False, path)
+
+    def test_apply_path_mapping_rejects_a_longer_path(self) -> None:
+        """The ``apply_path_mapping`` expression function raises rather than
+        returning the path unmapped."""
+        from openjd.expr import parse_expression
+
+        profile = ExprProfile().with_host_context(HostContext.with_rules([self._RULE]))
+        path = "/mnt/" + "a" * (32 * 1024 - len("/mnt/") + 1)
+        with pytest.raises(ExpressionError) as exc_info:
+            parse_expression(f"apply_path_mapping('{path}')").evaluate(profile=profile)
+        assert str(exc_info.value).split("\n")[0] == (
+            "apply_path_mapping: the path is 32769 bytes long, more than the limit of 32768 bytes"
+        )
+
+    def test_a_longer_destination_path_is_invalid(self) -> None:
+        rule = PathMappingRule(
+            source_path_format=PathFormat.POSIX,
+            source_path="/mnt",
+            destination_path="/" + "d" * (32 * 1024),
+        )
+        with pytest.raises(ValueError) as exc_info:
+            rule.apply(path="/mnt/x")
+        assert str(exc_info.value) == (
+            "destination_path is 32769 bytes long, more than the limit of 32768 bytes"
+        )
 
 
 class TestFormatMismatch:
@@ -571,6 +764,84 @@ class TestPathMappingViaProfile:
         fs = FormatString("{{apply_path_mapping('/mnt/shared/file.exr')}}")
         result = fs.resolve_string(SymbolTable({}), profile=self._profile_with_rule(dest))
         assert result == dest + os.sep + "file.exr"
+
+    @pytest.mark.parametrize("reverse", [False, True], ids=["shorter first", "longer first"])
+    def test_the_rule_with_the_most_names_wins_in_any_order(self, tmp_path, reverse) -> None:
+        """Since openjd-expr 0.14.0 (openjd-rs#472) the rule whose source
+        path has the most names applies, wherever it is in the list (How
+        Jobs Are Run, "Applying Path Mapping Rules within a Job Template",
+        item 3). Before, ``with_rules`` used the first rule that matched."""
+        from openjd.expr import parse_expression
+
+        short_dest = str(tmp_path / "short")
+        long_dest = str(tmp_path / "long")
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX,
+                source_path="/mnt",
+                destination_path=short_dest,
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX,
+                source_path="/mnt/shared",
+                destination_path=long_dest,
+            ),
+        ]
+        if reverse:
+            rules.reverse()
+        profile = ExprProfile().with_host_context(HostContext.with_rules(rules))
+        parsed = parse_expression("apply_path_mapping('/mnt/shared/file.exr')")
+        assert parsed.evaluate(profile=profile).item() == long_dest + os.sep + "file.exr"
+
+    @pytest.mark.parametrize("reverse", [False, True], ids=["WINDOWS first", "POSIX first"])
+    def test_windows_wins_a_tie_with_posix_in_any_order(self, reverse) -> None:
+        """A POSIX rule and a WINDOWS rule with the same number of names can
+        both match a path such as ``//srv/share/x``, and the WINDOWS rule
+        applies wherever it is in the list (How Jobs Are Run, "Applying Path
+        Mapping Rules within a Job Template", item 3). openjd-expr 0.14.0
+        (openjd-rs#472); before, the first one applied."""
+        from openjd.expr import parse_expression
+
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.WINDOWS,
+                source_path="\\\\srv\\share",
+                destination_path="/win",
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX,
+                source_path="//srv/share",
+                destination_path="/posix",
+            ),
+        ]
+        if reverse:
+            rules.reverse()
+        profile = ExprProfile().with_host_context(HostContext.with_rules(rules))
+        parsed = parse_expression("apply_path_mapping('//srv/share/x')")
+        result = parsed.evaluate(profile=profile, path_format=PathFormat.POSIX)
+        assert result.item() == "/win/x"
+
+    def test_the_last_rule_for_the_same_location_wins(self, tmp_path) -> None:
+        """Rules whose source paths have the same components name the same
+        location, and the last one given applies (How Jobs Are Run, "Applying
+        Path Mapping Rules within a Job Template", item 3). openjd-expr 0.14.0
+        (openjd-rs#472); before, the first one applied. ``/mnt`` and ``/mnt/``
+        name the same location."""
+        from openjd.expr import parse_expression
+
+        first = str(tmp_path / "first")
+        last = str(tmp_path / "last")
+        rules = [
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="/mnt", destination_path=first
+            ),
+            PathMappingRule(
+                source_path_format=PathFormat.POSIX, source_path="/mnt/", destination_path=last
+            ),
+        ]
+        profile = ExprProfile().with_host_context(HostContext.with_rules(rules))
+        parsed = parse_expression("apply_path_mapping('/mnt/file.exr')")
+        assert parsed.evaluate(profile=profile).item() == last + os.sep + "file.exr"
 
     def test_format_string_resolve_applies_rules(self, tmp_path) -> None:
         from openjd.expr import FormatString, SymbolTable
