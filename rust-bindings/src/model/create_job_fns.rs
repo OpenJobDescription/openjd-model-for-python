@@ -293,8 +293,23 @@ fn default_to_native(
             .ok()
             .map(|v| v.into_py_any(py))
             .unwrap_or_else(|| raw.into_py_any(py)),
-        JobParameterType::ListFloat => serde_json::from_str::<Vec<f64>>(raw)
+        // Since openjd-model 0.16.0 (openjd-rs#538) an item written in the
+        // template as a string, such as `"2.50"`, is a JSON string here so
+        // that job creation keeps its spelling. A Python `float` can't hold a
+        // spelling, so read either form as a number, as
+        // `JobListFloatParameterDefinition.default` does.
+        JobParameterType::ListFloat => serde_json::from_str::<Vec<serde_json::Value>>(raw)
             .ok()
+            .and_then(|items| {
+                items
+                    .iter()
+                    .map(|item| match item {
+                        serde_json::Value::Number(n) => n.as_f64(),
+                        serde_json::Value::String(s) => s.trim().parse::<f64>().ok(),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<f64>>>()
+            })
             .map(|v| v.into_py_any(py))
             .unwrap_or_else(|| raw.into_py_any(py)),
         JobParameterType::ListBool => serde_json::from_str::<Vec<bool>>(raw)

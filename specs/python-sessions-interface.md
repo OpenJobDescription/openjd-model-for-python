@@ -200,11 +200,12 @@ An action that ends `FAILED`, `CANCELED` or `TIMEOUT` makes the session
 ending-only (`READY_ENDING`) for good: `exit_environment` and `cleanup`
 still work, and a successful
 `exit_environment(keep_session_running=True)` leaves it `READY_ENDING`
-(openjd-rs#524). When `run_task` or `enter_environment` fails before its
-subprocess starts, for example because a parameter value can't be
-coerced, the action is `FAILED` with the error's message, as in the
-pure-Python reference (openjd-rs#532); an environment that fails this
-way still counts as entered. When `exit_environment` can't build its
+(openjd-rs#524). When `run_task`, `enter_environment` or
+`exit_environment` fails before its subprocess starts, for example
+because a parameter value can't be coerced, the action is `FAILED` with
+the error's message, as in the pure-Python reference (openjd-rs#532).
+An environment whose enter fails this way still counts as entered, and
+one whose exit fails this way counts as exited. When `exit_environment` can't build its
 symbol table from `resolved_symtab`, it runs `onExit` with the table the
 environment was entered with (openjd-rs#536). White space around a
 number in an INT or FLOAT job or task parameter value is ignored, so

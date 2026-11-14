@@ -975,9 +975,14 @@ except RangeExprError as e:
 Syntax errors use the wording of Ruff's parser (`Expected an
 expression`, `unexpected EOF while parsing`), which openjd-expr uses
 since 0.15.0 (openjd-rs#531). Parsing an invalid expression takes time
-roughly linear in its length, whatever its bracket nesting. A
-multi-line expression is parsed as written, so a caret points into the
-text the author wrote.
+roughly linear in its length, whatever its bracket nesting, except for
+unclosed nested f-strings, which are quadratic. Brackets are no longer
+limited to 200 levels; the 64 KB length cap and the AST depth limit
+still apply. A multi-line expression is parsed as written, so a caret
+points into the text the author wrote, and it may end in a comment.
+Coercing a string to a number, for example with a `target_type` of
+`int` or `list[int]`, ignores the white space around the number
+(openjd-rs#530).
 
 A computed float is written as Python's `repr(float)` writes it,
 including a shortest-digit tie, which rounds to even:

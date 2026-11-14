@@ -227,6 +227,15 @@ class TestMergeDefaultNativeTypes:
         assert m["default"] == [1.5, 2.5]
         assert all(isinstance(v, float) for v in m["default"])
 
+    def test_list_float_with_string_items(self) -> None:
+        """Since openjd-model 0.16.0 (openjd-rs#538) the crate writes a string
+        item of a LIST[FLOAT] default as a JSON string, to keep its spelling for
+        job creation. The binding reads it as a ``float``, as the template's
+        ``default`` does; a ``float`` can't hold the spelling."""
+        m = self._merge_one(param_type="LIST[FLOAT]", default=[1.5, "2.50", " 3 "])
+        assert m["default"] == [1.5, 2.5, 3.0]
+        assert all(isinstance(v, float) for v in m["default"])
+
     def test_list_string(self) -> None:
         m = self._merge_one(param_type="LIST[STRING]", default=["a", "b"])
         assert m["default"] == ["a", "b"]
