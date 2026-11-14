@@ -979,6 +979,11 @@ roughly linear in its length, whatever its bracket nesting. A
 multi-line expression is parsed as written, so a caret points into the
 text the author wrote.
 
+A computed float is written as Python's `repr(float)` writes it,
+including a shortest-digit tie, which rounds to even:
+`string(1000000000000000.25 * 1.0)` is `"1000000000000000.2"`
+(openjd-expr 0.15.0, openjd-rs#539; before, ties rounded up).
+
 
 | Exception | Base |
 |---|---|

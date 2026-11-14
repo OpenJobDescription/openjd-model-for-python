@@ -1338,3 +1338,27 @@ class TestReprCmdWindowsValidation:
         # limitation — set requires ^& escaping even inside double quotes.
         cmd = evaluate_expression(r"'set ' + repr_cmd('MY_VAR=hello world')").item()
         assert self._cmd_eval(f"{cmd}\necho %MY_VAR%") == "hello world"
+
+
+class TestComputedFloatText:
+    @pytest.mark.parametrize(
+        "expr, expected",
+        [
+            pytest.param("string(1000000000000000.25 * 1.0)", "1000000000000000.2", id="scalar"),
+            pytest.param(
+                "string([1000000000000000.25 * 1.0])", "[1000000000000000.2]", id="list item"
+            ),
+            pytest.param(
+                "string(float('1000000000000000.25'))", "1000000000000000.2", id="from a string"
+            ),
+        ],
+    )
+    def test_a_shortest_digit_tie_rounds_as_repr_does(self, expr: str, expected: str) -> None:
+        """A computed float is written as ``repr(float)`` writes it (Expression
+        Language §1.3.4). 1000000000000000.25 lies halfway between the two
+        shortest candidates, and ``repr`` rounds the tie to even. Since
+        openjd-expr 0.15.0 (openjd-rs#539) the digits come from ryu, which does
+        the same; before, Rust's shortest form rounded up, giving
+        ``1000000000000000.3``."""
+        assert repr(1000000000000000.25) == "1000000000000000.2"
+        assert evaluate_expression(expr).item() == expected

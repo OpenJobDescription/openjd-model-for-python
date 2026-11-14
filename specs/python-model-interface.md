@@ -289,10 +289,14 @@ constraints are checked against the joined value. URI values are refused. Violat
 
 A FLOAT given as a number, as a default, a `LIST[FLOAT]` item or a
 value, is written the way Python's `repr(float)` writes it, with zero
-always `0.0`: `default: 2` gives `"2.0"` and `1e20` gives `"1e+20"`. A
-FLOAT given as a string keeps its spelling (Template Schemas §7.5).
-Before openjd-model 0.16.0 (openjd-rs#539), a scalar FLOAT `default`
-given as a number kept its own digits (`2`, `100000000000000000000`). White space around a number in a string value is
+always `0.0`: `default: 2` gives `"2.0"`, `1e20` gives `"1e+20"`, and
+the tie 1000000000000000.25 gives `"1000000000000000.2"`. A FLOAT given
+as a string keeps its spelling (Template Schemas §7.5), and a
+`LIST[FLOAT]` value given as JSON text reads each number as the nearest
+double. Before openjd-model 0.16.0 (openjd-rs#539), a scalar FLOAT
+`default` given as a number kept its own digits (`2`,
+`100000000000000000000`), a tie rounded up, and JSON text could read a
+double one ULP off. White space around a number in a string value is
 ignored, so `" 7 "` is the INT `7` (openjd-rs#530). A `LIST[INT]`,
 `LIST[FLOAT]` or `LIST[LIST[INT]]` value given as a Python list of
 numeric strings is coerced item by item, the same as the JSON text of
