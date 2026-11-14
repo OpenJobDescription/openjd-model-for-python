@@ -658,6 +658,51 @@ class TestFloatRangeSpellingIsPreserved:
             self._rendered(["not-a-float"])
 
 
+class TestWholeFieldFloatRangeExpressionKeepsSpelling:
+    """A FLOAT task parameter whose ``range`` is one whole-field expression gives
+    each float the spelling it carries, as a range list element does (Expression
+    Language §1.3.4). openjd-model 0.16.0 (openjd-rs#540); before, the list was
+    rebuilt from the numbers, so ``["4.20", "5.30"]`` rendered ``4.2`` and
+    ``5.3``. (Before openjd-model 0.16.0, openjd-rs#538, a native list of
+    numeric strings couldn't be given for LIST[FLOAT] at all.)"""
+
+    @staticmethod
+    def _rendered(parameter_definitions: list[dict], rng: Any, values: dict) -> list[str]:
+        template = {
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "T",
+            "parameterDefinitions": parameter_definitions,
+            "steps": [
+                {
+                    "name": "S",
+                    "parameterSpace": {
+                        "taskParameterDefinitions": [{"name": "F", "type": "FLOAT", "range": rng}]
+                    },
+                    "script": {
+                        "actions": {"onRun": {"command": "echo", "args": ["{{Task.Param.F}}"]}}
+                    },
+                }
+            ],
+        }
+        job = create_job(
+            job_template=decode_job_template(template=template, supported_extensions=["EXPR"]),
+            job_parameter_values=values,
+        )
+        return [params["F"].value for params in StepParameterSpaceIterator(step=job.steps[0])]
+
+    @pytest.mark.parametrize(
+        "rng", ["{{ Param.LF }}", ["{{ Param.LF }}"]], ids=["whole field", "list element"]
+    )
+    def test_a_list_parameter(self, rng: Any) -> None:
+        defs = [{"name": "LF", "type": "LIST[FLOAT]"}]
+        assert self._rendered(defs, rng, {"LF": ["4.20", "5.30"]}) == ["4.20", "5.30"]
+
+    def test_a_float_parameter_in_a_list_expression(self) -> None:
+        defs = [{"name": "X", "type": "FLOAT"}]
+        assert self._rendered(defs, "{{ [Param.X] }}", {"X": "1.50"}) == ["1.50"]
+
+
 class TestChunkIntContains:
     """``__contains__`` must round-trip values yielded by a chunked
     iterator. The iterator yields ``TaskParameterValue`` instances

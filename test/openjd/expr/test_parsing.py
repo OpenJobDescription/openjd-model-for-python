@@ -21,6 +21,29 @@ class TestContextualKeywords:
         symtab = SymbolTable({"Param.if": 10, "Param.else": 20})
         assert evaluate_expression("Param.if + Param.else", values=symtab).item() == 30
 
+    def test_placeholder_never_equals_an_nfkc_normalized_name(self) -> None:
+        """A keyword attribute is renamed to a placeholder before parsing, and
+        ``Param.is`` gets ``bs``. The parser NFKC-normalizes identifiers, so
+        fullwidth ``Param.ｂｓ`` is the name ``bs`` too. Since openjd-expr 0.15.0
+        (openjd-rs#534) the placeholder is checked against normalized names;
+        before, this gave ``"isis"``."""
+        symtab = SymbolTable({"Param.bs": "fullwidth-bs", "Param.is": "is"})
+        assert evaluate_expression("Param.ｂｓ + Param.is", values=symtab).item() == (
+            "fullwidth-bsis"
+        )
+
+    def test_placeholder_when_every_first_letter_is_taken(self) -> None:
+        """The string literal holds every first-letter candidate for ``if``
+        (``af`` to ``zf``). Before openjd-expr 0.15.0 (openjd-rs#534,
+        openjd-rs#333) that made the placeholder fall back to ``xx`` without a
+        check, so ``Param.xx`` read ``Param.if``'s value and this gave
+        ``[1, 1, 52]``. Now text in a string literal doesn't block a candidate,
+        and a candidate is checked against every name the parser sees."""
+        symtab = SymbolTable({"Param.if": 1, "Param.xx": 2})
+        names = "".join(c + "f" for c in "abcdefghijklmnopqrstuvwxyz")
+        result = evaluate_expression(f"[Param.if, Param.xx, len('{names}')]", values=symtab)
+        assert result.item() == [1, 2, 52]
+
     def test_keyword_with_conditional(self) -> None:
         symtab = SymbolTable({"Param.if": 100})
         assert evaluate_expression("Param.if if True else 0", values=symtab).item() == 100
