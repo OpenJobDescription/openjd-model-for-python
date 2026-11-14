@@ -3046,11 +3046,16 @@ class TestFloatGivenAsANumber:
     ``repr(float)`` writes it, with zero always ``0.0`` (Expression Language
     §1.3.4). A FLOAT given as a string keeps its spelling (Template Schemas §7.5).
 
-    What changed in openjd-model 0.16.0 (openjd-rs#539) is a FLOAT parameter's
-    ``default`` given as a number: before, its own digits were written, so ``2``
-    stayed ``2`` and ``1e20`` became ``100000000000000000000``. A value given as
-    a Python number and a ``LIST[FLOAT]`` default's number items were already
-    written this way; ``test_value`` and ``test_list_default_items`` pin them.
+    openjd-model 0.16.0 and openjd-expr 0.15.0 (openjd-rs#539) changed three
+    things here. A FLOAT parameter's ``default`` given as a number used to keep
+    its own digits, so ``2`` stayed ``2`` and ``1e20`` became
+    ``100000000000000000000``. A shortest-digit tie such as
+    1000000000000000.25, in a value or a list item, rounded up
+    (``1000000000000000.3``) where ``repr`` rounds to even. And a LIST[FLOAT]
+    value given as JSON text could read a double one ULP off. Other values given
+    as a Python number, and other LIST[FLOAT] default items, were already
+    written as ``repr`` writes them; ``test_value`` and
+    ``test_list_default_items`` pin them.
     """
 
     @pytest.mark.parametrize(
@@ -3075,6 +3080,26 @@ class TestFloatGivenAsANumber:
     def test_list_default_items(self, tmp_path: Path) -> None:
         defs = [{"name": "L", "type": "LIST[FLOAT]", "default": [2, 1e20]}]
         assert _preprocess(defs, {}, tmp_path) == {"L": "[2.0, 1e+20]"}
+
+    def test_a_shortest_digit_tie_rounds_as_repr_does(self, tmp_path: Path) -> None:
+        tie = 1000000000000000.2
+        assert repr(tie) == "1000000000000000.2"
+        assert _preprocess([{"name": "F", "type": "FLOAT"}], {"F": tie}, tmp_path) == {
+            "F": "1000000000000000.2"
+        }
+        defs = [{"name": "L", "type": "LIST[FLOAT]", "default": [tie]}]
+        assert _preprocess(defs, {}, tmp_path) == {"L": "[1000000000000000.2]"}
+
+    def test_list_value_given_as_json_text_reads_the_nearest_double(self, tmp_path: Path) -> None:
+        """Before, ``2.2250738585072011e-308`` read as ``2.2250738585072014e-308``
+        and ``1000000000000000.25`` as ``1000000000000000.4``."""
+        text = "[1000000000000000.25, 2.2250738585072011e-308]"
+        expected = (
+            "[" + ", ".join(repr(v) for v in [1000000000000000.25, 2.2250738585072011e-308]) + "]"
+        )
+        assert expected == "[1000000000000000.2, 2.225073858507201e-308]"
+        defs = [{"name": "L", "type": "LIST[FLOAT]"}]
+        assert _preprocess(defs, {"L": text}, tmp_path) == {"L": expected}
 
 
 class TestNumericStringsInListParameters:

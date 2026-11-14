@@ -210,9 +210,11 @@ environment was entered with (openjd-rs#536). White space around a
 number in an INT or FLOAT job or task parameter value is ignored, so
 `" 7 "` is `7` and `" 1.50 "` is `1.50` (openjd-rs#530).
 
-Known gap: a call the session refuses, such as `run_task` on a
-`READY_ENDING` session, returns `None` without running anything, and
-`action_status` still describes the previous action. The pure-Python
+Known gap: a call the session refuses, such as `run_task` or
+`enter_environment` on a `READY_ENDING` session, runs nothing and
+raises nothing (`enter_environment` still returns an identifier, which
+is never entered), and `action_status` still describes the previous
+action. The pure-Python
 reference raises. `clear_ending_only()` is not bound yet.
 
 ### SessionUser (stays in Python, passed to Rust)
