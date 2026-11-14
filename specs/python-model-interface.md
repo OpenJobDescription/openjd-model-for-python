@@ -287,6 +287,18 @@ value is joined to `current_working_dir`. Joined values are lexically
 normalized; an absolute submitted value is returned as written. A default's
 constraints are checked against the joined value. URI values are refused. Violations raise `DecodeValidationError` (openjd-rs#421).
 
+A FLOAT given as a number, as a default, a `LIST[FLOAT]` item or a
+value, is written the way Python's `repr(float)` writes it, with zero
+always `0.0`: `default: 2` gives `"2.0"` and `1e20` gives `"1e+20"`. A
+FLOAT given as a string keeps its spelling (Template Schemas §7.5,
+openjd-rs#539). White space around a number in a string value is
+ignored, so `" 7 "` is the INT `7` (openjd-rs#530). A `LIST[INT]`,
+`LIST[FLOAT]` or `LIST[LIST[INT]]` value given as a Python list of
+numeric strings is coerced item by item, the same as the JSON text of
+that list, and an item error names its position (`item[1]: ...`); a
+`LIST[FLOAT]` default item written as a string keeps its spelling
+(openjd-rs#538).
+
 ```python
 from openjd.model._v1 import decode_job_template, preprocess_job_parameters
 from pathlib import Path

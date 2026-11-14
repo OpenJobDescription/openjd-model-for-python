@@ -957,7 +957,7 @@ from openjd.expr import ExpressionError, RangeExprError, evaluate_expression
 try:
     evaluate_expression("1 +")
 except ExpressionError as e:
-    str(e)  # "Syntax error: ...\n  1 +\n  ^~~"
+    str(e)  # "Syntax error: Expected an expression\n  1 +\n  ^~~"
 
 # Undefined variable
 try:
@@ -971,6 +971,14 @@ try:
 except RangeExprError as e:
     str(e)  # "Expected integer in 'not-a-range'"
 ```
+
+Syntax errors use the wording of Ruff's parser (`Expected an
+expression`, `unexpected EOF while parsing`), which openjd-expr uses
+since 0.15.0 (openjd-rs#531). Parsing an invalid expression takes time
+roughly linear in its length, whatever its bracket nesting. A
+multi-line expression is parsed as written, so a caret points into the
+text the author wrote.
+
 
 | Exception | Base |
 |---|---|

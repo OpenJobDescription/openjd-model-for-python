@@ -3017,3 +3017,105 @@ class TestIntRangeListFormatStringElements:
         assert (
             str(excinfo.value) == f"Task parameter 'F' range[1]: value '{value}' is not an integer"
         )
+
+
+def _preprocess(parameter_definitions: list[dict], values: dict, tmp_path: Path) -> dict:
+    """Decode a one-step template with ``parameter_definitions`` (with EXPR, for
+    the list types) and return ``preprocess_job_parameters``' values as text."""
+    job_template = decode_job_template(
+        template={
+            "specificationVersion": "jobtemplate-2023-09",
+            "extensions": ["EXPR"],
+            "name": "T",
+            "parameterDefinitions": parameter_definitions,
+            "steps": minimal_steps_v2023_09,
+        },
+        supported_extensions=["EXPR"],
+    )
+    result = preprocess_job_parameters(
+        job_template=job_template,
+        job_parameter_values=values,
+        job_template_dir=tmp_path,
+        current_working_dir=tmp_path,
+    )
+    return {name: value.value for name, value in result.items()}
+
+
+class TestFloatGivenAsANumber:
+    """Since openjd-model 0.16.0 (openjd-rs#539) a FLOAT given as a YAML or JSON
+    number is written the way Python's ``repr(float)`` writes it, with zero
+    always ``0.0`` (Expression Language §1.3.4). A FLOAT given as a string keeps
+    its spelling (Template Schemas §7.5). Before, the number's own digits were
+    written, so ``2`` stayed ``2`` and ``1e20`` became ``100000000000000000000``.
+    """
+
+    @pytest.mark.parametrize(
+        "default, expected",
+        [
+            pytest.param(2, "2.0", id="int"),
+            pytest.param(1e20, "1e+20", id="large"),
+            pytest.param(0.00001, "1e-05", id="small"),
+            pytest.param(0, "0.0", id="zero"),
+            pytest.param(2.5, "2.5", id="plain"),
+            pytest.param("2", "2", id="string keeps its spelling"),
+        ],
+    )
+    def test_default(self, default: Any, expected: str, tmp_path: Path) -> None:
+        defs = [{"name": "F", "type": "FLOAT", "default": default}]
+        assert _preprocess(defs, {}, tmp_path) == {"F": expected}
+
+    @pytest.mark.parametrize("value", [2, 2.0])
+    def test_value(self, value: Any, tmp_path: Path) -> None:
+        assert _preprocess([{"name": "F", "type": "FLOAT"}], {"F": value}, tmp_path) == {"F": "2.0"}
+
+    def test_list_default_items(self, tmp_path: Path) -> None:
+        defs = [{"name": "L", "type": "LIST[FLOAT]", "default": [2, 1e20]}]
+        assert _preprocess(defs, {}, tmp_path) == {"L": "[2.0, 1e+20]"}
+
+
+class TestNumericStringsInListParameters:
+    """openjd-model 0.16.0 (openjd-rs#538). A list value given as a native
+    Python list of numeric strings is coerced item by item, as the same value
+    given as JSON text is (Template Schemas §2.13, §2.14, §2.16). Before, a
+    LIST[INT] or LIST[FLOAT] list raised ``Cannot coerce list to LIST[INT]``,
+    and a LIST[LIST[INT]] one kept its items as strings. A LIST[FLOAT] default
+    item written as a string keeps its spelling; before, ``"2.50"`` became
+    ``2.5``."""
+
+    @pytest.mark.parametrize(
+        "param_type, value, expected",
+        [
+            pytest.param("LIST[INT]", ["1", " 2"], "[1, 2]", id="LIST[INT]"),
+            pytest.param("LIST[FLOAT]", ["1.50", " 2"], "[1.50, 2]", id="LIST[FLOAT]"),
+            pytest.param("LIST[LIST[INT]]", [["1", " 2"]], "[[1, 2]]", id="LIST[LIST[INT]]"),
+        ],
+    )
+    def test_native_list_value(
+        self, param_type: str, value: list, expected: str, tmp_path: Path
+    ) -> None:
+        defs = [{"name": "L", "type": param_type}]
+        assert _preprocess(defs, {"L": value}, tmp_path) == {"L": expected}
+
+    def test_a_bad_item_names_its_position(self, tmp_path: Path) -> None:
+        with pytest.raises(DecodeValidationError) as exc_info:
+            _preprocess([{"name": "L", "type": "LIST[INT]"}], {"L": ["1", "x"]}, tmp_path)
+        assert str(exc_info.value) == (
+            "Parameter 'L': item[1]: Value 'x' is not a valid integer or integer string."
+        )
+
+    def test_list_float_default_string_item_keeps_its_spelling(self, tmp_path: Path) -> None:
+        defs = [{"name": "L", "type": "LIST[FLOAT]", "default": [1.50, "2.50"]}]
+        assert _preprocess(defs, {}, tmp_path) == {"L": "[1.5, 2.50]"}
+
+
+class TestWhiteSpaceAroundNumericStrings:
+    """Since openjd-model 0.16.0 (openjd-rs#530) white space around a number in
+    a string value for an INT or FLOAT parameter is ignored (Template Schemas
+    §7.5). Before, ``" 7 "`` was ``not a valid integer``."""
+
+    def test_int(self, tmp_path: Path) -> None:
+        assert _preprocess([{"name": "I", "type": "INT"}], {"I": " 7 "}, tmp_path) == {"I": "7"}
+
+    def test_float_keeps_its_spelling(self, tmp_path: Path) -> None:
+        defs = [{"name": "F", "type": "FLOAT"}]
+        assert _preprocess(defs, {"F": " 1.50 "}, tmp_path) == {"F": "1.50"}

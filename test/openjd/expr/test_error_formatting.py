@@ -302,15 +302,21 @@ class TestErrorCaretWithWhitespace:
 
 
 class TestSyntaxErrorCarets:
-    """Test that syntax errors include caret pointers."""
+    """Test that syntax errors include caret pointers.
+
+    Since openjd-expr 0.15.0 (openjd-rs#531) expressions are parsed with
+    Astral's ruff_python_parser, so syntax errors use Ruff's wording
+    ("unexpected EOF while parsing"). From openjd-expr 0.11.0 (openjd-rs#429)
+    until then, RustPython's fork of the parser gave CPython's wording
+    ("'(' was never closed"). The caret is unchanged.
+    """
 
     def test_unclosed_paren(self):
         """Unclosed parenthesis shows caret spanning the expression."""
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("(1 + 2", values=SymbolTable())
-        # CPython's wording since ruff 0.16.10 (openjd-rs#429).
         expected = [
-            "Syntax error: '(' was never closed\n",
+            "Syntax error: unexpected EOF while parsing\n",
             "  (1 + 2\n",
             "  ^~~~~~",
         ]
@@ -321,7 +327,7 @@ class TestSyntaxErrorCarets:
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("[1, 2, 3", values=SymbolTable())
         expected = [
-            "Syntax error: '[' was never closed\n",
+            "Syntax error: unexpected EOF while parsing\n",
             "  [1, 2, 3\n",
             "  ^~~~~~~~",
         ]
@@ -332,15 +338,48 @@ class TestSyntaxErrorCarets:
         with pytest.raises(ExpressionError) as exc_info:
             evaluate_expression("'unclosed", values=SymbolTable())
         expected = [
-            "Syntax error: unterminated string literal (detected at line 1)\n",
+            "Syntax error: missing closing quote in string literal\n",
             "  'unclosed\n",
             "  ^~~~~~~~~",
         ]
         assert str(exc_info.value) == "".join(expected)
 
+    @pytest.mark.parametrize(
+        "expr, expected",
+        [
+            pytest.param(
+                "1 +", "Syntax error: Expected an expression\n  1 +\n  ^~~", id="no operand"
+            ),
+            pytest.param(
+                "f(a b)",
+                "Syntax error: Expected `,`, found identifier\n  f(a b)\n      ^",
+                id="missing comma",
+            ),
+            pytest.param(
+                "Param.A\nParam.B",
+                "Syntax error: Unexpected token at the end of an expression\n  Param.B\n  ^~~~~",
+                id="two lines",
+            ),
+        ],
+    )
+    def test_ruff_wording(self, expr: str, expected: str) -> None:
+        """More of Ruff's wording (openjd-rs#531). Before, these were
+        "invalid syntax", "invalid syntax. Perhaps you forgot a comma?" with a
+        caret on ``a b``, and, for two lines, the same comma hint on the first
+        line, because the parser saw them wrapped in parentheses."""
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression(expr, values=SymbolTable())
+        assert str(exc_info.value) == expected
+
 
 class TestMultiLineExpressions:
-    """Tests for error formatting in multi-line expressions."""
+    """Tests for error formatting in multi-line expressions.
+
+    The caret sits on the operator, as it does for a single-line expression.
+    Since openjd-expr 0.15.0 (openjd-rs#531) a multi-line expression is parsed
+    as written rather than wrapped in parentheses. Before, the wrap shifted
+    the caret one character right of the operator (``~~~^~~~``).
+    """
 
     def test_error_in_parentheses_multiline(self):
         """Error on second line of parenthesized expression."""
@@ -349,7 +388,7 @@ class TestMultiLineExpressions:
         expected = [
             "Cannot use '+' operator with int and string\n",
             "    1 + 'x'\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ]
         assert str(exc_info.value) == "".join(expected)
 
@@ -360,7 +399,7 @@ class TestMultiLineExpressions:
         expected = [
             "Cannot use '+' operator with int and string\n",
             "    2 + 'x',\n",
-            "    ~~~^~~~",
+            "    ~~^~~~~",
         ]
         assert str(exc_info.value) == "".join(expected)
 
@@ -371,7 +410,7 @@ class TestMultiLineExpressions:
         expected = [
             "Cannot use '+' operator with int and string\n",
             "  1 + 'x' + (\n",
-            "  ~~~^~~~",
+            "  ~~^~~~~",
         ]
         assert str(exc_info.value) == "".join(expected)
 
@@ -382,7 +421,7 @@ class TestMultiLineExpressions:
         expected = [
             "Cannot use '+' operator with int and string\n",
             "      1 + 'x'\n",
-            "      ~~~^~~~",
+            "      ~~^~~~~",
         ]
         assert str(exc_info.value) == "".join(expected)
 

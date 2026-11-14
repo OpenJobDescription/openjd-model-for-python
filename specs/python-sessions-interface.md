@@ -196,6 +196,23 @@ resolves it.
 is 8 random characters from `[a-z0-9_]`, with no part of the session
 ID in it, as the pure-Python reference names it.
 
+An action that ends `FAILED`, `CANCELED` or `TIMEOUT` makes the session
+ending-only (`READY_ENDING`) for good: `exit_environment` and `cleanup`
+still work, and a successful
+`exit_environment(keep_session_running=True)` leaves it `READY_ENDING`
+(openjd-rs#524). When `run_task` or `enter_environment` fails before its
+subprocess starts, for example because a parameter value can't be
+coerced, the action is `FAILED` with the error's message, as in the
+pure-Python reference (openjd-rs#532); an environment that fails this
+way still counts as entered. When `exit_environment` can't build its
+symbol table from `resolved_symtab`, it runs `onExit` with the table the
+environment was entered with (openjd-rs#536).
+
+Known gap: a call the session refuses, such as `run_task` on a
+`READY_ENDING` session, returns `None` without running anything, and
+`action_status` still describes the previous action. The pure-Python
+reference raises. `clear_ending_only()` is not bound yet.
+
 ### SessionUser (stays in Python, passed to Rust)
 
 The `SessionUser` types involve OS-specific credential validation (sudo
