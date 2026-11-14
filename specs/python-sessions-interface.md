@@ -206,7 +206,9 @@ coerced, the action is `FAILED` with the error's message, as in the
 pure-Python reference (openjd-rs#532); an environment that fails this
 way still counts as entered. When `exit_environment` can't build its
 symbol table from `resolved_symtab`, it runs `onExit` with the table the
-environment was entered with (openjd-rs#536).
+environment was entered with (openjd-rs#536). White space around a
+number in an INT or FLOAT job or task parameter value is ignored, so
+`" 7 "` is `7` and `" 1.50 "` is `1.50` (openjd-rs#530).
 
 Known gap: a call the session refuses, such as `run_task` on a
 `READY_ENDING` session, returns `None` without running anything, and

@@ -15,6 +15,9 @@
 - openjd-rs#536: when ``exit_environment`` can't build its symbol table from
   the ``resolved_symtab`` it is given, it runs ``onExit`` with the table the
   environment was entered with. Before, ``onExit`` didn't run.
+- openjd-rs#530: white space around a number in an INT or FLOAT parameter
+  value is ignored. Before, such a value failed before the action started,
+  which the binding didn't report, so the task silently didn't run.
 
 What a session does with a call it then refuses is in ``test_known_gaps.py``.
 """
@@ -149,5 +152,37 @@ def test_on_exit_runs_with_the_enter_time_table(tmp_path: Path) -> None:
         assert status.state == ActionState.SUCCESS
         assert marker.exists()
         assert session.state == SessionState.READY
+    finally:
+        session.cleanup()
+
+
+def test_white_space_around_a_numeric_parameter_value_is_ignored(tmp_path: Path) -> None:
+    out = tmp_path / "out.txt"
+    session = Session(
+        session_id="s",
+        job_parameter_values={"I": {"type": "INT", "value": " 7 "}},
+        session_root_directory=str(tmp_path),
+    )
+    try:
+        session.run_task(
+            step_script=_step_script(
+                {
+                    "command": sys.executable,
+                    "args": [
+                        "-c",
+                        "import sys; open(sys.argv[1], 'w').write(sys.argv[2] + '|' + sys.argv[3])",
+                        str(out),
+                        "{{Param.I}}",
+                        "{{Task.Param.F}}",
+                    ],
+                }
+            ),
+            task_parameter_values={"F": {"type": "FLOAT", "value": " 1.50 "}},
+        )
+        _settle(session)
+        status = session.action_status
+        assert status is not None
+        assert status.state == ActionState.SUCCESS
+        assert out.read_text() == "7|1.50"
     finally:
         session.cleanup()
