@@ -205,11 +205,14 @@ still work, and a successful
 because a parameter value can't be coerced, the action is `FAILED` with
 the error's message, as in the pure-Python reference (openjd-rs#532).
 An environment whose enter fails this way still counts as entered, and
-one whose exit fails this way counts as exited. When `exit_environment` can't build its
-symbol table from `resolved_symtab`, it runs `onExit` with the table the
-environment was entered with (openjd-rs#536). White space around a
-number in an INT or FLOAT job or task parameter value is ignored, so
-`" 7 "` is `7` and `" 1.50 "` is `1.50` (openjd-rs#530).
+one whose exit fails this way counts as exited. When `exit_environment`
+can't build its symbol table from `resolved_symtab`, it runs `onExit`
+with the table the environment was entered with (openjd-rs#536). White
+space around a number in an INT or FLOAT job or task parameter value is
+ignored, so `" 7 "` is `7` and `" 1.50 "` is `1.50` (openjd-rs#530).
+On Windows, `cleanup` retries removing a session directory that is
+still in use, for up to about 31 s, and holds the GIL meanwhile
+(openjd-rs#485).
 
 Known gap: a call the session refuses, such as `run_task` or
 `enter_environment` on a `READY_ENDING` session, runs nothing and

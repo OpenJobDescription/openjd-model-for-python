@@ -3,8 +3,8 @@
 
 """How ``Session`` handles a failed action, through openjd-sessions 0.10.0.
 
-- openjd-rs#532: when ``run_task`` or ``enter_environment`` fails before its
-  subprocess starts, for example because a parameter value can't be coerced,
+- openjd-rs#532: when ``run_task``, ``enter_environment`` or
+  ``exit_environment`` fails before its subprocess starts, for example because a parameter value can't be coerced,
   the action fails with the error's message and the session becomes
   ending-only, as the pure-Python ``openjd.sessions`` does. Before, the binding
   saw an error it discards, so ``action_status`` stayed ``None`` and the
@@ -93,14 +93,17 @@ def test_a_task_that_fails_before_it_starts_fails_the_action(tmp_path: Path) -> 
 
 
 def test_an_environment_that_fails_before_it_starts_fails_the_action(tmp_path: Path) -> None:
-    """The environment still counts as entered, so it can be exited."""
+    """The environment still counts as entered, so it can be exited, and its
+    exit fails before ``onExit`` starts the same way and counts as exited."""
     session = Session(
         session_id="s",
         job_parameter_values={"P": {"type": "PATH", "value": "/a/" + "x" * 32_800}},
         session_root_directory=str(tmp_path),
     )
     try:
-        identifier = session.enter_environment(environment=_environment(onEnter=_python("")))
+        identifier = session.enter_environment(
+            environment=_environment(onEnter=_python(""), onExit=_python(""))
+        )
         _settle(session)
         status = session.action_status
         assert status is not None
@@ -111,6 +114,12 @@ def test_an_environment_that_fails_before_it_starts_fails_the_action(tmp_path: P
         )
         assert session.state == SessionState.READY_ENDING
         assert session.environments_entered == [identifier]
+        session.exit_environment(identifier=identifier)
+        _settle(session)
+        status = session.action_status
+        assert status is not None
+        assert status.state == ActionState.FAILED
+        assert session.environments_entered == []
     finally:
         session.cleanup()
 
