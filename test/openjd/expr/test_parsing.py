@@ -44,6 +44,23 @@ class TestContextualKeywords:
         result = evaluate_expression(f"[Param.if, Param.xx, len('{names}')]", values=symtab)
         assert result.item() == [1, 2, 52]
 
+    def test_two_keyword_attributes_never_share_a_placeholder(self) -> None:
+        """Before openjd-expr 0.15.0 (openjd-rs#531) ``is`` and ``assert`` could
+        be renamed so that one placeholder was a prefix of the other, and this
+        gave the wrong value about half the time. Repeat it to catch that."""
+        symtab = SymbolTable({"Param.is": "a", "Param.assert": "b"})
+        for _ in range(50):
+            assert evaluate_expression("Param.is + Param.assert", values=symtab).item() == "ab"
+
+    def test_a_syntax_error_shows_the_text_as_written(self) -> None:
+        """Before openjd-expr 0.15.0 (openjd-rs#531) the source line showed the
+        placeholder (``Param.af +``) instead of the keyword."""
+        with pytest.raises(ExpressionError) as exc_info:
+            evaluate_expression("Param.if +", values=SymbolTable({"Param.if": 1}))
+        assert str(exc_info.value) == (
+            "Syntax error: Expected an expression\n  Param.if +\n  ^~~~~~~~~~"
+        )
+
     def test_keyword_with_conditional(self) -> None:
         symtab = SymbolTable({"Param.if": 100})
         assert evaluate_expression("Param.if if True else 0", values=symtab).item() == 100

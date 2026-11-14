@@ -1362,3 +1362,22 @@ class TestComputedFloatText:
         ``1000000000000000.3``."""
         assert repr(1000000000000000.25) == "1000000000000000.2"
         assert evaluate_expression(expr).item() == expected
+
+
+class TestNumericStringCoercion:
+    @pytest.mark.parametrize(
+        "expr, target, expected",
+        [
+            pytest.param("' 7 '", "int", 7, id="int"),
+            pytest.param("['1', ' 2']", "list[int]", [1, 2], id="list[int]"),
+        ],
+    )
+    def test_white_space_around_the_number_is_ignored(
+        self, expr: str, target: str, expected: object
+    ) -> None:
+        """Expression Language §1.2.3: coercing a string to a number ignores the
+        white space around it. Since openjd-expr 0.15.0 (openjd-rs#530); before,
+        ``' 7 '`` raised ``Cannot convert ' 7 ' to int``."""
+        from openjd.expr import ExprType
+
+        assert evaluate_expression(expr, target_type=ExprType(target)).item() == expected
