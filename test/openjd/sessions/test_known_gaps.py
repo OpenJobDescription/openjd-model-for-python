@@ -27,11 +27,13 @@ from openjd._openjd_rs import Session, SessionState, deserialize_step
 # leaves ``action_status`` showing the previous action. The pure-Python
 # ``openjd.sessions.Session`` raises for a session that isn't ``READY``.
 #
-# openjd-sessions 0.10.0 (openjd-rs#524) made this reachable in normal use: a
-# failed action keeps the session ending-only even after
-# ``exit_environment(keep_session_running=True)``, so the next ``run_task``
-# is refused, and the caller sees the exit's ``SUCCESS``. With openjd-sessions
-# 0.9.0 that ``run_task`` ran.
+# The gap predates openjd-sessions 0.10.0: a ``run_task`` straight after a
+# failed one, as below, was refused the same way with 0.9.0. 0.10.0
+# (openjd-rs#524) adds a common path into it: a failed action now keeps the
+# session ending-only even after a successful
+# ``exit_environment(keep_session_running=True)``, so the next ``run_task`` is
+# refused and the caller sees the exit's ``SUCCESS``. With 0.9.0 that exit
+# returned the session to ``READY`` and the ``run_task`` ran.
 
 
 @pytest.mark.xfail(

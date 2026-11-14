@@ -3042,11 +3042,15 @@ def _preprocess(parameter_definitions: list[dict], values: dict, tmp_path: Path)
 
 
 class TestFloatGivenAsANumber:
-    """Since openjd-model 0.16.0 (openjd-rs#539) a FLOAT given as a YAML or JSON
-    number is written the way Python's ``repr(float)`` writes it, with zero
-    always ``0.0`` (Expression Language §1.3.4). A FLOAT given as a string keeps
-    its spelling (Template Schemas §7.5). Before, the number's own digits were
-    written, so ``2`` stayed ``2`` and ``1e20`` became ``100000000000000000000``.
+    """A FLOAT given as a YAML or JSON number is written the way Python's
+    ``repr(float)`` writes it, with zero always ``0.0`` (Expression Language
+    §1.3.4). A FLOAT given as a string keeps its spelling (Template Schemas §7.5).
+
+    What changed in openjd-model 0.16.0 (openjd-rs#539) is a FLOAT parameter's
+    ``default`` given as a number: before, its own digits were written, so ``2``
+    stayed ``2`` and ``1e20`` became ``100000000000000000000``. A value given as
+    a Python number and a ``LIST[FLOAT]`` default's number items were already
+    written this way; ``test_value`` and ``test_list_default_items`` pin them.
     """
 
     @pytest.mark.parametrize(
