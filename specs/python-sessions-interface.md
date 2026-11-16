@@ -123,6 +123,7 @@ class Session:
         *,
         environment: Environment,
         identifier: Optional[str] = None,
+        resolved_symtab: Optional[SerializedSymbolTable] = None,
         os_env_vars: Optional[dict[str, str]] = None,
     ) -> str: ...
 
@@ -130,6 +131,8 @@ class Session:
         self,
         *,
         identifier: str,
+        resolved_symtab: Optional[SerializedSymbolTable] = None,
+        keep_session_running: bool = True,
         os_env_vars: Optional[dict[str, str]] = None,
     ) -> None: ...
 
@@ -138,7 +141,9 @@ class Session:
         self,
         *,
         step_script: StepScript,
+        step_name: Optional[str] = None,
         task_parameter_values: Optional[dict] = None,
+        resolved_symtab: Optional[SerializedSymbolTable] = None,
         os_env_vars: Optional[dict[str, str]] = None,
     ) -> None: ...
 
@@ -157,9 +162,8 @@ class Session:
     # Control
     def cancel_action(
         self,
-        *,
         time_limit: Optional[float] = None,
-        mark_action_failed: bool = False,
+        mark_action_failed: Optional[bool] = None,
     ) -> None: ...
 
     def clear_ending_only(self) -> None: ...
@@ -216,7 +220,9 @@ infinite raises `ValueError`.
 Once the crate accepts a call, the method returns when its action is
 `RUNNING` (or, for an environment with no script, has ended), and
 `action_status` describes that action. A `cancel_action` made as soon as
-it returns reaches the action. Every error after acceptance, such as a
+it returns reaches the action, unless the action has already ended, as
+one that fails before its subprocess starts can: then it raises the
+crate's `InvalidState`. A zero `time_limit` terminates at once. Every error after acceptance, such as a
 parameter value that can't be coerced, is reported on `action_status`
 and doesn't raise, even when it arrives before the call returns. The
 crate documents those as failing the action rather than refusing the
@@ -238,7 +244,7 @@ with the table the environment was entered with (openjd-rs#536). White
 space around a number in an INT or FLOAT job or task parameter value is
 ignored, so `" 7 "` is `7` and `" 1.50 "` is `1.50` (openjd-rs#530).
 On Windows, `cleanup` retries removing a session directory that is
-still in use, for up to about 31 s, and holds the GIL meanwhile
+still in use, for up to about 31 s, with the GIL released
 (openjd-rs#485).
 
 ### SessionUser (stays in Python, passed to Rust)

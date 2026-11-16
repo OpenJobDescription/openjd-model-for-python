@@ -160,8 +160,9 @@ fn failed_action_status(message: &str) -> ActionStatus {
     }
 }
 
-/// Convert a timeout or time limit given in seconds. Zero passes through, so
-/// the crate gives its own refusal for it. A negative, NaN or infinite value
+/// Convert a timeout or time limit given in seconds. Zero passes through to
+/// the crate, which refuses a zero `run_subprocess` timeout and reads a zero
+/// cancel time limit as "terminate now". A negative, NaN or infinite value
 /// has no `Duration`, so it raises `ValueError` here rather than panicking.
 fn seconds_to_duration(name: &str, seconds: f64) -> PyResult<std::time::Duration> {
     std::time::Duration::try_from_secs_f64(seconds).map_err(|_| {
@@ -301,7 +302,6 @@ fn run_action<F>(
             // would leave the Python poller waiting forever. Force a
             // terminal FAILED status and drop out of RUNNING, mirroring the
             // runtime-build-failure branch above.
-            drop(guard);
             {
                 let mut snap = lock_recover(&snapshot);
                 snap.state = SessionState::Ready;
@@ -310,6 +310,7 @@ fn run_action<F>(
                     panic_detail(payload.as_ref())
                 )));
             }
+            drop(guard);
             tell(call, true, None);
         }
     }
@@ -359,6 +360,11 @@ fn panic_detail(payload: &(dyn std::any::Any + Send)) -> String {
 #[pyclass(module = "openjd.sessions._v1", name = "Session")]
 pub(crate) struct PySession {
     /// The Rust session. None while a background thread has taken ownership.
+    ///
+    /// Lock it only with the GIL released (`Python::detach`). `cleanup` and
+    /// `cancel_action` call into the crate while holding it, the crate logs,
+    /// and `pyo3_log` takes the GIL for each record, so a thread that held
+    /// the GIL while waiting for this lock would deadlock with them.
     session: Arc<Mutex<Option<Session>>>,
     /// Snapshot updated after each state change, readable without blocking on the session.
     snapshot: Arc<Mutex<StateSnapshot>>,
@@ -409,15 +415,11 @@ impl PySession {
             + Send
             + 'static,
     {
-        let session = {
-            let mut guard = lock_recover(&self.session);
-            match guard.take() {
-                Some(session) => session,
-                None => {
-                    drop(guard);
-                    return Err(self.busy_error(expected));
-                }
-            }
+        // The session mutex is only ever locked with the GIL released; see
+        // `PySession::session`.
+        let session_arc = self.session.clone();
+        let Some(session) = py.detach(move || lock_recover(&session_arc).take()) else {
+            return Err(self.busy_error(expected));
         };
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
         *lock_recover(&self.pending) = Some(PendingCall {
@@ -444,7 +446,8 @@ impl PySession {
         if let Err(e) = spawned {
             *lock_recover(&self.pending) = None;
             if let Some(session) = lock_recover(&session_slot).take() {
-                *lock_recover(&self.session) = Some(session);
+                let session_arc = self.session.clone();
+                py.detach(move || *lock_recover(&session_arc) = Some(session));
             }
             return Err(session_err_to_py(SessionError::Runtime(format!(
                 "failed to start the action thread: {e}"
@@ -638,19 +641,23 @@ impl PySession {
     /// that is not absolute.
     fn extend_path_mapping_rules(
         &self,
+        py: Python<'_>,
         additional: Vec<crate::expr::PyPathMappingRule>,
     ) -> PyResult<()> {
-        let mut guard = lock_recover(&self.session);
-        let session = guard.as_mut().ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err(
-                "cannot extend path mapping rules while an action is running",
-            )
-        })?;
         let rules: Vec<openjd_expr::path_mapping::PathMappingRule> =
             additional.into_iter().map(|p| p.inner).collect();
-        session
-            .extend_path_mapping_rules(rules)
-            .map_err(session_err_to_py)
+        let session_arc = self.session.clone();
+        let result = py.detach(move || {
+            lock_recover(&session_arc)
+                .as_mut()
+                .map(|session| session.extend_path_mapping_rules(rules))
+        });
+        match result {
+            Some(r) => r.map_err(session_err_to_py),
+            None => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "cannot extend path mapping rules while an action is running",
+            )),
+        }
     }
 
     // ── Non-blocking action methods ──
@@ -824,15 +831,20 @@ impl PySession {
     /// Raises `SessionError` if the session isn't `READY_ENDING`. The
     /// crate also refuses after its session-wide cancel token is canceled;
     /// this binding doesn't expose one, so that can't happen here.
-    fn clear_ending_only(&self) -> PyResult<()> {
-        let mut guard = lock_recover(&self.session);
-        let Some(session) = guard.as_mut() else {
-            drop(guard);
-            return Err(self.busy_error(&[SessionState::ReadyEnding]));
-        };
-        session.clear_ending_only().map_err(session_err_to_py)?;
-        Self::update_snapshot(session, &self.snapshot);
-        Ok(())
+    fn clear_ending_only(&self, py: Python<'_>) -> PyResult<()> {
+        let session_arc = self.session.clone();
+        let snapshot = self.snapshot.clone();
+        let result = py.detach(move || {
+            let mut guard = lock_recover(&session_arc);
+            let session = guard.as_mut()?;
+            let r = session.clear_ending_only();
+            Self::update_snapshot(session, &snapshot);
+            Some(r)
+        });
+        match result {
+            Some(r) => r.map_err(session_err_to_py),
+            None => Err(self.busy_error(&[SessionState::ReadyEnding])),
+        }
     }
 
     /// Cancel the running action.
@@ -858,7 +870,12 @@ impl PySession {
         // action's cancel token, so a cancel straight after the call that
         // started it can find no token yet. Keep trying until the token is
         // there or the action thread has given the session back; the gap is
-        // well under a millisecond. The GIL is released meanwhile.
+        // well under a millisecond. Give up after `CANCEL_WAIT`, which is
+        // only reached when the action thread itself is waiting on this
+        // call (a logging handler that cancels, for example). The GIL is
+        // released meanwhile.
+        const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + CANCEL_WAIT;
         py.detach(move || loop {
             {
                 let mut guard = lock_recover(&session_arc);
@@ -884,6 +901,11 @@ impl PySession {
                     lock_recover(&snapshot).state = SessionState::Canceling;
                     return Ok(());
                 }
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(session_err_to_py(SessionError::Runtime(
+                    "Cannot cancel: the action has not started yet".into(),
+                )));
             }
             std::thread::sleep(std::time::Duration::from_micros(100));
         })
