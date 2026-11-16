@@ -423,3 +423,91 @@ class TestAcceptedCalls:
         assert session.state == SessionState.READY
         session.exit_environment(identifier=identifier)
         assert session.environments_entered == []
+
+
+_CONCURRENT_CLEANUP = r"""
+import logging, os, sys, threading
+logging.basicConfig(level=logging.INFO, stream=open(os.devnull, "w"))
+from openjd import _openjd_rs
+from openjd._openjd_rs import Session
+SessionError = getattr(_openjd_rs, "SessionError")
+for i in range(50):
+    s = Session(session_id=f"s{i}", job_parameter_values={}, session_root_directory=sys.argv[1])
+    stop = threading.Event()
+    def hammer():
+        while not stop.is_set():
+            try:
+                s.clear_ending_only()
+            except SessionError:
+                pass
+    t = threading.Thread(target=hammer, daemon=True)
+    t.start()
+    s.cleanup()
+    stop.set()
+    t.join()
+print("done")
+"""
+
+
+def test_cleanup_with_a_concurrent_call_and_logging_on(tmp_path: Path) -> None:
+    """``cleanup`` holds the session lock while the crate logs, and each log
+    record needs the GIL. A concurrent call that waited for the lock while
+    holding the GIL deadlocked. Every lock of the session is now taken with
+    the GIL released. This runs in a fresh interpreter so the INFO level is
+    in force when the binding's logger first looks it up."""
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-c", _CONCURRENT_CLEANUP, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "done"
+
+
+_CANCEL_ON_BANNER = r"""
+import logging, sys, time
+from openjd import _openjd_rs
+from openjd._openjd_rs import Session, SessionState, deserialize_step
+SessionError = getattr(_openjd_rs, "SessionError")
+results = []
+class CancelOnBanner(logging.Handler):
+    def emit(self, record):
+        if "Running Task" in record.getMessage() and not results:
+            try:
+                session.cancel_action()
+                results.append("canceled")
+            except SessionError as e:
+                results.append(str(e))
+logging.getLogger().addHandler(CancelOnBanner())
+logging.getLogger().setLevel(logging.INFO)
+session = Session(session_id="s", job_parameter_values={}, session_root_directory=sys.argv[1])
+script = deserialize_step(
+    {"name": "S", "script": {"actions": {"onRun": {"command": sys.executable, "args": ["-c", ""]}}}}
+).script
+session.run_task(step_script=script)
+while session.state == SessionState.RUNNING:
+    time.sleep(0.02)
+session.cleanup()
+print(results)
+"""
+
+
+def test_cancel_from_the_action_thread_before_it_starts(tmp_path: Path) -> None:
+    """The crate logs the "Running Task" banner on the action thread between
+    reporting the action ``Running`` and installing its cancel token. A
+    logging handler that cancels there can't wait for the token, so after a
+    bounded wait it raises instead of hanging. Runs in a fresh interpreter,
+    as above."""
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-c", _CANCEL_ON_BANNER, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "['Cannot cancel: the action has not started yet']"

@@ -240,7 +240,7 @@ a Python class in `_v1/_session.py` that holds a `_RustSession` and adds:
 |---|---|---|---|
 | `Session.__init__(revision_extensions=...)` | accepted **and used** | accepted, never forwarded | `get_enabled_extensions()` always returns `[]` |
 | `exit_environment(keep_session_running=...)` | `False` | `True` | Default flip — silent semantic regression for callers who omit the kwarg |
-| `run_subprocess(timeout=...)` | int>0; ValueError on 0/None handling | `float(timeout) if timeout else None` | `timeout=0` silently disables the timeout |
+| `run_subprocess(timeout=...)` | int>0; ValueError on 0/None handling | `None if timeout is None else float(timeout)` | ✓ resolved: `timeout=0` reaches the crate and raises |
 | `run_task(task_parameter_values: TaskParameterSet)` | required positional / kw | required kw — but type-coerces dicts and ParameterValue instances inconsistently | Possible bad-value paths |
 
 ### 3.4 Missing wrapper API
@@ -349,7 +349,7 @@ counted as test-suite failures.
 | `Session.cancel_action()` | cancels a running action | cancels it, also straight after the call that started it | ✓ resolved |
 | `Session.__enter__/__exit__` | implemented | not implemented on wrapper | ❌ missing |
 | `Session.session_id` (property) | not exposed in ref either; spec says yes | not on wrapper; on binding only | ⚠ matches ref |
-| `Session.run_subprocess(timeout=0)` | raises `ValueError` | silently runs without timeout (wrapper: `if timeout else None`) | ❌ correctness regression |
+| `Session.run_subprocess(timeout=0)` | raises `ValueError` | raises `SessionError("timeout must be positive")`, the crate's refusal | ⚠ class change |
 | `Session.run_subprocess(timeout=-5)` | raises `ValueError` | binding raises `ValueError` | ✓ resolved |
 | `Session.run_subprocess(command="")` | raises `ValueError` | binding raises `SessionError("command must be a non-empty string")`, the crate's refusal | ⚠ class change |
 | `Session.run_task(task_parameter_values)` | required (`TaskParameterSet`) | wrapper makes it required, but accepts dicts of dicts | ⚠ silent type drift |
@@ -370,7 +370,8 @@ counted as test-suite failures.
 | Failure | Reference | Binding | Status |
 |---|---|---|---|
 | `run_task` while session not READY | `RuntimeError("Session must be in the READY state to run a task.")` | `SessionError("Session must be in READY state, current: RUNNING")` (the crate's message; a `RuntimeError`) | ⚠ message change |
-| `run_task` / `enter_environment` on a `READY_ENDING` session | `RuntimeError("Session must be in the READY state ...")` | `SessionError("Session must be in READY state, current: READY_ENDING")`, a `RuntimeError`; nothing changes | ✓ resolved (raises the crate's refusal; `clear_ending_only()` bound) |
+| `run_task` / `enter_environment` on a `READY_ENDING` session | `RuntimeError("Session must be in the READY state ...")` | `SessionError("Session must be in READY state, current: READY_ENDING")`, a `RuntimeError`; nothing changes | ⚠ message change (the crate's) |
+| `Session.clear_ending_only()` | not in reference | takes a `READY_ENDING` session back to `READY`, as the crate's `clear_ending_only` does | ⚠ binding-only API |
 | `cancel_action` when nothing is running | `RuntimeError("No actions are running")` | `SessionError("Session must be in RUNNING state, current: READY")` | ⚠ class+message change (the crate's) |
 | `cancel_action` while running | succeeds | succeeds, including straight after the call that started the action | ✓ resolved |
 | `Session(session_root_directory=…)` non-existent dir | `RuntimeError("Ensure that the root directory ...")` | likely Rust I/O error → `SessionError(...)` (untested) | ⚠ untested |
@@ -542,12 +543,14 @@ Numbered for the report-driven workflow in `~/openjd-rs/AGENTS.md`. Strike throu
 
 ### Priority 1 — correctness regressions (fix before any caller migration)
 
-1. Make `Session.cancel_action()` work while an action is running. Wire the
+1. ~~Make `Session.cancel_action()` work while an action is running. Wire the
    Rust crate's `CancellationToken` through to a binding-owned handle so
    cancel does not require `&mut Session`. Reference test:
    `test/openjd/sessions-v1/test_known_gaps.py::test_cancel_action_actually_cancels_running_action`.
    Files: `rust-bindings/src/sessions/session.rs` lines 446–459; openjd-rs
-   `openjd-sessions/src/session.rs` cancel surface.
+   `openjd-sessions/src/session.rs` cancel surface.~~ **Resolved** — through
+   `SessionCancelHandle`, including straight after the call that started the
+   action (`test/openjd/sessions/test_refused_calls.py::TestCancelAction`).
 
 2. Validate `run_subprocess(timeout=...)` and `run_subprocess(command=...)` arguments at the **wrapper** boundary so timeout=0/negative and empty command raise `ValueError` matching reference.
    Reference tests:
@@ -555,12 +558,16 @@ Numbered for the report-driven workflow in `~/openjd-rs/AGENTS.md`. Strike throu
    `::test_run_subprocess_rejects_negative_timeout`, `::test_run_subprocess_rejects_empty_command`.
    Files: `openjd-sessions-for-python/src/openjd/sessions/_v1/_session.py`
    `Session.run_subprocess` (replace `if timeout else None` with explicit
-   `is None` check; add empty-command check at top).
+   `is None` check; add empty-command check at top). **Partly resolved** —
+   the wrapper passes `timeout=0` through and the binding raises the crate's
+   `SessionError` for a zero timeout and a blank command (not `ValueError`).
 
-3. In Rust, make negative `timeout` reject cleanly instead of panicking:
+3. ~~In Rust, make negative `timeout` reject cleanly instead of panicking:
    replace `Duration::from_secs_f64(t).unwrap()` with a check that returns a
    `SessionError`. File: `rust-bindings/src/sessions/session.rs` line 425
-   (`run_subprocess`'s `let duration = timeout.map(std::time::Duration::from_secs_f64);`).
+   (`run_subprocess`'s `let duration = timeout.map(std::time::Duration::from_secs_f64);`).~~
+   **Resolved** — a negative, NaN or infinite `timeout` or `time_limit` raises
+   `ValueError`.
 
 4. Fix `exit_environment` default `keep_session_running=False` to match reference.
    Reference test:
