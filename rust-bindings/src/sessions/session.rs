@@ -198,6 +198,8 @@ enum CallOutcome {
 /// The call an action thread is running, until the Python thread that made
 /// it has been told the outcome.
 struct PendingCall {
+    /// Tells this call apart from the next one in the same slot.
+    id: u64,
     tx: std::sync::mpsc::SyncSender<CallOutcome>,
     /// Set by the session callback: the crate reported an action for this
     /// call, so it accepted it.
@@ -205,6 +207,39 @@ struct PendingCall {
 }
 
 type PendingSlot = Arc<Mutex<Option<PendingCall>>>;
+
+static NEXT_CALL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The thread running a session's current action, so `cancel_action` can
+/// tell whether it is called from that thread.
+type ActionThread = Arc<Mutex<Option<std::thread::ThreadId>>>;
+
+/// Held by an action thread for its whole life. If the thread ends without
+/// having told its caller the outcome (it can't today, but a panic outside
+/// `catch_unwind` would), dropping the call's sender wakes the caller instead
+/// of leaving it waiting for ever. Also clears the thread's entry in
+/// `ActionThread`. Each slot is cleared only while it still names this call
+/// or thread, not a later one.
+struct ActionThreadGuard {
+    pending: PendingSlot,
+    call_id: u64,
+    action_thread: ActionThread,
+}
+
+impl Drop for ActionThreadGuard {
+    fn drop(&mut self) {
+        {
+            let mut slot = lock_recover(&self.pending);
+            if slot.as_ref().is_some_and(|c| c.id == self.call_id) {
+                slot.take();
+            }
+        }
+        let mut thread = lock_recover(&self.action_thread);
+        if *thread == Some(std::thread::current().id()) {
+            *thread = None;
+        }
+    }
+}
 
 /// Body of a spawned action thread.
 ///
@@ -376,6 +411,8 @@ pub(crate) struct PySession {
     /// The call whose caller is waiting to learn whether the crate accepted
     /// it. Shared with the session callback, which marks it accepted.
     pending: PendingSlot,
+    /// The thread running the current action, if any.
+    action_thread: ActionThread,
 }
 
 impl PySession {
@@ -422,7 +459,9 @@ impl PySession {
             return Err(self.busy_error(expected));
         };
         let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        let call_id = NEXT_CALL_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         *lock_recover(&self.pending) = Some(PendingCall {
+            id: call_id,
             tx,
             accepted: false,
         });
@@ -435,9 +474,16 @@ impl PySession {
         let session_arc = self.session.clone();
         let snapshot = self.snapshot.clone();
         let pending = self.pending.clone();
+        let action_thread = self.action_thread.clone();
         let spawned = std::thread::Builder::new()
             .name("openjd-session-action".into())
             .spawn(move || {
+                *lock_recover(&action_thread) = Some(std::thread::current().id());
+                let _guard = ActionThreadGuard {
+                    pending: pending.clone(),
+                    call_id,
+                    action_thread,
+                };
                 let Some(session) = lock_recover(&for_thread).take() else {
                     return;
                 };
@@ -459,9 +505,10 @@ impl PySession {
                 accepted: false,
                 error: Some(e),
             }) => Err(session_err_to_py(e)),
-            // Started, an accepted call that returned (its status says how),
-            // or an action thread that ended without saying (it panicked
-            // outside `catch_unwind`; the snapshot reports the failure).
+            // Started, or an accepted call that returned (its status says
+            // how). `Err` means the action thread ended without saying, which
+            // `ActionThreadGuard` turns into a wake-up; nothing does that
+            // today.
             _ => Ok(()),
         }
     }
@@ -586,6 +633,7 @@ impl PySession {
             snapshot,
             cancel_handle,
             pending,
+            action_thread: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -851,7 +899,10 @@ impl PySession {
     ///
     /// Raises `SessionError` with the crate's message if no action is
     /// running, and `ValueError` if `time_limit` is negative, NaN or
-    /// infinite.
+    /// infinite. Called from the action's own thread (from a logging
+    /// handler) before the action has started its subprocess, it waits up
+    /// to 2 s and then raises `SessionError("Cannot cancel: the action has
+    /// not started yet")`.
     #[pyo3(signature = (time_limit=None, mark_action_failed=None))]
     fn cancel_action(
         &self,
@@ -866,16 +917,20 @@ impl PySession {
         let session_arc = self.session.clone();
         let snapshot = self.snapshot.clone();
         let handle = self.cancel_handle.clone();
-        // The crate reports an action `Running` just before it installs the
-        // action's cancel token, so a cancel straight after the call that
-        // started it can find no token yet. Keep trying until the token is
-        // there or the action thread has given the session back; the gap is
-        // well under a millisecond. Give up after `CANCEL_WAIT`, which is
-        // only reached when the action thread itself is waiting on this
-        // call (a logging handler that cancels, for example). The GIL is
-        // released meanwhile.
+        // The crate reports an action `Running` just before it logs the
+        // action's banner and installs its cancel token, so a cancel straight
+        // after the call that started it can find no token yet. Logging needs
+        // the GIL, so the gap is as long as the action thread waits for it,
+        // which under load can be seconds. Keep trying, with the GIL
+        // released, until the token is there or the action thread has given
+        // the session back; both happen without help from this thread. On
+        // the action thread itself (a logging handler that cancels, say),
+        // neither can happen while this call waits, so give up after
+        // `CANCEL_WAIT` there.
         const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
-        let deadline = std::time::Instant::now() + CANCEL_WAIT;
+        let on_action_thread =
+            *lock_recover(&self.action_thread) == Some(std::thread::current().id());
+        let deadline = on_action_thread.then(|| std::time::Instant::now() + CANCEL_WAIT);
         py.detach(move || loop {
             {
                 let mut guard = lock_recover(&session_arc);
@@ -902,7 +957,7 @@ impl PySession {
                     return Ok(());
                 }
             }
-            if std::time::Instant::now() >= deadline {
+            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                 return Err(session_err_to_py(SessionError::Runtime(
                     "Cannot cancel: the action has not started yet".into(),
                 )));

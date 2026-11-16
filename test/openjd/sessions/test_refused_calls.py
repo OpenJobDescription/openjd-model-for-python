@@ -87,12 +87,17 @@ def session(tmp_path: Path):
         s.cleanup()
 
 
-def _assert_refused(session: Session, call: Callable[[], object], message: str) -> None:
-    """``call`` raises ``SessionError(message)`` and changes nothing."""
+def _assert_refused(
+    session: Session,
+    call: Callable[[], object],
+    message: str,
+    error: type[Exception] = SessionError,
+) -> None:
+    """``call`` raises ``error(message)`` and changes nothing."""
     state = session.state
     status = _status(session)
     entered = session.environments_entered
-    with pytest.raises(SessionError) as exc_info:
+    with pytest.raises(error) as exc_info:
         call()
     assert str(exc_info.value) == message
     assert session.state == state
@@ -197,10 +202,10 @@ class TestClearEndingOnly:
         session.run_task(step_script=_step_script("import time; time.sleep(30)"))
         try:
             assert session.state == SessionState.RUNNING
-            with pytest.raises(SessionError) as exc_info:
-                session.clear_ending_only()
-            assert str(exc_info.value) == (
-                "Session must be in READY_ENDING state, current: RUNNING"
+            _assert_refused(
+                session,
+                session.clear_ending_only,
+                "Session must be in READY_ENDING state, current: RUNNING",
             )
         finally:
             session.cancel_action()
@@ -244,13 +249,8 @@ class TestWhileAnActionRuns:
         session.run_task(step_script=_step_script("import time; time.sleep(30)"))
         try:
             assert session.state == SessionState.RUNNING
-            running = _status(session)
-            with pytest.raises(SessionError) as exc_info:
-                call(session)
-            assert isinstance(exc_info.value, RuntimeError)
-            assert str(exc_info.value) == message
-            assert session.state == SessionState.RUNNING
-            assert _status(session) == running
+            assert issubclass(SessionError, RuntimeError)
+            _assert_refused(session, lambda: call(session), message)
         finally:
             session.cancel_action()
             _settle(session)
@@ -328,13 +328,12 @@ class TestOtherRefusals:
         """A timeout with no ``Duration`` raises ``ValueError`` before the
         crate sees it. Before, the binding's conversion panicked
         (``PanicException``, which ``except Exception`` doesn't catch)."""
-        with pytest.raises(ValueError) as exc_info:
-            session.run_subprocess(command=sys.executable, timeout=timeout)
-        assert str(exc_info.value) == (
-            f"timeout must be a finite, non-negative number of seconds, got {shown}"
+        _assert_refused(
+            session,
+            lambda: session.run_subprocess(command=sys.executable, timeout=timeout),
+            f"timeout must be a finite, non-negative number of seconds, got {shown}",
+            ValueError,
         )
-        assert session.state == SessionState.READY
-        assert session.action_status is None
 
 
 _SLEEP = "import time; time.sleep(30)"
@@ -350,10 +349,11 @@ class TestCancelAction:
         _assert_refused(session, session.cancel_action, message)
 
     def test_a_time_limit_with_no_duration(self, session: Session) -> None:
-        with pytest.raises(ValueError) as exc_info:
-            session.cancel_action(time_limit=-1.0)
-        assert str(exc_info.value) == (
-            "time_limit must be a finite, non-negative number of seconds, got -1"
+        _assert_refused(
+            session,
+            lambda: session.cancel_action(time_limit=-1.0),
+            "time_limit must be a finite, non-negative number of seconds, got -1",
+            ValueError,
         )
 
     @pytest.mark.parametrize(
@@ -461,7 +461,7 @@ def test_cleanup_with_a_concurrent_call_and_logging_on(tmp_path: Path) -> None:
         [sys.executable, "-c", _CONCURRENT_CLEANUP, str(tmp_path)],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=25,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "done"
@@ -507,7 +507,49 @@ def test_cancel_from_the_action_thread_before_it_starts(tmp_path: Path) -> None:
         [sys.executable, "-c", _CANCEL_ON_BANNER, str(tmp_path)],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=25,
     )
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == "['Cannot cancel: the action has not started yet']"
+
+
+_CANCEL_WHILE_THE_ACTION_THREAD_WAITS = r"""
+import logging, sys, time
+from openjd._openjd_rs import ActionState, Session, SessionState, deserialize_step
+class SlowOnBanner(logging.Handler):
+    def emit(self, record):
+        if "Running Task" in record.getMessage():
+            time.sleep(2.5)
+logging.getLogger().addHandler(SlowOnBanner())
+logging.getLogger().setLevel(logging.INFO)
+session = Session(session_id="s", job_parameter_values={}, session_root_directory=sys.argv[1])
+script = deserialize_step(
+    {"name": "S", "script": {"actions": {"onRun": {
+        "command": sys.executable, "args": ["-c", "import time; time.sleep(30)"]}}}}
+).script
+session.run_task(step_script=script)
+session.cancel_action()
+while session.state in (SessionState.RUNNING, SessionState.CANCELING):
+    time.sleep(0.02)
+print(session.action_status.state.name)
+session.cleanup()
+"""
+
+
+def test_cancel_while_the_action_thread_is_slow_to_start(tmp_path: Path) -> None:
+    """The gap between the crate reporting ``Running`` and installing the
+    cancel token includes logging the action's banner, which needs the GIL
+    and runs every Python logging handler. Here a handler takes 2.5 s. A
+    cancel from another thread waits the gap out rather than giving up; with
+    a 2 s limit it used to raise "Cannot cancel: the action has not started
+    yet", and the task ran to the end."""
+    import subprocess
+
+    result = subprocess.run(
+        [sys.executable, "-c", _CANCEL_WHILE_THE_ACTION_THREAD_WAITS, str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=25,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "CANCELED"
