@@ -64,11 +64,11 @@ def _environment(name: str = "E", *, extensions: Optional[list[str]] = None, **a
 
 
 def _settle(session: Session) -> None:
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 10
     busy = (SessionState.RUNNING, SessionState.CANCELING)
     while session.state in busy and time.monotonic() < deadline:
         time.sleep(0.02)
-    assert session.state not in busy, "action did not finish within 30s"
+    assert session.state not in busy, "action did not finish within 10s"
 
 
 def _status(session: Session) -> Optional[tuple]:
@@ -348,6 +348,51 @@ class TestCancelAction:
         _settle(session)
         _assert_refused(session, session.cancel_action, message)
 
+    def test_a_second_cancel_while_canceling(self, session: Session, tmp_path: Path) -> None:
+        """The crate refuses a cancel while one is in progress. Before, the
+        binding delivered it through the cancel handle and returned, ignoring
+        its time limit."""
+        marker = tmp_path / "started"
+        ignore_notify = (
+            "import signal, time\n"
+            "for name in ('SIGTERM', 'SIGBREAK'):\n"
+            "    if hasattr(signal, name):\n"
+            "        signal.signal(getattr(signal, name), signal.SIG_IGN)\n"
+            f"open({str(marker)!r}, 'w').close()\n"
+            "time.sleep(30)"
+        )
+        script = deserialize_step(
+            {
+                "name": "S",
+                "script": {
+                    "actions": {
+                        "onRun": {
+                            **_python(ignore_notify),
+                            "cancelation": {
+                                "mode": "NOTIFY_THEN_TERMINATE",
+                                "notifyPeriodInSeconds": 3,
+                            },
+                        }
+                    }
+                },
+            }
+        ).script
+        session.run_task(step_script=script)
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert marker.exists()
+        session.cancel_action()
+        assert session.state == SessionState.CANCELING
+        _assert_refused(
+            session,
+            lambda: session.cancel_action(time_limit=0.0),
+            "Session must be in RUNNING state, current: CANCELING",
+        )
+        _settle(session)
+        status = session.action_status
+        assert status is not None and status.state == ActionState.CANCELED
+
     def test_a_time_limit_with_no_duration(self, session: Session) -> None:
         _assert_refused(
             session,
@@ -382,7 +427,7 @@ class TestCancelAction:
             began = time.monotonic()
             session.cancel_action()
             _settle(session)
-            assert time.monotonic() - began < 20
+            assert time.monotonic() - began < 4
             status = session.action_status
             assert status is not None and status.state == ActionState.CANCELED
             assert session.state == SessionState.READY_ENDING
@@ -498,9 +543,9 @@ print(results)
 def test_cancel_from_the_action_thread_before_it_starts(tmp_path: Path) -> None:
     """The crate logs the "Running Task" banner on the action thread between
     reporting the action ``Running`` and installing its cancel token. A
-    logging handler that cancels there can't wait for the token, so after a
-    bounded wait it raises instead of hanging. Runs in a fresh interpreter,
-    as above."""
+    logging handler that cancels there can't wait for the token, which can't
+    appear while it runs, so it raises at once instead of hanging. Runs in a
+    fresh interpreter, as above."""
     import subprocess
 
     result = subprocess.run(
