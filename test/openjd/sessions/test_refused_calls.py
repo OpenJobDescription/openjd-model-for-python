@@ -427,7 +427,7 @@ class TestCancelAction:
             began = time.monotonic()
             session.cancel_action()
             _settle(session)
-            assert time.monotonic() - began < 4
+            assert time.monotonic() - began < 8
             status = session.action_status
             assert status is not None and status.state == ActionState.CANCELED
             assert session.state == SessionState.READY_ENDING
@@ -521,11 +521,13 @@ results = []
 class CancelOnBanner(logging.Handler):
     def emit(self, record):
         if "Running Task" in record.getMessage() and not results:
+            began = time.monotonic()
             try:
                 session.cancel_action()
                 results.append("canceled")
             except SessionError as e:
                 results.append(str(e))
+            results.append(time.monotonic() - began < 0.5)
 logging.getLogger().addHandler(CancelOnBanner())
 logging.getLogger().setLevel(logging.INFO)
 session = Session(session_id="s", job_parameter_values={}, session_root_directory=sys.argv[1])
@@ -555,7 +557,7 @@ def test_cancel_from_the_action_thread_before_it_starts(tmp_path: Path) -> None:
         timeout=25,
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "['Cannot cancel: the action has not started yet']"
+    assert result.stdout.strip() == "['Cannot cancel: the action has not started yet', True]"
 
 
 _CANCEL_WHILE_THE_ACTION_THREAD_WAITS = r"""

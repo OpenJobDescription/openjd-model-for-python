@@ -2221,6 +2221,9 @@ class Session:
         wrap hook is entered. A failure after that, such as an environment
         variable that doesn't resolve, fails the action; the environment
         still counts as entered and must be exited.
+
+        Waits for the action thread, which logs through Python's `logging`,
+        so don't call it while holding a lock that a logging handler takes.
         """
 
     def exit_environment(
@@ -2239,6 +2242,9 @@ class Session:
         `READY_ENDING`, if `identifier` isn't entered, or if it isn't the
         most recently entered environment. A failure after that fails the
         action, and the environment still counts as exited.
+
+        Waits for the action thread, which logs through Python's `logging`,
+        so don't call it while holding a lock that a logging handler takes.
         """
 
     def run_task(
@@ -2257,6 +2263,9 @@ class Session:
         because an earlier action failed and the session is ending-only. A
         failure after that, such as a task parameter value that can't be
         coerced, fails the action.
+
+        Waits for the action thread, which logs through Python's `logging`,
+        so don't call it while holding a lock that a logging handler takes.
 
         `step_name` is surfaced as `WrappedStep.Name` to a wrapping
         environment's `onWrapTaskRun` hook (RFC 0008). It defaults to an empty
@@ -2279,6 +2288,9 @@ class Session:
         Raises `SessionError` if the session isn't `READY`, if `command` is
         empty or blank, or if `timeout` is zero, and `ValueError` if
         `timeout` is negative, NaN or infinite.
+
+        Waits for the action thread, which logs through Python's `logging`,
+        so don't call it while holding a lock that a logging handler takes.
         """
 
     def clear_ending_only(self) -> None:
@@ -2307,8 +2319,12 @@ class Session:
         `SessionError("Cannot cancel: the action has not started yet")` if
         the action hasn't installed its cancel token: at once when called
         from the action's own thread (a logging handler), and after 20 s
-        otherwise, which happens only when the action thread is blocked on a
-        lock the caller holds, such as a logging handler's.
+        otherwise, typically because the action thread is blocked on a lock
+        the caller holds, such as a logging handler's.
+
+        Unlike the pure-Python reference, a second cancel while one is in
+        progress raises; the crate doesn't shorten the first cancel's grace
+        period.
         """
 
     def cleanup(self) -> None:

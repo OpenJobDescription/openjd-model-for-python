@@ -225,15 +225,18 @@ it returns reaches the action, unless the action has already ended, as
 one that fails before its subprocess starts can: then it raises the
 crate's `InvalidState`. A zero `time_limit` terminates at once. A second
 `cancel_action` while the session is `CANCELING` raises the crate's
-`InvalidState`. If the action hasn't installed its cancel token yet,
-`cancel_action` raises `SessionError("Cannot cancel: the action has not
-started yet")`, the binding's own message: at once when called from the
-action's own thread (a logging handler), and after 20 s otherwise. Every
-error after acceptance, such as a parameter value that can't be coerced,
-is reported on `action_status` and doesn't raise, even when it arrives
-before the call returns. The crate documents those as failing the action
-rather than refusing the call, and the pure-Python reference reports
-them the same way.
+`InvalidState`; the pure-Python reference accepts it and shortens the
+grace period to its `time_limit`, which the crate can't do. If the
+action hasn't installed its cancel token yet, `cancel_action` raises
+`SessionError("Cannot cancel: the action has not started yet")`, the
+binding's own message: at once when called from the action's own thread
+(a logging handler), and after 20 s otherwise, typically because the
+action thread is blocked on a lock the caller holds. Every error after
+acceptance, such as a parameter value that can't be coerced, is reported
+on `action_status` and doesn't raise, even when it arrives before the
+call returns. The crate documents those as failing the action rather
+than refusing the call, and the pure-Python reference reports them the
+same way.
 
 The crate runs each action on a background thread, and that thread logs
 through Python's `logging` (each record needs the GIL and runs the
@@ -241,7 +244,9 @@ handlers). An action method waits for the crate to accept or refuse the
 call, and `cancel_action` waits for the action's cancel token, so don't
 call either while holding a lock that a logging handler takes on another
 thread: the action thread would wait for the lock, and the call for the
-action thread.
+action thread. The pure-Python reference logs on the caller's thread, so
+it has no such restriction. A fix belongs in the crate: report that it
+accepted a call, and install the cancel token, before logging.
 
 An action that ends `FAILED`, `CANCELED` or `TIMEOUT` makes the session
 ending-only (`READY_ENDING`): `exit_environment` and `cleanup` still
