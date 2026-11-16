@@ -145,9 +145,9 @@ fn lock_recover<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 /// Build a terminal FAILED `ActionStatus` carrying `message`.
 ///
-/// Used when an action thread can't even start (e.g. the Tokio runtime
-/// fails to build) so the Python poller observes a terminal state and
-/// stops waiting on RUNNING rather than spinning forever.
+/// Used when an accepted action panics, or returns an error the crate
+/// didn't record, so the Python poller observes a terminal state and stops
+/// waiting on RUNNING rather than spinning forever.
 fn failed_action_status(message: &str) -> ActionStatus {
     ActionStatus {
         state: openjd_sessions::action::ActionState::Failed,
@@ -254,11 +254,11 @@ impl Drop for ActionThreadGuard {
 ///   poison shared state silently and tear down the interpreter's view
 ///   of the session.
 ///
-/// A runtime-build failure is surfaced as a terminal FAILED
-/// `ActionStatus` so the Python-side poller terminates cleanly. A panic
-/// inside the action is likewise converted into a terminal FAILED
-/// `ActionStatus` (rather than copying the possibly-still-Running real
-/// session state), so the poller never hangs on a panicked action.
+/// A runtime-build failure is a refusal: the session goes back unchanged
+/// and the caller raises. A panic inside the action is converted into a
+/// terminal FAILED `ActionStatus` (rather than copying the
+/// possibly-still-Running real session state), so the poller never hangs
+/// on a panicked action.
 ///
 /// If the calling Python thread is still waiting (the action never
 /// reported `Running`), it is told the outcome after the session is back in
@@ -335,8 +335,7 @@ fn run_action<F>(
             // usable for future calls, but the real `session.state()` may
             // still read Running with no terminal `ActionStatus` — which
             // would leave the Python poller waiting forever. Force a
-            // terminal FAILED status and drop out of RUNNING, mirroring the
-            // runtime-build-failure branch above.
+            // terminal FAILED status and drop out of RUNNING.
             {
                 let mut snap = lock_recover(&snapshot);
                 snap.state = SessionState::Ready;
@@ -505,11 +504,15 @@ impl PySession {
                 accepted: false,
                 error: Some(e),
             }) => Err(session_err_to_py(e)),
+            // `Err`: the action thread ended without saying, which
+            // `ActionThreadGuard` turns into a wake-up. Nothing does that
+            // today; if it did, the session may not be back in its slot.
+            Err(_) => Err(session_err_to_py(SessionError::Runtime(
+                "the action thread ended unexpectedly".into(),
+            ))),
             // Started, or an accepted call that returned (its status says
-            // how). `Err` means the action thread ended without saying, which
-            // `ActionThreadGuard` turns into a wake-up; nothing does that
-            // today.
-            _ => Ok(()),
+            // how).
+            Ok(_) => Ok(()),
         }
     }
 }
@@ -898,11 +901,13 @@ impl PySession {
     /// Cancel the running action.
     ///
     /// Raises `SessionError` with the crate's message if no action is
-    /// running, and `ValueError` if `time_limit` is negative, NaN or
-    /// infinite. Called from the action's own thread (from a logging
-    /// handler) before the action has started its subprocess, it waits up
-    /// to 2 s and then raises `SessionError("Cannot cancel: the action has
-    /// not started yet")`.
+    /// running or one is already being canceled, and `ValueError` if
+    /// `time_limit` is negative, NaN or infinite. Raises
+    /// `SessionError("Cannot cancel: the action has not started yet")` if
+    /// the action hasn't installed its cancel token: at once when called
+    /// from the action's own thread (a logging handler), and after 20 s
+    /// otherwise, which happens only when the action thread is blocked on a
+    /// lock the caller holds, such as a logging handler's.
     #[pyo3(signature = (time_limit=None, mark_action_failed=None))]
     fn cancel_action(
         &self,
@@ -920,17 +925,23 @@ impl PySession {
         // The crate reports an action `Running` just before it logs the
         // action's banner and installs its cancel token, so a cancel straight
         // after the call that started it can find no token yet. Logging needs
-        // the GIL, so the gap is as long as the action thread waits for it,
-        // which under load can be seconds. Keep trying, with the GIL
-        // released, until the token is there or the action thread has given
-        // the session back; both happen without help from this thread. On
-        // the action thread itself (a logging handler that cancels, say),
-        // neither can happen while this call waits, so give up after
-        // `CANCEL_WAIT` there.
-        const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(2);
+        // the GIL and runs every Python handler, so the gap is as long as the
+        // action thread waits for those, which under load can be seconds.
+        // Keep trying, with the GIL released, until the token is there or the
+        // action thread has given the session back. Give up after
+        // `CANCEL_WAIT`, which is reached only when the action thread is
+        // stuck on something this thread holds, such as a logging handler's
+        // lock. On the action thread itself (a logging handler that cancels)
+        // the token can't appear while this call runs, so don't wait at all.
+        const CANCEL_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
         let on_action_thread =
             *lock_recover(&self.action_thread) == Some(std::thread::current().id());
-        let deadline = on_action_thread.then(|| std::time::Instant::now() + CANCEL_WAIT);
+        let deadline = std::time::Instant::now()
+            + if on_action_thread {
+                std::time::Duration::ZERO
+            } else {
+                CANCEL_WAIT
+            };
         py.detach(move || loop {
             {
                 let mut guard = lock_recover(&session_arc);
@@ -952,12 +963,24 @@ impl PySession {
                 // write its final snapshot before the `Canceling` below, so
                 // the snapshot can't be left reading `Canceling` after the
                 // action has ended.
+                // A second cancel while one is in progress: the crate's
+                // `Session::cancel_action` refuses it, so do the same rather
+                // than deliver it through the handle.
+                {
+                    let snap = lock_recover(&snapshot);
+                    if snap.state == SessionState::Canceling {
+                        return Err(session_err_to_py(SessionError::InvalidState {
+                            expected: vec![SessionState::Running],
+                            current: SessionState::Canceling,
+                        }));
+                    }
+                }
                 if handle.cancel(duration, mark_failed) {
                     lock_recover(&snapshot).state = SessionState::Canceling;
                     return Ok(());
                 }
             }
-            if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
+            if std::time::Instant::now() >= deadline {
                 return Err(session_err_to_py(SessionError::Runtime(
                     "Cannot cancel: the action has not started yet".into(),
                 )));
