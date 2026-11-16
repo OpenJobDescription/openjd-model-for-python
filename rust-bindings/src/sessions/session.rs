@@ -12,7 +12,9 @@ use pyo3_stub_gen::derive::*;
 
 use openjd_model::types::{JobParameterType, JobParameterValue, JobParameterValues};
 use openjd_model::types::{TaskParameterSet, TaskParameterType, TaskParameterValue};
+use openjd_sessions::action::ActionState;
 use openjd_sessions::action_status::ActionStatus;
+use openjd_sessions::error::SessionError;
 use openjd_sessions::limits::SessionLimits;
 use openjd_sessions::session::{Session, SessionConfig, SessionState};
 
@@ -158,6 +160,40 @@ fn failed_action_status(message: &str) -> ActionStatus {
     }
 }
 
+/// What an action thread tells the Python thread that handed it a call.
+///
+/// A non-blocking method must not return until it knows whether the crate
+/// accepted the call. The crate refuses a call (wrong state, unknown or
+/// duplicate environment, out-of-order exit, bad `run_subprocess`
+/// arguments) before it touches the session, and such a refusal has to
+/// raise. It accepts a call by reporting the call's action through the
+/// session callback, before its first `.await`; from then on every outcome,
+/// errors included, is recorded on the action status.
+enum CallOutcome {
+    /// The crate accepted the call and its action is `Running`.
+    Started,
+    /// The crate returned before the action reported `Running`.
+    /// `accepted == false` means it refused the call and changed nothing, so
+    /// `error` is the refusal. Otherwise the action ended without running a
+    /// subprocess (an environment with no script, or a failure before the
+    /// action started), and its status says how.
+    Returned {
+        accepted: bool,
+        error: Option<SessionError>,
+    },
+}
+
+/// The call an action thread is running, until the Python thread that made
+/// it has been told the outcome.
+struct PendingCall {
+    tx: std::sync::mpsc::SyncSender<CallOutcome>,
+    /// Set by the session callback: the crate reported an action for this
+    /// call, so it accepted it.
+    accepted: bool,
+}
+
+type PendingSlot = Arc<Mutex<Option<PendingCall>>>;
+
 /// Body of a spawned action thread.
 ///
 /// Builds a lightweight current-thread Tokio runtime, runs the action
@@ -166,7 +202,7 @@ fn failed_action_status(message: &str) -> ActionStatus {
 /// the runtime failed to build or the future panicked. This guarantees:
 ///
 /// * the session is never left permanently "taken" (which would wedge
-///   every later call into `"An action is already running"`), and
+///   every later call), and
 /// * a panic in async session code can't escape the detached thread to
 ///   poison shared state silently and tear down the interpreter's view
 ///   of the session.
@@ -176,13 +212,18 @@ fn failed_action_status(message: &str) -> ActionStatus {
 /// inside the action is likewise converted into a terminal FAILED
 /// `ActionStatus` (rather than copying the possibly-still-Running real
 /// session state), so the poller never hangs on a panicked action.
+///
+/// If the calling Python thread is still waiting (the action never
+/// reported `Running`), it is told the outcome after the session is back in
+/// its slot, so it can make its next call straight away.
 fn run_action<F>(
     mut session: Session,
     session_arc: Arc<Mutex<Option<Session>>>,
     snapshot: Arc<Mutex<StateSnapshot>>,
+    pending: PendingSlot,
     action: F,
 ) where
-    F: FnOnce(&tokio::runtime::Runtime, &mut Session),
+    F: FnOnce(&tokio::runtime::Runtime, &mut Session) -> Result<(), SessionError>,
 {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -193,6 +234,7 @@ fn run_action<F>(
             // Couldn't build a runtime (e.g. fd/thread exhaustion). Mark
             // the action FAILED and drop out of RUNNING so the poller
             // delivers a terminal callback instead of hanging.
+            let call = lock_recover(&pending).take();
             {
                 let mut snap = lock_recover(&snapshot);
                 snap.state = SessionState::Ready;
@@ -201,22 +243,26 @@ fn run_action<F>(
                 )));
             }
             *lock_recover(&session_arc) = Some(session);
+            tell(call, true, None);
             return;
         }
     };
 
     // Catch panics so a panic inside async session code still restores
     // the session below rather than leaking out of this detached thread.
-    let action_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        action(&rt, &mut session);
-    }));
+    let action_result =
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| action(&rt, &mut session)));
+
+    // Take the waiting call, if any, before the session goes back: once it
+    // is back another thread can start a call and install its own.
+    let call = lock_recover(&pending).take();
+    let accepted = call.as_ref().is_none_or(|c| c.accepted);
 
     // Restore the session BEFORE refreshing the snapshot, holding the guard
     // across both so there's no window where a caller finds the slot empty.
     // Python callers watch `state` via the snapshot and dispatch the next
     // action the moment it transitions out of Running; if the snapshot
-    // updated first they could find the mutex still empty ("An action is
-    // already running").
+    // updated first they could find the mutex still empty.
     let guard = {
         let mut slot = lock_recover(&session_arc);
         *slot = Some(session);
@@ -224,10 +270,17 @@ fn run_action<F>(
     };
 
     match action_result {
-        Ok(()) => {
+        Ok(result) => {
             if let Some(s) = guard.as_ref() {
                 PySession::update_snapshot(s, &snapshot);
             }
+            drop(guard);
+            if accepted {
+                if let Err(e) = &result {
+                    record_unreported_failure(&snapshot, e);
+                }
+            }
+            tell(call, accepted, result.err());
         }
         Err(payload) => {
             // The action panicked mid-run. `catch_unwind` kept the session
@@ -236,13 +289,44 @@ fn run_action<F>(
             // would leave the Python poller waiting forever. Force a
             // terminal FAILED status and drop out of RUNNING, mirroring the
             // runtime-build-failure branch above.
-            let mut snap = lock_recover(&snapshot);
-            snap.state = SessionState::Ready;
-            snap.action_status = Some(failed_action_status(&format!(
-                "action panicked during execution: {}",
-                panic_detail(payload.as_ref())
-            )));
+            drop(guard);
+            {
+                let mut snap = lock_recover(&snapshot);
+                snap.state = SessionState::Ready;
+                snap.action_status = Some(failed_action_status(&format!(
+                    "action panicked during execution: {}",
+                    panic_detail(payload.as_ref())
+                )));
+            }
+            tell(call, true, None);
         }
+    }
+}
+
+/// Tell a waiting Python thread how its call came out. Nothing to do when
+/// it was already told the action started.
+fn tell(call: Option<PendingCall>, accepted: bool, error: Option<SessionError>) {
+    if let Some(call) = call {
+        // `send` fails only when the receiver is gone, and the caller drops
+        // it only after receiving: there is nobody left to tell.
+        let _ = call.tx.send(CallOutcome::Returned { accepted, error });
+    }
+}
+
+/// An accepted call returned an error. The crate records every such error
+/// on the action status (`fail_action_setup`, `drive_action`, or a failed
+/// script's own status), so this normally changes nothing. If the status
+/// doesn't show a failure, record the error there rather than lose it.
+fn record_unreported_failure(snapshot: &Arc<Mutex<StateSnapshot>>, e: &SessionError) {
+    let mut snap = lock_recover(snapshot);
+    let reported = snap.action_status.as_ref().is_some_and(|st| {
+        matches!(
+            st.state,
+            ActionState::Failed | ActionState::Canceled | ActionState::Timeout
+        )
+    });
+    if !reported {
+        snap.action_status = Some(failed_action_status(&e.to_string()));
     }
 }
 
@@ -271,6 +355,9 @@ pub(crate) struct PySession {
     /// by a background action thread — the case where `Session::cancel_action`
     /// is unreachable (it needs `&mut Session`).
     cancel_handle: openjd_sessions::session::SessionCancelHandle,
+    /// The call whose caller is waiting to learn whether the crate accepted
+    /// it. Shared with the session callback, which marks it accepted.
+    pending: PendingSlot,
 }
 
 impl PySession {
@@ -279,6 +366,68 @@ impl PySession {
         snap.state = session.state();
         snap.action_status = session.action_status();
         snap.environments_entered = session.environments_entered().to_vec();
+    }
+
+    /// The error for a call made while an action thread owns the session.
+    /// The crate itself would refuse it with `InvalidState`, because the
+    /// session is `Running` or `Canceling`; give the same message. Until the
+    /// action reports `Running` the snapshot may still show the state
+    /// before it, so anything else reads as `Running`.
+    fn busy_error(&self, expected: &[SessionState]) -> PyErr {
+        let current = match lock_recover(&self.snapshot).state {
+            s @ (SessionState::Running | SessionState::Canceling) => s,
+            _ => SessionState::Running,
+        };
+        session_err_to_py(SessionError::InvalidState {
+            expected: expected.to_vec(),
+            current,
+        })
+    }
+
+    /// Run `action` on a background thread and return once the crate has
+    /// accepted it and its action is `Running`, or once it has returned.
+    /// A call the crate refuses raises `SessionError` with the crate's
+    /// message and leaves the session, its state and its action status as
+    /// they were. Every later outcome of an accepted call is reported on the
+    /// action status. The GIL is released while waiting, because the action
+    /// thread needs it to log.
+    fn dispatch<F>(&self, py: Python<'_>, expected: &[SessionState], action: F) -> PyResult<()>
+    where
+        F: FnOnce(&tokio::runtime::Runtime, &mut Session) -> Result<(), SessionError>
+            + Send
+            + 'static,
+    {
+        let session = {
+            let mut guard = lock_recover(&self.session);
+            match guard.take() {
+                Some(session) => session,
+                None => {
+                    drop(guard);
+                    return Err(self.busy_error(expected));
+                }
+            }
+        };
+        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+        *lock_recover(&self.pending) = Some(PendingCall {
+            tx,
+            accepted: false,
+        });
+
+        let session_arc = self.session.clone();
+        let snapshot = self.snapshot.clone();
+        let pending = self.pending.clone();
+        std::thread::spawn(move || run_action(session, session_arc, snapshot, pending, action));
+
+        match py.detach(move || rx.recv()) {
+            Ok(CallOutcome::Returned {
+                accepted: false,
+                error: Some(e),
+            }) => Err(session_err_to_py(e)),
+            // Started, an accepted call that returned (its status says how),
+            // or an action thread that ended without saying (it panicked
+            // outside `catch_unwind`; the snapshot reports the failure).
+            _ => Ok(()),
+        }
     }
 }
 
@@ -345,9 +494,27 @@ impl PySession {
             environments_entered: vec![],
         }));
         let snapshot_for_cb = snapshot.clone();
+        let pending: PendingSlot = Arc::new(Mutex::new(None));
+        let pending_for_cb = pending.clone();
+        // The crate calls this for every action it accepts before the
+        // action's first `.await`, so the first call for a pending call is
+        // its acceptance. On `Running`, the caller is told the action
+        // started; `state` is set here, under the snapshot lock and before
+        // the action thread's final `update_snapshot`, so it can't
+        // overwrite a later state. Lock order: snapshot, then pending.
         let callback = Box::new(move |_session_id: &str, status: &ActionStatus| {
-            if let Ok(mut snap) = snapshot_for_cb.lock() {
-                snap.action_status = Some(status.clone());
+            let mut snap = lock_recover(&snapshot_for_cb);
+            snap.action_status = Some(status.clone());
+            let mut slot = lock_recover(&pending_for_cb);
+            if let Some(call) = slot.as_mut() {
+                call.accepted = true;
+                if status.state == ActionState::Running {
+                    snap.state = SessionState::Running;
+                    if let Some(call) = slot.take() {
+                        // Fails only if the caller is gone; see `tell`.
+                        let _ = call.tx.send(CallOutcome::Started);
+                    }
+                }
             }
         });
 
@@ -382,6 +549,7 @@ impl PySession {
             session: Arc::new(Mutex::new(Some(session))),
             snapshot,
             cancel_handle,
+            pending,
         })
     }
 
@@ -453,12 +621,28 @@ impl PySession {
     }
 
     // ── Non-blocking action methods ──
+    //
+    // Each returns once its action is `Running` (or, for an action that
+    // runs no subprocess, once it has ended) and leaves the rest to a
+    // background thread. A call the crate refuses raises `SessionError`
+    // with the crate's message, as the Rust method returns `Err`, and
+    // changes nothing; that includes a call while another action is
+    // running or the session is ending-only. Once the crate has accepted a
+    // call, its outcome, including an error before the action's subprocess
+    // starts, is on `action_status`.
 
-    /// Enter an environment. Non-blocking — spawns the onEnter action on a
-    /// background thread and returns the environment identifier immediately.
+    /// Enter an environment. Non-blocking: returns the environment
+    /// identifier once the onEnter action is running.
+    ///
+    /// Raises `SessionError` if the session isn't `READY`, if
+    /// `identifier` is already entered, or if a second environment with a
+    /// wrap hook is entered. A failure after that, such as an environment
+    /// variable that doesn't resolve, fails the action; the environment
+    /// still counts as entered and must be exited.
     #[pyo3(signature = (*, environment, identifier=None, resolved_symtab=None, os_env_vars=None))]
     fn enter_environment(
         &self,
+        py: Python<'_>,
         environment: &PyEnvironment,
         identifier: Option<String>,
         resolved_symtab: Option<&crate::expr::PySerializedSymbolTable>,
@@ -482,86 +666,56 @@ impl PySession {
         // evaluation or expression interpolation.
         let resolved = resolved_symtab.map(|st| st.inner.clone());
 
-        // Take the session out of the mutex so the background thread owns it
-        let mut guard = lock_recover(&self.session);
-        let session = guard.take().ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
+        self.dispatch(py, &[SessionState::Ready], move |rt, session| {
+            rt.block_on(session.enter_environment(
+                &env,
+                resolved.as_ref(),
+                Some(&env_id),
+                os_env_vars.as_ref(),
+            ))
+            .map(|_| ())
         })?;
-        drop(guard);
-
-        // Update snapshot to RUNNING and CLEAR action_status.
-        // The worker's poll loop treats a non-None action_status as "the current
-        // action has reported state". If we leave the previous action's status
-        // here, the poll loop will immediately fire a stale terminal callback
-        // for the new action — causing the worker to think envEnter / run_task
-        // finished in ~1ms with the previous action's SUCCEEDED result.
-        {
-            let mut snap = lock_recover(&self.snapshot);
-            snap.state = SessionState::Running;
-            snap.action_status = None;
-        }
-
-        let session_arc = self.session.clone();
-        let snapshot = self.snapshot.clone();
-
-        std::thread::spawn(move || {
-            run_action(session, session_arc, snapshot, move |rt, session| {
-                let env_ref = os_env_vars.as_ref();
-                let _ = rt.block_on(session.enter_environment(
-                    &env,
-                    resolved.as_ref(),
-                    Some(&env_id),
-                    env_ref,
-                ));
-            });
-        });
-
         Ok(return_id)
     }
 
-    /// Exit an environment. Non-blocking — spawns the onExit action on a
-    /// background thread.
+    /// Exit an environment. Non-blocking: returns once the onExit action is
+    /// running.
+    ///
+    /// Raises `SessionError` if the session isn't `READY` or
+    /// `READY_ENDING`, if `identifier` isn't entered, or if it isn't the
+    /// most recently entered environment. A failure after that fails the
+    /// action, and the environment still counts as exited.
     #[pyo3(signature = (*, identifier, resolved_symtab=None, keep_session_running=true, os_env_vars=None))]
     fn exit_environment(
         &self,
+        py: Python<'_>,
         identifier: String,
         resolved_symtab: Option<&crate::expr::PySerializedSymbolTable>,
         keep_session_running: bool,
         os_env_vars: Option<HashMap<String, String>>,
     ) -> PyResult<()> {
         let resolved = resolved_symtab.map(|st| st.inner.clone());
-
-        let mut guard = lock_recover(&self.session);
-        let session = guard.take().ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
-        })?;
-        drop(guard);
-
-        {
-            let mut snap = lock_recover(&self.snapshot);
-            snap.state = SessionState::Running;
-            snap.action_status = None;
-        }
-
-        let session_arc = self.session.clone();
-        let snapshot = self.snapshot.clone();
-
-        std::thread::spawn(move || {
-            run_action(session, session_arc, snapshot, move |rt, session| {
-                let env_ref = os_env_vars.as_ref();
-                let _ = rt.block_on(session.exit_environment(
+        self.dispatch(
+            py,
+            &[SessionState::Ready, SessionState::ReadyEnding],
+            move |rt, session| {
+                rt.block_on(session.exit_environment(
                     &identifier,
                     resolved.as_ref(),
                     keep_session_running,
-                    env_ref,
-                ));
-            });
-        });
-
-        Ok(())
+                    os_env_vars.as_ref(),
+                ))
+                .map(|_| ())
+            },
+        )
     }
 
-    /// Run a task. Non-blocking — spawns the onRun action on a background thread.
+    /// Run a task. Non-blocking: returns once the onRun action is running.
+    ///
+    /// Raises `SessionError` if the session isn't `READY`, for example
+    /// because an earlier action failed and the session is ending-only. A
+    /// failure after that, such as a task parameter value that can't be
+    /// coerced, fails the action.
     ///
     /// `step_name` is surfaced as `WrappedStep.Name` to a wrapping
     /// environment's `onWrapTaskRun` hook (RFC 0008). It defaults to an empty
@@ -569,6 +723,7 @@ impl PySession {
     #[pyo3(signature = (*, step_script, step_name=None, task_parameter_values=None, resolved_symtab=None, os_env_vars=None))]
     fn run_task(
         &self,
+        py: Python<'_>,
         step_script: &PyStepScript,
         step_name: Option<String>,
         task_parameter_values: Option<&Bound<'_, PyDict>>,
@@ -583,42 +738,27 @@ impl PySession {
         };
         let resolved = resolved_symtab.map(|st| st.inner.clone());
 
-        let mut guard = lock_recover(&self.session);
-        let session = guard.take().ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
-        })?;
-        drop(guard);
-
-        {
-            let mut snap = lock_recover(&self.snapshot);
-            snap.state = SessionState::Running;
-            snap.action_status = None;
-        }
-
-        let session_arc = self.session.clone();
-        let snapshot = self.snapshot.clone();
-
-        std::thread::spawn(move || {
-            run_action(session, session_arc, snapshot, move |rt, session| {
-                let env_ref = os_env_vars.as_ref();
-                let task_ref = task_params.as_ref();
-                let _ = rt.block_on(session.run_task(
-                    &step_name,
-                    &script,
-                    task_ref,
-                    resolved.as_ref(),
-                    env_ref,
-                ));
-            });
-        });
-
-        Ok(())
+        self.dispatch(py, &[SessionState::Ready], move |rt, session| {
+            rt.block_on(session.run_task(
+                &step_name,
+                &script,
+                task_params.as_ref(),
+                resolved.as_ref(),
+                os_env_vars.as_ref(),
+            ))
+            .map(|_| ())
+        })
     }
 
-    /// Run a subprocess. Non-blocking — spawns on a background thread.
+    /// Run a subprocess. Non-blocking: returns once it is running.
+    ///
+    /// Raises `SessionError` if the session isn't `READY`, if `command` is
+    /// empty or blank, or if `timeout` is zero.
     #[pyo3(signature = (*, command, args=None, timeout=None, os_env_vars=None, use_session_env_vars=true, log_banner_message=None))]
+    #[allow(clippy::too_many_arguments)] // PyO3 method mirrors a kwarg-rich public signature
     fn run_subprocess(
         &self,
+        py: Python<'_>,
         command: String,
         args: Option<Vec<String>>,
         timeout: Option<f64>,
@@ -626,38 +766,36 @@ impl PySession {
         use_session_env_vars: bool,
         log_banner_message: Option<String>,
     ) -> PyResult<()> {
+        let duration = timeout.map(std::time::Duration::from_secs_f64);
+        self.dispatch(py, &[SessionState::Ready], move |rt, session| {
+            rt.block_on(session.run_subprocess(
+                &command,
+                args.as_deref(),
+                duration,
+                os_env_vars.as_ref(),
+                use_session_env_vars,
+                log_banner_message.as_deref(),
+            ))
+            .map(|_| ())
+        })
+    }
+
+    /// Take an ending-only session (`READY_ENDING`) back to `READY`, so it
+    /// accepts `run_task`, `enter_environment` and `run_subprocess` again.
+    /// The environments entered, the last action's status and the
+    /// environment variables stay as they were.
+    ///
+    /// Raises `SessionError` if the session isn't `READY_ENDING`. The
+    /// crate also refuses after its session-wide cancel token is canceled;
+    /// this binding doesn't expose one, so that can't happen here.
+    fn clear_ending_only(&self) -> PyResult<()> {
         let mut guard = lock_recover(&self.session);
-        let session = guard.take().ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err("An action is already running")
-        })?;
-        drop(guard);
-
-        {
-            let mut snap = lock_recover(&self.snapshot);
-            snap.state = SessionState::Running;
-            snap.action_status = None;
-        }
-
-        let session_arc = self.session.clone();
-        let snapshot = self.snapshot.clone();
-
-        std::thread::spawn(move || {
-            run_action(session, session_arc, snapshot, move |rt, session| {
-                let duration = timeout.map(std::time::Duration::from_secs_f64);
-                let env_ref = os_env_vars.as_ref();
-                let args_ref = args.as_deref();
-                let banner_ref = log_banner_message.as_deref();
-                let _ = rt.block_on(session.run_subprocess(
-                    &command,
-                    args_ref,
-                    duration,
-                    env_ref,
-                    use_session_env_vars,
-                    banner_ref,
-                ));
-            });
-        });
-
+        let Some(session) = guard.as_mut() else {
+            drop(guard);
+            return Err(self.busy_error(&[SessionState::ReadyEnding]));
+        };
+        session.clear_ending_only().map_err(session_err_to_py)?;
+        Self::update_snapshot(session, &self.snapshot);
         Ok(())
     }
 
