@@ -19,7 +19,7 @@
   value is ignored. Before, such a value failed before the action started,
   which the binding didn't report, so the task silently didn't run.
 
-What a session does with a call it then refuses is in ``test_known_gaps.py``.
+What a session does with a call it refuses is in ``test_refused_calls.py``.
 """
 
 from __future__ import annotations

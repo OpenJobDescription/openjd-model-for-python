@@ -200,10 +200,16 @@ impl PyWindowsSessionUser {
                 ));
             }
 
-            // Determine whether `user` matches the process user.
-            let is_process_user = openjd_sessions::win32::get_process_user()
-                .map(|proc_user| user.eq_ignore_ascii_case(&proc_user))
-                .unwrap_or(false);
+            // Determine whether `user` matches the process user. A failure to
+            // look up the process user raises, as the pure-Python reference's
+            // `get_process_user()` does, rather than reading as "not the
+            // process user".
+            let process_user = openjd_sessions::win32::get_process_user().map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Could not determine the process user: {e}"
+                ))
+            })?;
+            let is_process_user = user.eq_ignore_ascii_case(&process_user);
 
             if is_process_user {
                 if password.is_some() {

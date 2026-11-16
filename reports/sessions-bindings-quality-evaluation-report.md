@@ -369,8 +369,8 @@ counted as test-suite failures.
 
 | Failure | Reference | Binding | Status |
 |---|---|---|---|
-| `run_task` while session not READY | `RuntimeError("Session must be in the READY state to run a task.")` | `RuntimeError("An action is already running")` | ⚠ message change |
-| `run_task` / `enter_environment` on a `READY_ENDING` session | `RuntimeError("Session must be in the READY state ...")` | runs nothing (`run_task` returns `None`; `enter_environment` returns an identifier that was never entered), `action_status` still shows the previous action (the binding discards the crate's `Err`); openjd-sessions 0.10.0 keeps a session `READY_ENDING` after a failed action even when an exit keeps it running | ❌ silent no-op (strict xfail in `test/openjd/sessions/test_known_gaps.py`) |
+| `run_task` while session not READY | `RuntimeError("Session must be in the READY state to run a task.")` | `SessionError("Session must be in READY state, current: RUNNING")` (the crate's message; a `RuntimeError`) | ⚠ message change |
+| `run_task` / `enter_environment` on a `READY_ENDING` session | `RuntimeError("Session must be in the READY state ...")` | `SessionError("Session must be in READY state, current: READY_ENDING")`, a `RuntimeError`; nothing changes | ✓ resolved (raises the crate's refusal; `clear_ending_only()` bound) |
 | `cancel_action` when nothing is running | `RuntimeError("No actions are running")` | `SessionError("Session must be in RUNNING state, current: READY")` | ⚠ class+message change |
 | `cancel_action` while running | succeeds | `RuntimeError("Cannot cancel: session is busy with an action")` | ❌ contract inversion |
 | `Session(session_root_directory=…)` non-existent dir | `RuntimeError("Ensure that the root directory ...")` | likely Rust I/O error → `SessionError(...)` (untested) | ⚠ untested |

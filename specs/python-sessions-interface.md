@@ -117,7 +117,7 @@ class Session:
     files_directory: Path
     action_status: Optional[ActionStatus]
 
-    # Environment lifecycle (non-blocking — starts action, returns immediately)
+    # Environment lifecycle (non-blocking — returns once the action is running)
     def enter_environment(
         self,
         *,
@@ -133,7 +133,7 @@ class Session:
         os_env_vars: Optional[dict[str, str]] = None,
     ) -> None: ...
 
-    # Task execution (non-blocking — starts action, returns immediately)
+    # Task execution (non-blocking — returns once the action is running)
     def run_task(
         self,
         *,
@@ -161,6 +161,8 @@ class Session:
         time_limit: Optional[float] = None,
         mark_action_failed: bool = False,
     ) -> None: ...
+
+    def clear_ending_only(self) -> None: ...
 
     def cleanup(self) -> None: ...
 ```
@@ -196,11 +198,30 @@ resolves it.
 is 8 random characters from `[a-z0-9_]`, with no part of the session
 ID in it, as the pure-Python reference names it.
 
+A call the openjd-sessions crate refuses raises `SessionError` with the
+crate's message, as the Rust method returns `Err`, and changes nothing:
+the state, `action_status` (still the previous action's) and
+`environments_entered` stay as they were. The crate refuses `run_task`,
+`enter_environment` and `run_subprocess` unless the session is `READY`,
+`exit_environment` unless it is `READY` or `READY_ENDING`, an unknown,
+out-of-order or duplicate environment identifier, a second environment
+with wrap hooks, and a blank `command` or zero `timeout`. A call made
+while another action runs gets the same `InvalidState` message
+(`Session must be in READY state, current: RUNNING`); before, it was
+`RuntimeError("An action is already running")`, and `SessionError` is a
+`RuntimeError`. Once the crate accepts a call, the method returns when
+its action is `RUNNING` (or, for an environment with no script, has
+ended), and `action_status` describes that action. Everything after
+acceptance, errors included, is reported on `action_status`; the method
+doesn't raise for it, where the Rust method would also return `Err`,
+because it has already returned.
+
 An action that ends `FAILED`, `CANCELED` or `TIMEOUT` makes the session
-ending-only (`READY_ENDING`) for good: `exit_environment` and `cleanup`
-still work, and a successful
-`exit_environment(keep_session_running=True)` leaves it `READY_ENDING`
-(openjd-rs#524). When `run_task`, `enter_environment` or
+ending-only (`READY_ENDING`): `exit_environment` and `cleanup` still
+work, and a successful `exit_environment(keep_session_running=True)`
+leaves it `READY_ENDING` (openjd-rs#524). `clear_ending_only()` takes it
+back to `READY`, keeping the environments entered and the last action's
+status; it raises `SessionError` unless the session is `READY_ENDING`. When `run_task`, `enter_environment` or
 `exit_environment` fails before its subprocess starts, for example
 because a parameter value can't be coerced, the action is `FAILED` with
 the error's message, as in the pure-Python reference (openjd-rs#532).
@@ -213,13 +234,6 @@ ignored, so `" 7 "` is `7` and `" 1.50 "` is `1.50` (openjd-rs#530).
 On Windows, `cleanup` retries removing a session directory that is
 still in use, for up to about 31 s, and holds the GIL meanwhile
 (openjd-rs#485).
-
-Known gap: a call the session refuses, such as `run_task` or
-`enter_environment` on a `READY_ENDING` session, runs nothing and
-raises nothing (`enter_environment` still returns an identifier, which
-is never entered), and `action_status` still describes the previous
-action. The pure-Python
-reference raises. `clear_ending_only()` is not bound yet.
 
 ### SessionUser (stays in Python, passed to Rust)
 

@@ -2213,8 +2213,14 @@ class Session:
         os_env_vars: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None,
     ) -> builtins.str:
         r"""
-        Enter an environment. Non-blocking — spawns the onEnter action on a
-        background thread and returns the environment identifier immediately.
+        Enter an environment. Non-blocking: returns the environment
+        identifier once the onEnter action is running.
+
+        Raises `SessionError` if the session isn't `READY`, if
+        `identifier` is already entered, or if a second environment with a
+        wrap hook is entered. A failure after that, such as an environment
+        variable that doesn't resolve, fails the action; the environment
+        still counts as entered and must be exited.
         """
 
     def exit_environment(
@@ -2226,20 +2232,35 @@ class Session:
         os_env_vars: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None,
     ) -> None:
         r"""
-        Exit an environment. Non-blocking — spawns the onExit action on a
-        background thread.
+        Exit an environment. Non-blocking: returns once the onExit action is
+        running.
+
+        Raises `SessionError` if the session isn't `READY` or
+        `READY_ENDING`, if `identifier` isn't entered, or if it isn't the
+        most recently entered environment. A failure after that fails the
+        action, and the environment still counts as exited.
         """
 
     def run_task(
         self,
         *,
         step_script: StepScript,
+        step_name: typing.Optional[builtins.str] = None,
         task_parameter_values: typing.Optional[dict] = None,
         resolved_symtab: typing.Optional[SerializedSymbolTable] = None,
         os_env_vars: typing.Optional[typing.Mapping[builtins.str, builtins.str]] = None,
     ) -> None:
         r"""
-        Run a task. Non-blocking — spawns the onRun action on a background thread.
+        Run a task. Non-blocking: returns once the onRun action is running.
+
+        Raises `SessionError` if the session isn't `READY`, for example
+        because an earlier action failed and the session is ending-only. A
+        failure after that, such as a task parameter value that can't be
+        coerced, fails the action.
+
+        `step_name` is surfaced as `WrappedStep.Name` to a wrapping
+        environment's `onWrapTaskRun` hook (RFC 0008). It defaults to an empty
+        string when the caller does not supply one.
         """
 
     def run_subprocess(
@@ -2253,7 +2274,22 @@ class Session:
         log_banner_message: typing.Optional[builtins.str] = None,
     ) -> None:
         r"""
-        Run a subprocess. Non-blocking — spawns on a background thread.
+        Run a subprocess. Non-blocking: returns once it is running.
+
+        Raises `SessionError` if the session isn't `READY`, if `command` is
+        empty or blank, or if `timeout` is zero.
+        """
+
+    def clear_ending_only(self) -> None:
+        r"""
+        Take an ending-only session (`READY_ENDING`) back to `READY`, so it
+        accepts `run_task`, `enter_environment` and `run_subprocess` again.
+        The environments entered, the last action's status and the
+        environment variables stay as they were.
+
+        Raises `SessionError` if the session isn't `READY_ENDING`. The
+        crate also refuses after its session-wide cancel token is canceled;
+        this binding doesn't expose one, so that can't happen here.
         """
 
     def cancel_action(
