@@ -160,6 +160,17 @@ fn failed_action_status(message: &str) -> ActionStatus {
     }
 }
 
+/// Convert a timeout or time limit given in seconds. Zero passes through, so
+/// the crate gives its own refusal for it. A negative, NaN or infinite value
+/// has no `Duration`, so it raises `ValueError` here rather than panicking.
+fn seconds_to_duration(name: &str, seconds: f64) -> PyResult<std::time::Duration> {
+    std::time::Duration::try_from_secs_f64(seconds).map_err(|_| {
+        pyo3::exceptions::PyValueError::new_err(format!(
+            "{name} must be a finite, non-negative number of seconds, got {seconds}"
+        ))
+    })
+}
+
 /// What an action thread tells the Python thread that handed it a call.
 ///
 /// A non-blocking method must not return until it knows whether the crate
@@ -231,19 +242,18 @@ fn run_action<F>(
     {
         Ok(rt) => rt,
         Err(e) => {
-            // Couldn't build a runtime (e.g. fd/thread exhaustion). Mark
-            // the action FAILED and drop out of RUNNING so the poller
-            // delivers a terminal callback instead of hanging.
+            // Couldn't build a runtime (e.g. fd/thread exhaustion). The
+            // crate never saw the call, so treat it as refused: put the
+            // session back unchanged and raise in the caller.
             let call = lock_recover(&pending).take();
-            {
-                let mut snap = lock_recover(&snapshot);
-                snap.state = SessionState::Ready;
-                snap.action_status = Some(failed_action_status(&format!(
-                    "failed to start action runtime: {e}"
-                )));
-            }
             *lock_recover(&session_arc) = Some(session);
-            tell(call, true, None);
+            tell(
+                call,
+                false,
+                Some(SessionError::Runtime(format!(
+                    "failed to start action runtime: {e}"
+                ))),
+            );
             return;
         }
     };
@@ -274,12 +284,14 @@ fn run_action<F>(
             if let Some(s) = guard.as_ref() {
                 PySession::update_snapshot(s, &snapshot);
             }
-            drop(guard);
+            // Still under the session guard, so no next action can have
+            // started and been overwritten.
             if accepted {
                 if let Err(e) = &result {
                     record_unreported_failure(&snapshot, e);
                 }
             }
+            drop(guard);
             tell(call, accepted, result.err());
         }
         Err(payload) => {
@@ -354,7 +366,7 @@ pub(crate) struct PySession {
     /// to whichever action is running even while the `Session` value is owned
     /// by a background action thread — the case where `Session::cancel_action`
     /// is unreachable (it needs `&mut Session`).
-    cancel_handle: openjd_sessions::session::SessionCancelHandle,
+    cancel_handle: Arc<openjd_sessions::session::SessionCancelHandle>,
     /// The call whose caller is waiting to learn whether the crate accepted
     /// it. Shared with the session callback, which marks it accepted.
     pending: PendingSlot,
@@ -413,10 +425,31 @@ impl PySession {
             accepted: false,
         });
 
+        // `run_action` owns the session from here. If the thread can't be
+        // spawned, the closure is dropped unrun, so keep the session where
+        // it can be recovered, put it back, and raise, as for a refusal.
+        let session_slot = Arc::new(Mutex::new(Some(session)));
+        let for_thread = session_slot.clone();
         let session_arc = self.session.clone();
         let snapshot = self.snapshot.clone();
         let pending = self.pending.clone();
-        std::thread::spawn(move || run_action(session, session_arc, snapshot, pending, action));
+        let spawned = std::thread::Builder::new()
+            .name("openjd-session-action".into())
+            .spawn(move || {
+                let Some(session) = lock_recover(&for_thread).take() else {
+                    return;
+                };
+                run_action(session, session_arc, snapshot, pending, action)
+            });
+        if let Err(e) = spawned {
+            *lock_recover(&self.pending) = None;
+            if let Some(session) = lock_recover(&session_slot).take() {
+                *lock_recover(&self.session) = Some(session);
+            }
+            return Err(session_err_to_py(SessionError::Runtime(format!(
+                "failed to start the action thread: {e}"
+            ))));
+        }
 
         match py.detach(move || rx.recv()) {
             Ok(CallOutcome::Returned {
@@ -544,7 +577,7 @@ impl PySession {
             snap.files_directory = session.files_directory().to_string_lossy().to_string();
             snap.action_status = session.action_status();
         }
-        let cancel_handle = session.cancel_handle();
+        let cancel_handle = Arc::new(session.cancel_handle());
         Ok(PySession {
             session: Arc::new(Mutex::new(Some(session))),
             snapshot,
@@ -753,7 +786,8 @@ impl PySession {
     /// Run a subprocess. Non-blocking: returns once it is running.
     ///
     /// Raises `SessionError` if the session isn't `READY`, if `command` is
-    /// empty or blank, or if `timeout` is zero.
+    /// empty or blank, or if `timeout` is zero, and `ValueError` if
+    /// `timeout` is negative, NaN or infinite.
     #[pyo3(signature = (*, command, args=None, timeout=None, os_env_vars=None, use_session_env_vars=true, log_banner_message=None))]
     #[allow(clippy::too_many_arguments)] // PyO3 method mirrors a kwarg-rich public signature
     fn run_subprocess(
@@ -766,7 +800,9 @@ impl PySession {
         use_session_env_vars: bool,
         log_banner_message: Option<String>,
     ) -> PyResult<()> {
-        let duration = timeout.map(std::time::Duration::from_secs_f64);
+        let duration = timeout
+            .map(|t| seconds_to_duration("timeout", t))
+            .transpose()?;
         self.dispatch(py, &[SessionState::Ready], move |rt, session| {
             rt.block_on(session.run_subprocess(
                 &command,
@@ -799,50 +835,74 @@ impl PySession {
         Ok(())
     }
 
+    /// Cancel the running action.
+    ///
+    /// Raises `SessionError` with the crate's message if no action is
+    /// running, and `ValueError` if `time_limit` is negative, NaN or
+    /// infinite.
+    #[pyo3(signature = (time_limit=None, mark_action_failed=None))]
     fn cancel_action(
         &self,
+        py: Python<'_>,
         time_limit: Option<f64>,
         mark_action_failed: Option<bool>,
     ) -> PyResult<()> {
-        let duration = time_limit.map(std::time::Duration::from_secs_f64);
+        let duration = time_limit
+            .map(|t| seconds_to_duration("time_limit", t))
+            .transpose()?;
         let mark_failed = mark_action_failed.unwrap_or(false);
-        // Direct path when the session is not taken (e.g. between actions):
-        // Session::cancel_action also performs the Running -> Canceling state
-        // transition, which the handle cannot (it doesn't own the Session).
-        let mut guard = lock_recover(&self.session);
-        if let Some(session) = guard.as_mut() {
-            let result = session
-                .cancel_action(duration, mark_failed)
-                .map_err(session_err_to_py);
-            Self::update_snapshot(session, &self.snapshot);
-            return result;
-        }
-        drop(guard);
-
-        // Session is owned by a background action thread: deliver through the
-        // thread-safe cancel handle. Cancellation follows the action's own
-        // cancelation method (including cross-user helper delivery), exactly
-        // like Session::cancel_action.
-        if self.cancel_handle.cancel(duration, mark_failed) {
-            // The handle cannot set the session's transient Canceling state;
-            // reflect it in the snapshot so Python-side pollers observe the
-            // cancel-in-progress phase until the terminal state lands.
-            let mut snap = lock_recover(&self.snapshot);
-            snap.state = SessionState::Canceling;
-            Ok(())
-        } else {
-            Err(pyo3::exceptions::PyRuntimeError::new_err(
-                "Cannot cancel: no action is running",
-            ))
-        }
+        let session_arc = self.session.clone();
+        let snapshot = self.snapshot.clone();
+        let handle = self.cancel_handle.clone();
+        // The crate reports an action `Running` just before it installs the
+        // action's cancel token, so a cancel straight after the call that
+        // started it can find no token yet. Keep trying until the token is
+        // there or the action thread has given the session back; the gap is
+        // well under a millisecond. The GIL is released meanwhile.
+        py.detach(move || loop {
+            {
+                let mut guard = lock_recover(&session_arc);
+                if let Some(session) = guard.as_mut() {
+                    // Between actions, or the action has ended: the crate
+                    // decides, and refuses with `InvalidState` unless the
+                    // session is `Running` (which it isn't here).
+                    let result = session
+                        .cancel_action(duration, mark_failed)
+                        .map_err(session_err_to_py);
+                    Self::update_snapshot(session, &snapshot);
+                    return result;
+                }
+                // Session is owned by a background action thread: deliver
+                // through the thread-safe cancel handle, which follows the
+                // action's own cancelation method (including cross-user
+                // helper delivery), exactly like Session::cancel_action.
+                // Holding the session lock means the action thread can't
+                // write its final snapshot before the `Canceling` below, so
+                // the snapshot can't be left reading `Canceling` after the
+                // action has ended.
+                if handle.cancel(duration, mark_failed) {
+                    lock_recover(&snapshot).state = SessionState::Canceling;
+                    return Ok(());
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        })
     }
 
-    fn cleanup(&self) {
-        let mut guard = lock_recover(&self.session);
-        if let Some(session) = guard.as_mut() {
-            session.cleanup();
-            Self::update_snapshot(session, &self.snapshot);
-        }
+    /// Clean up the session, deleting its working directory unless it is
+    /// retained. Does nothing while an action is running. The GIL is
+    /// released meanwhile: on Windows the crate retries a removal that
+    /// fails for up to about 31 s.
+    fn cleanup(&self, py: Python<'_>) {
+        let session_arc = self.session.clone();
+        let snapshot = self.snapshot.clone();
+        py.detach(move || {
+            let mut guard = lock_recover(&session_arc);
+            if let Some(session) = guard.as_mut() {
+                session.cleanup();
+                Self::update_snapshot(session, &snapshot);
+            }
+        });
     }
 
     fn __repr__(&self, py: Python<'_>) -> PyResult<String> {

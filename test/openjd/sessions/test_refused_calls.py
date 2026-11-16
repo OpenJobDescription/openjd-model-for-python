@@ -65,9 +65,10 @@ def _environment(name: str = "E", *, extensions: Optional[list[str]] = None, **a
 
 def _settle(session: Session) -> None:
     deadline = time.monotonic() + 30
-    while session.state == SessionState.RUNNING and time.monotonic() < deadline:
+    busy = (SessionState.RUNNING, SessionState.CANCELING)
+    while session.state in busy and time.monotonic() < deadline:
         time.sleep(0.02)
-    assert session.state != SessionState.RUNNING, "action did not finish within 30s"
+    assert session.state not in busy, "action did not finish within 30s"
 
 
 def _status(session: Session) -> Optional[tuple]:
@@ -193,7 +194,7 @@ class TestClearEndingOnly:
         )
 
     def test_refused_while_an_action_runs(self, session: Session) -> None:
-        session.run_task(step_script=_step_script("import time; time.sleep(1)"))
+        session.run_task(step_script=_step_script("import time; time.sleep(30)"))
         try:
             assert session.state == SessionState.RUNNING
             with pytest.raises(SessionError) as exc_info:
@@ -202,10 +203,7 @@ class TestClearEndingOnly:
                 "Session must be in READY_ENDING state, current: RUNNING"
             )
         finally:
-            # Let the task finish rather than cancel it: the crate reports
-            # the action `Running` just before it installs the action's
-            # cancel token, so a cancel straight after the call returns can
-            # find no action to cancel.
+            session.cancel_action()
             _settle(session)
 
 
@@ -243,7 +241,7 @@ class TestWhileAnActionRuns:
     def test_a_second_action(
         self, session: Session, call: Callable[[Session], object], message: str
     ) -> None:
-        session.run_task(step_script=_step_script("import time; time.sleep(1)"))
+        session.run_task(step_script=_step_script("import time; time.sleep(30)"))
         try:
             assert session.state == SessionState.RUNNING
             running = _status(session)
@@ -254,10 +252,7 @@ class TestWhileAnActionRuns:
             assert session.state == SessionState.RUNNING
             assert _status(session) == running
         finally:
-            # Let the task finish rather than cancel it: the crate reports
-            # the action `Running` just before it installs the action's
-            # cancel token, so a cancel straight after the call returns can
-            # find no action to cancel.
+            session.cancel_action()
             _settle(session)
 
 
@@ -323,6 +318,75 @@ class TestOtherRefusals:
         self, session: Session, kwargs: dict[str, Any], message: str
     ) -> None:
         _assert_refused(session, lambda: session.run_subprocess(**kwargs), message)
+
+    @pytest.mark.parametrize(
+        "timeout, shown", [(-1.0, "-1"), (float("nan"), "NaN"), (float("inf"), "inf")]
+    )
+    def test_run_subprocess_timeout_with_no_duration(
+        self, session: Session, timeout: float, shown: str
+    ) -> None:
+        """A timeout with no ``Duration`` raises ``ValueError`` before the
+        crate sees it. Before, the binding's conversion panicked
+        (``PanicException``, which ``except Exception`` doesn't catch)."""
+        with pytest.raises(ValueError) as exc_info:
+            session.run_subprocess(command=sys.executable, timeout=timeout)
+        assert str(exc_info.value) == (
+            f"timeout must be a finite, non-negative number of seconds, got {shown}"
+        )
+        assert session.state == SessionState.READY
+        assert session.action_status is None
+
+
+_SLEEP = "import time; time.sleep(30)"
+
+
+class TestCancelAction:
+    def test_with_no_action_running(self, session: Session) -> None:
+        """The crate's ``InvalidState``, whether or not an action has run."""
+        message = "Session must be in RUNNING state, current: READY"
+        _assert_refused(session, session.cancel_action, message)
+        session.run_task(step_script=_step_script(""))
+        _settle(session)
+        _assert_refused(session, session.cancel_action, message)
+
+    def test_a_time_limit_with_no_duration(self, session: Session) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            session.cancel_action(time_limit=-1.0)
+        assert str(exc_info.value) == (
+            "time_limit must be a finite, non-negative number of seconds, got -1"
+        )
+
+    @pytest.mark.parametrize(
+        "start",
+        [
+            pytest.param(lambda s: s.run_task(step_script=_step_script(_SLEEP)), id="run_task"),
+            pytest.param(
+                lambda s: s.run_subprocess(command=sys.executable, args=["-c", _SLEEP]),
+                id="run_subprocess",
+            ),
+            pytest.param(
+                lambda s: s.enter_environment(environment=_environment(onEnter=_python(_SLEEP))),
+                id="enter_environment",
+            ),
+        ],
+    )
+    def test_straight_after_the_call_that_started_the_action(
+        self, session: Session, start: Callable[[Session], object]
+    ) -> None:
+        """The crate reports an action ``Running`` just before it installs
+        its cancel token. A cancel made as soon as the call returns still
+        reaches the action; before, it nearly always raised "Cannot cancel:
+        no action is running" and the action ran to the end."""
+        for _ in range(5):
+            start(session)
+            began = time.monotonic()
+            session.cancel_action()
+            _settle(session)
+            assert time.monotonic() - began < 20
+            status = session.action_status
+            assert status is not None and status.state == ActionState.CANCELED
+            assert session.state == SessionState.READY_ENDING
+            session.clear_ending_only()
 
 
 class TestAcceptedCalls:

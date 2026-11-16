@@ -346,12 +346,12 @@ counted as test-suite failures.
 | `ActionResult` | not in reference | new pyclass, Python-constructible via `#[new]`, pickleable | ✓ resolved (Rec #11) |
 | `Session.__init__(callback=...)` | accepted | accepted only by wrapper, NOT by binding | ⚠ binding gap |
 | `Session.__init__(revision_extensions=...)` | accepted, used | accepted by wrapper, **not forwarded** | ❌ silent regression |
-| `Session.cancel_action()` | cancels a running action | raises `RuntimeError("session is busy")` while running | ❌ correctness regression |
+| `Session.cancel_action()` | cancels a running action | cancels it, also straight after the call that started it | ✓ resolved |
 | `Session.__enter__/__exit__` | implemented | not implemented on wrapper | ❌ missing |
 | `Session.session_id` (property) | not exposed in ref either; spec says yes | not on wrapper; on binding only | ⚠ matches ref |
 | `Session.run_subprocess(timeout=0)` | raises `ValueError` | silently runs without timeout (wrapper: `if timeout else None`) | ❌ correctness regression |
-| `Session.run_subprocess(timeout=-5)` | raises `ValueError` | panics in background thread; action wedges | ❌ correctness regression |
-| `Session.run_subprocess(command="")` | raises `ValueError` | accepts; action wedges with `action_status=None` | ❌ correctness regression |
+| `Session.run_subprocess(timeout=-5)` | raises `ValueError` | binding raises `ValueError` | ✓ resolved |
+| `Session.run_subprocess(command="")` | raises `ValueError` | binding raises `SessionError("command must be a non-empty string")`, the crate's refusal | ⚠ class change |
 | `Session.run_task(task_parameter_values)` | required (`TaskParameterSet`) | wrapper makes it required, but accepts dicts of dicts | ⚠ silent type drift |
 | `Session.exit_environment(keep_session_running=False)` | default `False` | wrapper default `True` | ❌ silent default flip |
 | `Session.environments_entered` (property) | `tuple[str, ...]` | binding returns `list[str]`; wrapper returns `tuple` | ✓ wrapper matches |
@@ -371,11 +371,11 @@ counted as test-suite failures.
 |---|---|---|---|
 | `run_task` while session not READY | `RuntimeError("Session must be in the READY state to run a task.")` | `SessionError("Session must be in READY state, current: RUNNING")` (the crate's message; a `RuntimeError`) | ⚠ message change |
 | `run_task` / `enter_environment` on a `READY_ENDING` session | `RuntimeError("Session must be in the READY state ...")` | `SessionError("Session must be in READY state, current: READY_ENDING")`, a `RuntimeError`; nothing changes | ✓ resolved (raises the crate's refusal; `clear_ending_only()` bound) |
-| `cancel_action` when nothing is running | `RuntimeError("No actions are running")` | `SessionError("Session must be in RUNNING state, current: READY")` | ⚠ class+message change |
-| `cancel_action` while running | succeeds | `RuntimeError("Cannot cancel: session is busy with an action")` | ❌ contract inversion |
+| `cancel_action` when nothing is running | `RuntimeError("No actions are running")` | `SessionError("Session must be in RUNNING state, current: READY")` | ⚠ class+message change (the crate's) |
+| `cancel_action` while running | succeeds | succeeds, including straight after the call that started the action | ✓ resolved |
 | `Session(session_root_directory=…)` non-existent dir | `RuntimeError("Ensure that the root directory ...")` | likely Rust I/O error → `SessionError(...)` (untested) | ⚠ untested |
-| `enter_environment` with same identifier twice | `RuntimeError("Environment {id} has already been entered ...")` | not verified | ⚠ untested |
-| `exit_environment` with unknown id | `RuntimeError("Cannot exit unknown Environment ...")` | not verified | ⚠ untested |
+| `enter_environment` with same identifier twice | `RuntimeError("Environment {id} has already been entered ...")` | `SessionError` with the same message | ✓ tested |
+| `exit_environment` with unknown id | `RuntimeError("Cannot exit unknown Environment ...")` | `SessionError("Unknown environment identifier: {id}")` | ⚠ message change (the crate's; tested) |
 
 ### 5.3 Underlying Rust crate — `openjd-rs`
 
@@ -472,6 +472,9 @@ All 17 are reproducible failures of the binding/wrapper.
    `test_known_gaps::test_cancel_action_actually_cancels_running_action`.
    Reference fix path: thread the Rust crate's `CancellationToken` to a
    `cancel()` method that does not need `&mut Session`. **High priority.**
+   **Resolved** — the binding cancels through the crate's
+   `SessionCancelHandle`, and retries for the moment between the crate
+   reporting `Running` and installing the action's cancel token.
 
 2. **`run_subprocess` skips all input validation.**
    * `timeout=0` silently disables (wrapper bug at `_session.py` line in
@@ -482,6 +485,10 @@ All 17 are reproducible failures of the binding/wrapper.
    * `command=""` — same wedge: the action sits at RUNNING with `action_status=None`.
 
    Reference's reference behavior is `ValueError` for all three. **High priority.**
+   **Partly resolved** — the binding raises `SessionError` with the crate's
+   refusal for a blank `command` and a zero `timeout` (given to the binding),
+   and `ValueError` for a negative, NaN or infinite `timeout`. The `_v1`
+   wrapper's `if timeout else None` is fixed in openjd-sessions-for-python.
 
 3. **State enums lost `.value`.** `SessionState.READY.value` → `AttributeError`.
    The new `bindings-rs` test_session_scenarios.py uses `state.value` and is

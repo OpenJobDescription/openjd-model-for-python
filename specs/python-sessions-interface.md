@@ -142,7 +142,7 @@ class Session:
         os_env_vars: Optional[dict[str, str]] = None,
     ) -> None: ...
 
-    # Subprocess execution (non-blocking)
+    # Subprocess execution (non-blocking — returns once it is running)
     def run_subprocess(
         self,
         *,
@@ -203,18 +203,24 @@ crate's message, as the Rust method returns `Err`, and changes nothing:
 the state, `action_status` (still the previous action's) and
 `environments_entered` stay as they were. The crate refuses `run_task`,
 `enter_environment` and `run_subprocess` unless the session is `READY`,
-`exit_environment` unless it is `READY` or `READY_ENDING`, an unknown,
-out-of-order or duplicate environment identifier, a second environment
-with wrap hooks, and a blank `command` or zero `timeout`. A call made
-while another action runs gets the same `InvalidState` message
-(`Session must be in READY state, current: RUNNING`); before, it was
-`RuntimeError("An action is already running")`, and `SessionError` is a
-`RuntimeError`. Once the crate accepts a call, the method returns when
-its action is `RUNNING` (or, for an environment with no script, has
-ended), and `action_status` describes that action. Everything after
-acceptance, errors included, is reported on `action_status`; the method
-doesn't raise for it, where the Rust method would also return `Err`,
-because it has already returned.
+`exit_environment` unless it is `READY` or `READY_ENDING`,
+`cancel_action` unless an action is running, an unknown, out-of-order
+or duplicate environment identifier, a second environment with wrap
+hooks, and a blank `command` or zero `timeout`. A call made while
+another action runs gets the crate's `InvalidState` message, such as
+`Session must be in READY state, current: RUNNING`; before, it was
+`RuntimeError("An action is already running")`, and `SessionError` is
+a `RuntimeError`. A `timeout` or `time_limit` that is negative, NaN or
+infinite raises `ValueError`.
+
+Once the crate accepts a call, the method returns when its action is
+`RUNNING` (or, for an environment with no script, has ended), and
+`action_status` describes that action. A `cancel_action` made as soon as
+it returns reaches the action. Every error after acceptance, such as a
+parameter value that can't be coerced, is reported on `action_status`
+and doesn't raise, even when it arrives before the call returns. The
+crate documents those as failing the action rather than refusing the
+call, and the pure-Python reference reports them the same way.
 
 An action that ends `FAILED`, `CANCELED` or `TIMEOUT` makes the session
 ending-only (`READY_ENDING`): `exit_environment` and `cleanup` still

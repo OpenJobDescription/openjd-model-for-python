@@ -2277,7 +2277,8 @@ class Session:
         Run a subprocess. Non-blocking: returns once it is running.
 
         Raises `SessionError` if the session isn't `READY`, if `command` is
-        empty or blank, or if `timeout` is zero.
+        empty or blank, or if `timeout` is zero, and `ValueError` if
+        `timeout` is negative, NaN or infinite.
         """
 
     def clear_ending_only(self) -> None:
@@ -2294,10 +2295,25 @@ class Session:
 
     def cancel_action(
         self,
-        time_limit: typing.Optional[builtins.float],
-        mark_action_failed: typing.Optional[builtins.bool],
-    ) -> None: ...
-    def cleanup(self) -> None: ...
+        time_limit: typing.Optional[builtins.float] = None,
+        mark_action_failed: typing.Optional[builtins.bool] = None,
+    ) -> None:
+        r"""
+        Cancel the running action.
+
+        Raises `SessionError` with the crate's message if no action is
+        running, and `ValueError` if `time_limit` is negative, NaN or
+        infinite.
+        """
+
+    def cleanup(self) -> None:
+        r"""
+        Clean up the session, deleting its working directory unless it is
+        retained. Does nothing while an action is running. The GIL is
+        released meanwhile: on Windows the crate retries a removal that
+        fails for up to about 31 s.
+        """
+
     def __repr__(self) -> builtins.str: ...
 
 @typing.final
