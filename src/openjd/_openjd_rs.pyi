@@ -2303,7 +2303,10 @@ class Session:
 
         Raises `SessionError` with the crate's message if no action is
         running, and `ValueError` if `time_limit` is negative, NaN or
-        infinite.
+        infinite. Called from the action's own thread (from a logging
+        handler) before the action has started its subprocess, it waits up
+        to 2 s and then raises `SessionError("Cannot cancel: the action has
+        not started yet")`.
         """
 
     def cleanup(self) -> None:

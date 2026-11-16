@@ -100,13 +100,11 @@ class Session:
         session_id: str,
         job_parameter_values: dict[str, ParameterValue],
         path_mapping_rules: Optional[list[PathMappingRule]] = None,
-        callback: Optional[Callable] = None,
-        os_env_vars: Optional[dict[str, str]] = None,
         retain_working_dir: bool = False,
+        os_env_vars: Optional[dict[str, str]] = None,
         session_root_directory: Optional[Path] = None,
         user: Optional[SessionUser] = None,
-        job_template: Optional[JobTemplate] = None,
-        environment_templates: Optional[list[EnvironmentTemplate]] = None,
+        profile: Optional[ModelProfile] = None,
         caller_limits: Optional[CallerLimits] = None,
     ): ...
 
@@ -116,6 +114,9 @@ class Session:
     working_directory: Path
     files_directory: Path
     action_status: Optional[ActionStatus]
+    environments_entered: list[str]
+
+    def extend_path_mapping_rules(self, additional: list[PathMappingRule]) -> None: ...
 
     # Environment lifecycle (non-blocking — returns once the action is running)
     def enter_environment(
@@ -208,13 +209,13 @@ the state, `action_status` (still the previous action's) and
 `environments_entered` stay as they were. The crate refuses `run_task`,
 `enter_environment` and `run_subprocess` unless the session is `READY`,
 `exit_environment` unless it is `READY` or `READY_ENDING`,
-`cancel_action` unless an action is running, an unknown, out-of-order
-or duplicate environment identifier, a second environment with wrap
-hooks, and a blank `command` or zero `timeout`. A call made while
-another action runs gets the crate's `InvalidState` message, such as
-`Session must be in READY state, current: RUNNING`; before, it was
-`RuntimeError("An action is already running")`, and `SessionError` is
-a `RuntimeError`. A `timeout` or `time_limit` that is negative, NaN or
+`cancel_action` unless an action is running, an unknown, out-of-order or
+duplicate environment identifier, a second environment with wrap hooks,
+and a blank `command` or zero `timeout`. A call made while another
+action runs gets the crate's `InvalidState` message, such as `Session
+must be in READY state, current: RUNNING`; before, it was
+`RuntimeError("An action is already running")`, and `SessionError` is a
+`RuntimeError`. A `timeout` or `time_limit` that is negative, NaN or
 infinite raises `ValueError`.
 
 Once the crate accepts a call, the method returns when its action is
@@ -222,30 +223,34 @@ Once the crate accepts a call, the method returns when its action is
 `action_status` describes that action. A `cancel_action` made as soon as
 it returns reaches the action, unless the action has already ended, as
 one that fails before its subprocess starts can: then it raises the
-crate's `InvalidState`. A zero `time_limit` terminates at once. Every error after acceptance, such as a
-parameter value that can't be coerced, is reported on `action_status`
-and doesn't raise, even when it arrives before the call returns. The
-crate documents those as failing the action rather than refusing the
-call, and the pure-Python reference reports them the same way.
+crate's `InvalidState`. A zero `time_limit` terminates at once. Called
+from the action's own thread (a logging handler) before the action has
+started, `cancel_action` waits up to 2 s and then raises
+`SessionError("Cannot cancel: the action has not started yet")`, the
+binding's own message. Every error after acceptance, such as a parameter
+value that can't be coerced, is reported on `action_status` and doesn't
+raise, even when it arrives before the call returns. The crate documents
+those as failing the action rather than refusing the call, and the
+pure-Python reference reports them the same way.
 
 An action that ends `FAILED`, `CANCELED` or `TIMEOUT` makes the session
 ending-only (`READY_ENDING`): `exit_environment` and `cleanup` still
 work, and a successful `exit_environment(keep_session_running=True)`
 leaves it `READY_ENDING` (openjd-rs#524). `clear_ending_only()` takes it
 back to `READY`, keeping the environments entered and the last action's
-status; it raises `SessionError` unless the session is `READY_ENDING`. When `run_task`, `enter_environment` or
-`exit_environment` fails before its subprocess starts, for example
-because a parameter value can't be coerced, the action is `FAILED` with
-the error's message, as in the pure-Python reference (openjd-rs#532).
-An environment whose enter fails this way still counts as entered, and
-one whose exit fails this way counts as exited. When `exit_environment`
-can't build its symbol table from `resolved_symtab`, it runs `onExit`
-with the table the environment was entered with (openjd-rs#536). White
-space around a number in an INT or FLOAT job or task parameter value is
-ignored, so `" 7 "` is `7` and `" 1.50 "` is `1.50` (openjd-rs#530).
-On Windows, `cleanup` retries removing a session directory that is
-still in use, for up to about 31 s, with the GIL released
-(openjd-rs#485).
+status; it raises `SessionError` unless the session is `READY_ENDING`.
+When `run_task`, `enter_environment` or `exit_environment` fails before
+its subprocess starts, for example because a parameter value can't be
+coerced, the action is `FAILED` with the error's message, as in the
+pure-Python reference (openjd-rs#532). An environment whose enter fails
+this way still counts as entered, and one whose exit fails this way
+counts as exited. When `exit_environment` can't build its symbol table
+from `resolved_symtab`, it runs `onExit` with the table the environment
+was entered with (openjd-rs#536). White space around a number in an INT
+or FLOAT job or task parameter value is ignored, so `" 7 "` is `7` and
+`" 1.50 "` is `1.50` (openjd-rs#530). On Windows, `cleanup` retries
+removing a session directory that is still in use, for up to about 31 s,
+with the GIL released (openjd-rs#485).
 
 ### SessionUser (stays in Python, passed to Rust)
 
@@ -263,6 +268,10 @@ class WindowsSessionUser:
     user: str
     password: Optional[str]
 ```
+
+`WindowsSessionUser` raises `RuntimeError("Could not determine the
+process user: ...")` if it can't look up the process user, as the
+pure-Python reference's `get_process_user()` raises.
 
 ### Callback interface
 

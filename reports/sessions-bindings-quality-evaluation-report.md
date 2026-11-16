@@ -372,6 +372,7 @@ counted as test-suite failures.
 | `run_task` while session not READY | `RuntimeError("Session must be in the READY state to run a task.")` | `SessionError("Session must be in READY state, current: RUNNING")` (the crate's message; a `RuntimeError`) | ⚠ message change |
 | `run_task` / `enter_environment` on a `READY_ENDING` session | `RuntimeError("Session must be in the READY state ...")` | `SessionError("Session must be in READY state, current: READY_ENDING")`, a `RuntimeError`; nothing changes | ⚠ message change (the crate's) |
 | `Session.clear_ending_only()` | not in reference | takes a `READY_ENDING` session back to `READY`, as the crate's `clear_ending_only` does | ⚠ binding-only API |
+| `WindowsSessionUser(...)` when the process user can't be looked up | `get_process_user()` raises | raises `RuntimeError("Could not determine the process user: ...")` (before, treated as "not the process user") | ⚠ class change |
 | `cancel_action` when nothing is running | `RuntimeError("No actions are running")` | `SessionError("Session must be in RUNNING state, current: READY")` | ⚠ class+message change (the crate's) |
 | `cancel_action` while running | succeeds | succeeds, including straight after the call that started the action | ✓ resolved |
 | `Session(session_root_directory=…)` non-existent dir | `RuntimeError("Ensure that the root directory ...")` | likely Rust I/O error → `SessionError(...)` (untested) | ⚠ untested |
