@@ -105,7 +105,7 @@ class TestWithoutExpr:
             pytest.param({"type": "CHUNK[INT]", "chunks": _CHUNKS}, ["TASK_CHUNKING"], id="CHUNK"),
         ],
     )
-    @pytest.mark.parametrize("value", ["abc", "2.5", ""])
+    @pytest.mark.parametrize("value", ["abc", "2.5", "", "1 000"])
     def test_int_element_not_an_integer(self, tmp_path, task_param, extensions, value) -> None:
         error = _range_error(
             tmp_path,
@@ -263,14 +263,29 @@ class TestWithExpr:
             "  Param.L\n  ~~~~~~^."
         )
 
-    def test_padded_string_does_not_coerce(self, tmp_path) -> None:
-        # Expression Language §1.2.3 coercion does not trim, unlike the
-        # <intstring> parse without EXPR.
+    def test_white_space_around_the_number_is_ignored(self, tmp_path) -> None:
+        # Expression Language §1.2.3 and §1.3.12: string-to-number coercion
+        # ignores white space around the number (Template Schemas §7.5), so an
+        # element resolves as it does without EXPR (test_int_elements_resolve,
+        # test_float_elements_resolve_and_keep_their_spelling). The white space
+        # is not part of a float's spelling (§1.3.4).
+        params = [{"name": "S", "type": "STRING"}, {"name": "T", "type": "STRING"}]
+        values = {"S": " 7\n", "T": "\t2.50 "}
+        int_range = _range(
+            tmp_path, {"type": "INT", "range": [1, "{{Param.S}}"]}, params, values, ["EXPR"]
+        )
+        float_range = _range(
+            tmp_path, {"type": "FLOAT", "range": [1.5, "{{Param.T}}"]}, params, values, ["EXPR"]
+        )
+        assert int_range == [1, 7]
+        assert float_range == [Decimal("1.5"), "2.50"]
+
+    def test_white_space_inside_the_number_does_not_coerce(self, tmp_path) -> None:
         error = _range_error(
             tmp_path,
             {"type": "INT", "range": [1, "{{Param.S}}"]},
             _STRING_S,
-            {"S": " 7 "},
+            {"S": "1 000"},
             ["EXPR"],
         )
         assert error == _ELEMENT_1 + (

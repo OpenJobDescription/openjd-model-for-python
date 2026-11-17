@@ -3019,6 +3019,39 @@ class TestIntRangeListFormatStringElements:
         )
 
 
+class TestRangeListElementsAsListItems:
+    """With EXPR, a range list element that is exactly one expression is a list
+    item (Expression Language §1.3.2): a list it evaluates to flattens into one
+    element per member. Since openjd-model 0.15.0 (openjd-rs#486); before, a
+    FLOAT element resolved to text and failed to parse.
+    ``test_range_list_items.py`` in model_v0 covers v0."""
+
+    def test_float_list_flattens(self) -> None:
+        decoded = decode_job_template(
+            template={
+                "specificationVersion": "jobtemplate-2023-09",
+                "extensions": ["EXPR"],
+                "name": "T",
+                "steps": [
+                    {
+                        "name": "S",
+                        "parameterSpace": {
+                            "taskParameterDefinitions": [
+                                {"name": "X", "type": "FLOAT", "range": [1.5, "{{ [2, 2.5] }}"]}
+                            ]
+                        },
+                        "script": {"actions": {"onRun": {"command": "echo"}}},
+                    }
+                ],
+            },
+            supported_extensions=["EXPR"],
+        )
+        job = create_job(job_template=decoded, job_parameter_values={})
+        space = job.steps[0].parameterSpace
+        assert space is not None
+        assert space.taskParameterDefinitions["X"].range == [1.5, 2.0, 2.5]
+
+
 def _preprocess(parameter_definitions: list[dict], values: dict, tmp_path: Path) -> dict:
     """Decode a one-step template with ``parameter_definitions`` (with EXPR, for
     the list types) and return ``preprocess_job_parameters``' values as text."""
