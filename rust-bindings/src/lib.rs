@@ -65,9 +65,8 @@ pub(crate) fn len_to_usize(len: u64) -> PyResult<usize> {
 #[pymodule]
 #[pyo3(name = "_openjd_rs")]
 fn openjd_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // Install Rust→Python logging bridge. Remap Rust crate targets
-    // (openjd_sessions, openjd_model, openjd_expr) to Python logger
-    // hierarchy (openjd.sessions, openjd.model, openjd.expr).
+    // Install the Rust→Python logging bridge. Rust log targets already use
+    // the corresponding Python logger hierarchy.
     pyo3_log::Logger::default()
         .filter(log::LevelFilter::Info)
         .install()
