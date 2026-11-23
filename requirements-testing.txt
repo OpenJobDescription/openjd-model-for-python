@@ -14,4 +14,4 @@ mypy == 2.3.*
 pydantic >= 2.10, < 3
 # hypothesis: used by the opt-in fuzz test suites in test/openjd/expr
 # and test/openjd/model-v*. conftest.py imports it unconditionally.
-hypothesis ~= 6.161
+hypothesis ~= 6.168
